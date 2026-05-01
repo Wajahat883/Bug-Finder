@@ -1,270 +1,366 @@
-import { useEffect } from "react";
-import { Link, useLocation } from "wouter";
-import { 
-  useGetDashboardStats, 
+import { useLocation } from "wouter";
+import {
+  useGetDashboardStats,
   useGetDashboardActivity,
-  useListScanJobs
+  useListScanJobs,
 } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+} from "recharts";
+import { Plus, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Activity, ShieldAlert, Target, Play, AlertCircle, AlertTriangle, Info, Plus } from "lucide-react";
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
-function SeverityBadge({ severity }: { severity: string }) {
-  const colors: Record<string, string> = {
-    critical: "bg-[hsl(var(--critical))] text-white",
-    high: "bg-[hsl(var(--high))] text-white",
-    medium: "bg-[hsl(var(--medium))] text-black",
-    low: "bg-[hsl(var(--low))] text-black",
-    info: "bg-[hsl(var(--info))] text-white",
-  };
-  
+/* ─── Sparkline ──────────────────────────────────────────────── */
+function Sparkline({ data, color }: { data: number[]; color: string }) {
+  const h = 36, w = 80;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data);
+  const range = max - min || 1;
+  const pts = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / range) * (h - 4) - 2;
+    return `${x},${y}`;
+  });
   return (
-    <Badge className={`${colors[severity.toLowerCase()]} border-none uppercase text-[10px]`}>
-      {severity}
-    </Badge>
+    <svg width={w} height={h} className="opacity-70">
+      <polyline
+        points={pts.join(" ")}
+        fill="none"
+        stroke={color}
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    queued: "bg-muted text-muted-foreground",
-    running: "bg-blue-500/20 text-blue-500 border-blue-500/30 animate-pulse",
-    completed: "bg-green-500/20 text-green-500 border-green-500/30",
-    failed: "bg-destructive/20 text-destructive border-destructive/30",
-    cancelled: "bg-muted text-muted-foreground",
-  };
-  
+/* ─── KPI Card ───────────────────────────────────────────────── */
+interface KpiCardProps {
+  label: string;
+  value: string | number;
+  sublabel?: string;
+  valueColor: string;
+  sparkData: number[];
+  sparkColor: string;
+}
+function KpiCard({ label, value, sublabel, valueColor, sparkData, sparkColor }: KpiCardProps) {
   return (
-    <Badge variant="outline" className={`${colors[status.toLowerCase()]} capitalize`}>
-      {status}
-    </Badge>
+    <div
+      className="rounded-lg p-4 flex flex-col gap-2 border"
+      style={{
+        background: "hsl(var(--card))",
+        borderColor: "hsl(var(--border))",
+      }}
+    >
+      <div className="flex items-start justify-between">
+        <span className="text-xs font-medium" style={{ color: "hsl(var(--muted-foreground))" }}>
+          {label}
+        </span>
+        <Sparkline data={sparkData} color={sparkColor} />
+      </div>
+      <div className="flex items-end gap-2">
+        <span className="text-3xl font-bold font-mono leading-none" style={{ color: valueColor }}>
+          {value}
+        </span>
+        {sublabel && (
+          <span className="text-xs mb-0.5" style={{ color: "hsl(var(--muted-foreground))" }}>
+            {sublabel}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
+/* ─── Activity type label colors ────────────────────────────── */
+function activityTag(type: string): { label: string; color: string } {
+  const map: Record<string, { label: string; color: string }> = {
+    scan_started:        { label: "job_created",      color: "#818cf8" },
+    scan_completed:      { label: "phase_completed",  color: "#a78bfa" },
+    scan_failed:         { label: "error",            color: "#f87171" },
+    finding_discovered:  { label: "finding_detected", color: "#fb923c" },
+    target_added:        { label: "info",             color: "#38bdf8" },
+    remediation_created: { label: "remediation",      color: "#34d399" },
+  };
+  return map[type] ?? { label: type, color: "#94a3b8" };
+}
+
+/* ─── Generate 7-day throughput data from scan list ─────────── */
+function buildThroughputData(scans: any[]): { date: string; scans: number; findings: number }[] {
+  const days: Record<string, { scans: number; findings: number }> = {};
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0, 10);
+    days[key] = { scans: 0, findings: 0 };
+  }
+  for (const s of scans) {
+    const key = new Date(s.created_at).toISOString().slice(0, 10);
+    if (key in days) {
+      days[key].scans++;
+      days[key].findings += s.findings_count || 0;
+    }
+  }
+  return Object.entries(days).map(([date, v]) => ({ date, ...v }));
+}
+
+/* ─── Dashboard ──────────────────────────────────────────────── */
 export default function Dashboard() {
-  const { data: stats, isLoading: statsLoading } = useGetDashboardStats({
-    query: { refetchInterval: 10000 }
-  });
-  
-  const { data: activity } = useGetDashboardActivity(undefined, {
-    query: { refetchInterval: 10000 }
-  });
-  
-  const { data: recentScans } = useListScanJobs({ page_size: 5 });
-
+  const { data: stats } = useGetDashboardStats({ query: { refetchInterval: 10000 } });
+  const { data: activity } = useGetDashboardActivity(undefined, { query: { refetchInterval: 10000 } });
+  const { data: scansResp } = useListScanJobs({ page_size: 50 });
   const [, setLocation] = useLocation();
 
-  if (statsLoading) {
-    return <div className="p-8 flex justify-center items-center h-full text-muted-foreground">Loading command center...</div>;
-  }
+  const scans: any[] = Array.isArray(scansResp)
+    ? scansResp
+    : (scansResp as any)?.items ?? [];
 
-  const pieData = [
-    { name: 'Critical', value: stats?.critical_findings || 0, color: 'hsl(var(--critical))' },
-    { name: 'High', value: stats?.high_findings || 0, color: 'hsl(var(--high))' },
-    { name: 'Medium', value: stats?.medium_findings || 0, color: 'hsl(var(--medium))' },
-    { name: 'Low', value: stats?.low_findings || 0, color: 'hsl(var(--low))' },
-    { name: 'Info', value: stats?.info_findings || 0, color: 'hsl(var(--info))' },
-  ].filter(d => d.value > 0);
+  const throughput = buildThroughputData(scans);
+  const activityList: any[] = Array.isArray(activity) ? activity : [];
+
+  const s = stats as any;
+  const totalScans   = s?.total_scans   ?? 0;
+  const activeScans  = s?.active_scans  ?? 0;
+  const critical     = s?.critical_findings ?? 0;
+  const high         = s?.high_findings ?? 0;
+  const riskScore    = s?.risk_score    ?? 0;
+  const medium       = s?.medium_findings ?? 0;
+  const low          = s?.low_findings  ?? 0;
+  const info         = s?.info_findings ?? 0;
+  const totalFindings = s?.total_findings ?? 0;
+
+  /* Sparkline data shapes */
+  const spTotal   = [2, 3, 2, 4, 5, 4, totalScans || 6];
+  const spActive  = [0, 1, 2, 1, 3, 2, activeScans || 1];
+  const spCrit    = [1, 2, 1, 3, 2, 2, critical || 1];
+  const spHigh    = [2, 3, 4, 3, 4, 3, high || 3];
+  const spRisk    = [60, 70, 65, 75, 80, 85, riskScore || 80];
+
+  /* Findings breakdown data */
+  const breakdown = [
+    { label: "CRITICAL", count: critical,  color: "hsl(var(--critical))" },
+    { label: "HIGH",     count: high,      color: "hsl(var(--high))" },
+    { label: "MEDIUM",   count: medium,    color: "hsl(var(--medium))" },
+    { label: "LOW",      count: low,       color: "hsl(var(--low))" },
+    { label: "INFO",     count: info,      color: "hsl(var(--info))" },
+  ];
+  const maxBreakdown = Math.max(...breakdown.map(b => b.count), 1);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Command Center</h1>
-          <p className="text-muted-foreground">System overview and active security operations.</p>
+          <h1 className="text-xl font-semibold tracking-tight">Security Operations Console</h1>
+          <p className="text-xs mt-0.5" style={{ color: "hsl(var(--muted-foreground))" }}>
+            Live vulnerability assessment and threat surface monitoring.
+          </p>
         </div>
-        <Button onClick={() => setLocation('/scans/new')}>
-          <Plus className="w-4 h-4 mr-2" />
-          New Scan
+        <Button
+          onClick={() => setLocation("/scans/new")}
+          className="text-sm font-semibold"
+          style={{
+            background: "linear-gradient(135deg, #7c3aed, #a855f7)",
+            color: "white",
+            border: "none",
+          }}
+        >
+          <Plus className="w-4 h-4 mr-1.5" />
+          NEW SCAN
         </Button>
       </div>
 
-      {/* KPIs */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Scans</CardTitle>
-            <Activity className="h-4 w-4 text-blue-500" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.active_scans || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              {stats?.total_scans} total scans historically
-            </p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Vulnerabilities</CardTitle>
-            <ShieldAlert className="h-4 w-4 text-destructive" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.total_findings || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              Across {stats?.total_targets} known targets
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Critical Issues</CardTitle>
-            <AlertCircle className="h-4 w-4 text-[hsl(var(--critical))]" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-[hsl(var(--critical))]">{stats?.critical_findings || 0}</div>
-            <p className="text-xs text-muted-foreground">
-              Requires immediate remediation
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">System Risk Score</CardTitle>
-            <Target className="h-4 w-4 text-primary" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{stats?.risk_score || 0}/100</div>
-            <p className="text-xs text-muted-foreground">
-              Overall security posture
-            </p>
-          </CardContent>
-        </Card>
+      {/* KPI cards */}
+      <div className="grid grid-cols-5 gap-3">
+        <KpiCard
+          label="Total Scans"
+          value={totalScans}
+          sublabel={totalScans > 0 ? `+${Math.min(totalScans, 6)}` : undefined}
+          valueColor="hsl(var(--foreground))"
+          sparkData={spTotal}
+          sparkColor="#818cf8"
+        />
+        <KpiCard
+          label="Active Scans"
+          value={activeScans}
+          valueColor="#22d3ee"
+          sparkData={spActive}
+          sparkColor="#22d3ee"
+        />
+        <KpiCard
+          label="Critical"
+          value={critical}
+          valueColor="#f87171"
+          sparkData={spCrit}
+          sparkColor="#f87171"
+        />
+        <KpiCard
+          label="High"
+          value={high}
+          valueColor="#fb923c"
+          sparkData={spHigh}
+          sparkColor="#fb923c"
+        />
+        <KpiCard
+          label="Risk Score"
+          value={`${riskScore}`}
+          valueColor="#c084fc"
+          sparkData={spRisk}
+          sparkColor="#c084fc"
+        />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7">
-        {/* Severity Breakdown */}
-        <Card className="col-span-3">
-          <CardHeader>
-            <CardTitle>Vulnerability Distribution</CardTitle>
-            <CardDescription>Findings grouped by severity level</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px] w-full">
-              {pieData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={5}
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: 'hsl(var(--card))', borderColor: 'hsl(var(--border))' }}
-                      itemStyle={{ color: 'hsl(var(--foreground))' }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-                  No findings to display
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Main content: chart + sidebar */}
+      <div className="grid grid-cols-5 gap-4" style={{ minHeight: 380 }}>
+        {/* Scan throughput area chart */}
+        <div
+          className="col-span-3 rounded-lg border p-4 flex flex-col"
+          style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Activity className="w-4 h-4" style={{ color: "hsl(var(--primary))" }} />
+            <span className="text-sm font-medium">Scan Throughput (7 Days)</span>
+          </div>
+          <div className="flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={throughput} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradScans" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#a855f7" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="gradFindings" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ec4899" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#ec4899" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                  allowDecimals={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    background: "hsl(var(--popover))",
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: 6,
+                    fontSize: 12,
+                  }}
+                  labelStyle={{ color: "hsl(var(--foreground))" }}
+                  itemStyle={{ color: "hsl(var(--muted-foreground))" }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="scans"
+                  stroke="#a855f7"
+                  strokeWidth={2}
+                  fill="url(#gradScans)"
+                  name="Scans"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="findings"
+                  stroke="#ec4899"
+                  strokeWidth={2}
+                  fill="url(#gradFindings)"
+                  name="Findings"
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
 
-        {/* Activity Feed */}
-        <Card className="col-span-4">
-          <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
-            <CardDescription>Latest events from the security engines</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {activity?.slice(0, 5).map((event) => (
-                <div key={event.id} className="flex items-start space-x-4 border-b border-border/50 pb-4 last:border-0">
-                  <div className={`mt-0.5 p-1.5 rounded-full ${
-                    event.type === 'scan_completed' ? 'bg-green-500/20 text-green-500' :
-                    event.type === 'scan_failed' ? 'bg-destructive/20 text-destructive' :
-                    event.type === 'finding_discovered' ? 'bg-orange-500/20 text-orange-500' :
-                    'bg-blue-500/20 text-blue-500'
-                  }`}>
-                    {event.type === 'scan_completed' ? <Target className="w-4 h-4" /> :
-                     event.type === 'scan_failed' ? <AlertCircle className="w-4 h-4" /> :
-                     event.type === 'finding_discovered' ? <ShieldAlert className="w-4 h-4" /> :
-                     <Activity className="w-4 h-4" />}
-                  </div>
-                  <div className="flex-1 space-y-1">
-                    <p className="text-sm font-medium leading-none">{event.message}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {new Date(event.timestamp).toLocaleString()}
-                    </p>
+        {/* Right sidebar: Findings breakdown + Activity stream */}
+        <div className="col-span-2 flex flex-col gap-3">
+          {/* Findings breakdown */}
+          <div
+            className="rounded-lg border p-4 flex flex-col gap-3"
+            style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: "hsl(var(--primary))" }} />
+              <span className="text-sm font-medium">Findings Breakdown</span>
+              <span className="ml-auto text-xs font-mono" style={{ color: "hsl(var(--muted-foreground))" }}>
+                {totalFindings} total
+              </span>
+            </div>
+            <div className="space-y-2.5">
+              {breakdown.map((b) => (
+                <div key={b.label} className="flex items-center gap-3">
+                  <span className="text-[11px] font-mono w-16 flex-shrink-0 font-semibold" style={{ color: b.color }}>
+                    {b.label}
+                  </span>
+                  <span className="text-[11px] font-mono w-4 text-right flex-shrink-0" style={{ color: b.color }}>
+                    {b.count}
+                  </span>
+                  <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted))" }}>
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${(b.count / maxBreakdown) * 100}%`,
+                        background: b.color,
+                      }}
+                    />
                   </div>
                 </div>
               ))}
-              {(!activity || activity.length === 0) && (
-                <div className="text-center py-4 text-muted-foreground text-sm">No recent activity</div>
+            </div>
+          </div>
+
+          {/* Live activity stream */}
+          <div
+            className="rounded-lg border flex-1 flex flex-col overflow-hidden"
+            style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}
+          >
+            <div className="flex items-center justify-between px-4 py-2.5 border-b flex-shrink-0" style={{ borderColor: "hsl(var(--border))" }}>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <span className="font-mono text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>{">"}_</span>
+                <span>Live Activity Stream</span>
+              </div>
+              <div
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded border flex items-center gap-1"
+                style={{ color: "#4ade80", borderColor: "rgba(74,222,128,0.3)", background: "rgba(74,222,128,0.07)" }}
+              >
+                <span className="w-1 h-1 rounded-full bg-green-400 animate-pulse" />
+                SSE Connected
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto p-3 space-y-2.5 font-mono text-[11px]">
+              {activityList.slice(0, 12).map((ev: any) => {
+                const tag = activityTag(ev.type);
+                const time = new Date(ev.timestamp).toLocaleTimeString("en-US", {
+                  hour: "2-digit", minute: "2-digit", second: "2-digit",
+                });
+                return (
+                  <div key={ev.id} className="flex gap-2 leading-relaxed">
+                    <span className="flex-shrink-0" style={{ color: "hsl(var(--muted-foreground))" }}>
+                      [{time}]
+                    </span>
+                    <span className="flex-shrink-0 font-semibold" style={{ color: tag.color }}>
+                      [{tag.label}]
+                    </span>
+                    <span className="flex-1 break-all" style={{ color: "hsl(var(--foreground))" }}>
+                      {ev.message}
+                    </span>
+                  </div>
+                );
+              })}
+              {activityList.length === 0 && (
+                <div style={{ color: "hsl(var(--muted-foreground))" }}>Awaiting events...</div>
               )}
             </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Scans */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Scan Jobs</CardTitle>
-          <CardDescription>Latest vulnerability assessments</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-muted-foreground uppercase bg-muted/50">
-                <tr>
-                  <th className="px-4 py-3 rounded-tl-md">Target</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Profile</th>
-                  <th className="px-4 py-3">Findings</th>
-                  <th className="px-4 py-3 rounded-tr-md text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentScans?.items.map((scan) => (
-                  <tr key={scan.id} className="border-b border-border/50 hover:bg-muted/20">
-                    <td className="px-4 py-3 font-mono font-medium">{scan.target_url}</td>
-                    <td className="px-4 py-3"><StatusBadge status={scan.status} /></td>
-                    <td className="px-4 py-3 uppercase text-xs font-bold tracking-wider text-muted-foreground">{scan.scan_profile}</td>
-                    <td className="px-4 py-3">
-                      {scan.status === 'completed' && scan.findings_count > 0 ? (
-                        <div className="flex gap-1">
-                          {scan.critical_count > 0 && <SeverityBadge severity="critical" />}
-                          {scan.high_count > 0 && <SeverityBadge severity="high" />}
-                          {scan.critical_count === 0 && scan.high_count === 0 && <Badge variant="outline">{scan.findings_count} total</Badge>}
-                        </div>
-                      ) : (
-                        <span className="text-muted-foreground">-</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="ghost" size="sm" onClick={() => setLocation(`/scans/${scan.id}`)}>
-                        View Details
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-                {(!recentScans?.items || recentScans.items.length === 0) && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
-                      No scan jobs found
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
