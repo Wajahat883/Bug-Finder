@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { Link, useLocation } from "wouter";
+import { useLocation } from "wouter";
 import { useListRemediations } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +8,8 @@ import { CheckSquare, ArrowRight, ExternalLink, Wrench } from "lucide-react";
 
 export default function Remediations() {
   const [, setLocation] = useLocation();
-  const { data: remediationsResponse, isLoading } = useListRemediations();
+  const { data, isLoading } = useListRemediations();
+  const remediations = Array.isArray(data) ? data : (data as any)?.items ?? [];
 
   return (
     <div className="space-y-6">
@@ -23,12 +23,12 @@ export default function Remediations() {
           <div className="p-8 text-center text-muted-foreground bg-muted/20 rounded-lg border border-border">
             Loading remediation tasks...
           </div>
-        ) : remediationsResponse?.items.length === 0 ? (
+        ) : remediations.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground bg-muted/20 rounded-lg border border-border">
             No remediation tasks found. Create one from a finding detail page.
           </div>
         ) : (
-          remediationsResponse?.items.map((remediation) => (
+          remediations.map((remediation: any) => (
             <Card key={remediation.id} className="overflow-hidden">
               <div className="flex flex-col md:flex-row">
                 <div className="flex-1 p-6">
