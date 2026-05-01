@@ -29,14 +29,17 @@ router.get("/scan-templates", async (req, res) => {
 
     // Seed built-in templates if collection is empty
     if (templates.length === 0) {
+      const now = new Date();
       const builtins = [
-        { name: "Quick Recon", description: "Fast reconnaissance: TLS, headers, cookies, recon, DNS, JS secrets, CVE lookup", scan_profile: "quick", validation_enabled: false, fuzzing_enabled: false, bug_bounty_mode: false, tags: ["recon", "fast"], is_builtin: true, created_at: new Date(), updated_at: new Date() },
-        { name: "Standard Security Audit", description: "Full security audit including CORS, XSS, SQLi, JWT, rate limits, GraphQL", scan_profile: "standard", validation_enabled: true, fuzzing_enabled: false, bug_bounty_mode: false, tags: ["audit", "standard"], is_builtin: true, created_at: new Date(), updated_at: new Date() },
-        { name: "Bug Bounty Deep Dive", description: "Deep scan with IDOR, auth testing, SSRF, SSTI, file upload, subdomain enum, Wayback Machine", scan_profile: "deep", validation_enabled: true, fuzzing_enabled: true, bug_bounty_mode: true, tags: ["bounty", "deep", "full"], is_builtin: true, created_at: new Date(), updated_at: new Date() },
-        { name: "API Security Test", description: "Focused API security: JWT attacks, GraphQL checks, rate limiting, CORS", scan_profile: "standard", validation_enabled: false, fuzzing_enabled: false, bug_bounty_mode: false, tags: ["api", "jwt", "graphql"], is_builtin: true, created_at: new Date(), updated_at: new Date() },
-        { name: "OWASP Top 10 Scan", description: "Covers OWASP Top 10: injection, auth, XSS, IDOR, security misconfiguration", scan_profile: "standard", validation_enabled: true, fuzzing_enabled: true, bug_bounty_mode: true, tags: ["owasp", "compliance"], is_builtin: true, created_at: new Date(), updated_at: new Date() },
+        { name: "Quick Recon", description: "Fast reconnaissance: TLS, headers, cookies, recon, DNS, JS secrets, CVE lookup", scan_profile: "quick", validation_enabled: false, fuzzing_enabled: false, bug_bounty_mode: false, tags: ["recon", "fast"], is_builtin: true, created_at: now, updated_at: now },
+        { name: "Standard Security Audit", description: "Full security audit including CORS, XSS, SQLi, JWT, rate limits, GraphQL", scan_profile: "standard", validation_enabled: true, fuzzing_enabled: false, bug_bounty_mode: false, tags: ["audit", "standard"], is_builtin: true, created_at: now, updated_at: now },
+        { name: "Bug Bounty Deep Dive", description: "Deep scan with IDOR, auth testing, SSRF, SSTI, file upload, subdomain enum, Wayback Machine", scan_profile: "deep", validation_enabled: true, fuzzing_enabled: true, bug_bounty_mode: true, tags: ["bounty", "deep", "full"], is_builtin: true, created_at: now, updated_at: now },
+        { name: "API Security Test", description: "Focused API security: JWT attacks, GraphQL checks, rate limiting, CORS", scan_profile: "standard", validation_enabled: false, fuzzing_enabled: false, bug_bounty_mode: false, tags: ["api", "jwt", "graphql"], is_builtin: true, created_at: now, updated_at: now },
+        { name: "OWASP Top 10 Scan", description: "Covers OWASP Top 10: injection, auth, XSS, IDOR, security misconfiguration", scan_profile: "standard", validation_enabled: true, fuzzing_enabled: true, bug_bounty_mode: true, tags: ["owasp", "compliance"], is_builtin: true, created_at: now, updated_at: now },
       ];
-      await col("scan_templates").insertMany(builtins);
+      for (const t of builtins) {
+        await col("scan_templates").insertOne(t);
+      }
       const all = await col("scan_templates").find({}).sort({ is_builtin: -1, name: 1 }).toArray() as Array<Record<string, unknown>>;
       return res.json(all.map(formatTemplate));
     }
