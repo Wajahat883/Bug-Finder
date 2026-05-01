@@ -5,9 +5,27 @@ import { Server, Activity, Database, ShieldCheck, Clock, Zap } from "lucide-reac
 import { format } from "date-fns";
 
 export default function System() {
-  const { data: health, isLoading } = useHealthCheck({
-    query: { refetchInterval: 10000 } // poll every 10s
+  const { data: raw, isLoading } = useHealthCheck({
+    query: { refetchInterval: 10000 },
   });
+
+  const health = raw as any;
+
+  const uptimeSecs: number = health?.uptime ?? 0;
+  const uptimeH = Math.floor(uptimeSecs / 3600);
+  const uptimeM = Math.floor((uptimeSecs % 3600) / 60);
+  const timestamp: string = health?.timestamp ?? new Date().toISOString();
+  const components = health?.components ?? {};
+  const scannerEngines: number = components.scanner_engines ?? 0;
+  const dbStatus: string = components.database ?? "unknown";
+  const queueStatus: string = components.queue ?? "unknown";
+  const overallStatus: string = health?.status ?? "unknown";
+
+  function statusBadgeClass(s: string) {
+    return s === "healthy"
+      ? "bg-green-500/10 text-green-500 border-green-500/20"
+      : "bg-destructive/10 text-destructive border-destructive/20";
+  }
 
   return (
     <div className="space-y-6">
@@ -26,13 +44,11 @@ export default function System() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Overall Status</CardTitle>
-                <ShieldCheck className={`h-4 w-4 ${health.status === 'healthy' ? 'text-green-500' : 'text-destructive'}`} />
+                <ShieldCheck className={`h-4 w-4 ${overallStatus === "healthy" ? "text-green-500" : "text-destructive"}`} />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold capitalize">{health.status}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Engine nodes are operational
-                </p>
+                <div className="text-2xl font-bold capitalize">{overallStatus}</div>
+                <p className="text-xs text-muted-foreground mt-1">Engine nodes are operational</p>
               </CardContent>
             </Card>
 
@@ -42,10 +58,8 @@ export default function System() {
                 <Clock className="h-4 w-4 text-blue-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{Math.floor(health.uptime / 3600)}h {Math.floor((health.uptime % 3600) / 60)}m</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Since last restart
-                </p>
+                <div className="text-2xl font-bold">{uptimeH}h {uptimeM}m</div>
+                <p className="text-xs text-muted-foreground mt-1">Since last restart</p>
               </CardContent>
             </Card>
 
@@ -55,10 +69,8 @@ export default function System() {
                 <Zap className="h-4 w-4 text-yellow-500" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{health.components.scanner_engines}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Available engines online
-                </p>
+                <div className="text-2xl font-bold">{scannerEngines}</div>
+                <p className="text-xs text-muted-foreground mt-1">Available engines online</p>
               </CardContent>
             </Card>
 
@@ -68,10 +80,8 @@ export default function System() {
                 <Activity className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-lg font-bold">{format(new Date(health.timestamp), "HH:mm:ss")}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {format(new Date(health.timestamp), "MMM d, yyyy")}
-                </p>
+                <div className="text-lg font-bold">{format(new Date(timestamp), "HH:mm:ss")}</div>
+                <p className="text-xs text-muted-foreground mt-1">{format(new Date(timestamp), "MMM d, yyyy")}</p>
               </CardContent>
             </Card>
           </div>
@@ -91,8 +101,8 @@ export default function System() {
                       <p className="text-sm text-muted-foreground mt-1">Findings and metadata storage</p>
                     </div>
                   </div>
-                  <Badge variant="outline" className={`capitalize ${health.components.database === 'healthy' ? 'bg-green-500/10 text-green-500 border-green-500/20' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
-                    {health.components.database}
+                  <Badge variant="outline" className={`capitalize ${statusBadgeClass(dbStatus)}`}>
+                    {dbStatus}
                   </Badge>
                 </div>
 
@@ -104,8 +114,8 @@ export default function System() {
                       <p className="text-sm text-muted-foreground mt-1">Scan task distribution and management</p>
                     </div>
                   </div>
-                  <Badge variant="outline" className={`capitalize ${health.components.queue === 'healthy' ? 'bg-green-500/10 text-green-500 border-green-500/20' : 'bg-destructive/10 text-destructive border-destructive/20'}`}>
-                    {health.components.queue}
+                  <Badge variant="outline" className={`capitalize ${statusBadgeClass(queueStatus)}`}>
+                    {queueStatus}
                   </Badge>
                 </div>
 
