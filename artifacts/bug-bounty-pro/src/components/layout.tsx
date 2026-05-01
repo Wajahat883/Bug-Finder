@@ -4,13 +4,15 @@ import {
   Activity, LayoutDashboard, Search, Target, ShieldAlert,
   Bell, CheckSquare, Shield, Settings, Cpu, ScrollText,
   Calculator, Network, TrendingUp, Clock, Webhook, LogOut,
-  ChevronDown, ChevronRight,
+  ChevronDown, ChevronRight, Bookmark, GitCompare, ClipboardCheck,
+  Timer, Sparkles, FileCode2,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
 function pageName(loc: string): string {
   if (loc === "/dashboard") return "Dashboard";
   if (loc.startsWith("/scans/new")) return "New Scan";
+  if (loc.startsWith("/scans/compare")) return "Scan Comparison";
   if (loc.startsWith("/scans/")) return "Scan Detail";
   if (loc.startsWith("/scans")) return "Scans";
   if (loc.startsWith("/findings/")) return "Finding Detail";
@@ -28,6 +30,10 @@ function pageName(loc: string): string {
   if (loc.startsWith("/owasp")) return "OWASP Top 10";
   if (loc.startsWith("/timeline")) return "Activity Timeline";
   if (loc.startsWith("/integrations")) return "Integrations";
+  if (loc.startsWith("/scan-templates")) return "Scan Templates";
+  if (loc.startsWith("/compliance")) return "Compliance Dashboard";
+  if (loc.startsWith("/sla")) return "SLA Tracking";
+  if (loc.startsWith("/ai-triage")) return "AI Triage";
   return "Dashboard";
 }
 
@@ -49,19 +55,24 @@ const NAV_GROUPS = [
       { href: "/attack-surface", label: "Attack Surface", icon: Network },
       { href: "/owasp", label: "OWASP Top 10", icon: Shield },
       { href: "/timeline", label: "Timeline", icon: Clock },
+      { href: "/compliance", label: "Compliance", icon: ClipboardCheck },
+      { href: "/sla", label: "SLA Tracking", icon: Timer },
     ],
   },
   {
-    label: "Tools",
+    label: "AI & Tools",
     items: [
+      { href: "/ai-triage", label: "AI Triage", icon: Sparkles },
+      { href: "/scans/compare", label: "Scan Compare", icon: GitCompare },
+      { href: "/scan-templates", label: "Templates", icon: Bookmark },
       { href: "/cvss", label: "CVSS Calc", icon: Calculator },
+    ],
+  },
+  {
+    label: "Config",
+    items: [
       { href: "/integrations", label: "Integrations", icon: Webhook },
       { href: "/audit-log", label: "Audit Log", icon: ScrollText },
-    ],
-  },
-  {
-    label: "System",
-    items: [
       { href: "/system", label: "System", icon: Cpu },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
@@ -177,12 +188,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="flex items-center gap-1.5 text-[10px] font-mono px-2 py-1 rounded border"
               style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", color: "#4ade80" }}>
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-              AUTH: OK
+              ONLINE
             </div>
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>
       </div>
