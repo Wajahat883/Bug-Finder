@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useCreateScanJob } from "@workspace/api-client-react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,19 +8,51 @@ import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AlertCircle, Rocket, Shield, Zap } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { AlertCircle, Rocket, Shield, Zap, Lock, FileText, ChevronDown, ChevronUp, Bookmark } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+interface Template {
+  id: string;
+  name: string;
+  description: string;
+  scan_profile: string;
+  validation_enabled: boolean;
+  fuzzing_enabled: boolean;
+  bug_bounty_mode: boolean;
+  tags: string[];
+  is_builtin: boolean;
+}
 
 export default function NewScan() {
   const [, setLocation] = useLocation();
-  
+
   const [targetUrl, setTargetUrl] = useState("");
   const [profile, setProfile] = useState<"quick" | "standard" | "deep">("standard");
   const [validationEnabled, setValidationEnabled] = useState(true);
   const [fuzzingEnabled, setFuzzingEnabled] = useState(false);
   const [bugBountyMode, setBugBountyMode] = useState(false);
-  const [engines, setEngines] = useState<string[]>(["nuclei", "nmap"]);
   const [authorized, setAuthorized] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+  const [templates, setTemplates] = useState<Template[]>([]);
+
+  const [sessionCookie, setSessionCookie] = useState("");
+  const [authToken, setAuthToken] = useState("");
+  const [customHeadersRaw, setCustomHeadersRaw] = useState("");
+  const [showAuthPanel, setShowAuthPanel] = useState(false);
+
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+
+  useEffect(() => {
+    fetch("/api/scan-templates", { credentials: "include" })
+      .then(r => r.json())
+      .then(data => setTemplates(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, []);
 
   const createScan = useCreateScanJob({
     mutation: {
@@ -30,10 +62,58 @@ export default function NewScan() {
     }
   });
 
+  const loadTemplate = (templateId: string) => {
+    const tmpl = templates.find(t => t.id === templateId);
+    if (!tmpl) return;
+    setSelectedTemplate(templateId);
+    setProfile(tmpl.scan_profile as "quick" | "standard" | "deep");
+    setValidationEnabled(tmpl.validation_enabled);
+    setFuzzingEnabled(tmpl.fuzzing_enabled);
+    setBugBountyMode(tmpl.bug_bounty_mode);
+  };
+
+  const parseCustomHeaders = (): Record<string, string> | undefined => {
+    if (!customHeadersRaw.trim()) return undefined;
+    const headers: Record<string, string> = {};
+    for (const line of customHeadersRaw.split("\n")) {
+      const idx = line.indexOf(":");
+      if (idx > 0) {
+        headers[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+      }
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!templateName.trim()) return;
+    try {
+      await fetch("/api/scan-templates", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: templateName,
+          scan_profile: profile,
+          validation_enabled: validationEnabled,
+          fuzzing_enabled: fuzzingEnabled,
+          bug_bounty_mode: bugBountyMode,
+        }),
+      });
+      const refreshed = await fetch("/api/scan-templates", { credentials: "include" }).then(r => r.json());
+      setTemplates(Array.isArray(refreshed) ? refreshed : []);
+      setSaveAsTemplate(false);
+      setTemplateName("");
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!targetUrl || !authorized) return;
-    
+
+    const customHeaders = parseCustomHeaders();
+
     createScan.mutate({
       data: {
         target_url: targetUrl,
@@ -41,17 +121,13 @@ export default function NewScan() {
         validation_enabled: validationEnabled,
         fuzzing_enabled: fuzzingEnabled,
         bug_bounty_mode: bugBountyMode,
-        scanner_engines: engines
+        authorization_acknowledged: authorized,
+        template_id: selectedTemplate || undefined,
+        session_cookie: sessionCookie || undefined,
+        auth_token: authToken || undefined,
+        custom_headers: customHeaders as Record<string, string> | undefined,
       }
     });
-  };
-
-  const handleEngineChange = (engine: string, checked: boolean) => {
-    if (checked) {
-      setEngines([...engines, engine]);
-    } else {
-      setEngines(engines.filter(e => e !== engine));
-    }
   };
 
   return (
@@ -60,6 +136,40 @@ export default function NewScan() {
         <h1 className="text-3xl font-bold tracking-tight">Launch New Scan</h1>
         <p className="text-muted-foreground">Configure and initiate a new vulnerability assessment.</p>
       </div>
+
+      {templates.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <Bookmark className="w-4 h-4" /> Scan Templates
+            </CardTitle>
+            <CardDescription>Load a pre-configured scan template to start quickly</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Select value={selectedTemplate} onValueChange={loadTemplate}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a template (optional)..." />
+              </SelectTrigger>
+              <SelectContent>
+                {templates.map(t => (
+                  <SelectItem key={t.id} value={t.id}>
+                    <div className="flex items-center gap-2">
+                      {t.name}
+                      {t.is_builtin && <Badge variant="outline" className="text-xs">Built-in</Badge>}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedTemplate && (() => {
+              const tmpl = templates.find(t => t.id === selectedTemplate);
+              return tmpl && (
+                <p className="text-sm text-muted-foreground mt-2">{tmpl.description}</p>
+              );
+            })()}
+          </CardContent>
+        </Card>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <Card>
@@ -70,9 +180,9 @@ export default function NewScan() {
           <CardContent>
             <div className="space-y-2">
               <Label htmlFor="target_url">Target URL</Label>
-              <Input 
-                id="target_url" 
-                placeholder="https://example.com" 
+              <Input
+                id="target_url"
+                placeholder="https://example.com"
                 value={targetUrl}
                 onChange={(e) => setTargetUrl(e.target.value)}
                 required
@@ -88,40 +198,27 @@ export default function NewScan() {
             <CardDescription>Select the depth and aggressiveness of the scan.</CardDescription>
           </CardHeader>
           <CardContent>
-            <RadioGroup value={profile} onValueChange={(val: any) => setProfile(val)} className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <RadioGroupItem value="quick" id="quick" className="peer sr-only" />
-                <Label
-                  htmlFor="quick"
-                  className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
-                >
-                  <Zap className="mb-3 h-6 w-6" />
-                  <div className="font-semibold">Quick</div>
-                  <div className="text-xs text-muted-foreground text-center mt-1">Lightweight checks, fast results</div>
-                </Label>
-              </div>
-              <div>
-                <RadioGroupItem value="standard" id="standard" className="peer sr-only" />
-                <Label
-                  htmlFor="standard"
-                  className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
-                >
-                  <Shield className="mb-3 h-6 w-6" />
-                  <div className="font-semibold">Standard</div>
-                  <div className="text-xs text-muted-foreground text-center mt-1">Balanced depth and speed</div>
-                </Label>
-              </div>
-              <div>
-                <RadioGroupItem value="deep" id="deep" className="peer sr-only" />
-                <Label
-                  htmlFor="deep"
-                  className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
-                >
-                  <Rocket className="mb-3 h-6 w-6" />
-                  <div className="font-semibold">Deep</div>
-                  <div className="text-xs text-muted-foreground text-center mt-1">Comprehensive exhaustive scan</div>
-                </Label>
-              </div>
+            <RadioGroup value={profile} onValueChange={(val: string) => setProfile(val as "quick" | "standard" | "deep")} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { value: "quick", icon: Zap, label: "Quick", desc: "8 scanners · ~2 min", modules: "TLS, Headers, Cookies, JS Secrets, CVE, Recon, DNS" },
+                { value: "standard", icon: Shield, label: "Standard", desc: "17 scanners · ~8 min", modules: "All quick + CORS, XSS, SQLi, JWT, GraphQL, Rate Limit, Dep Confusion" },
+                { value: "deep", icon: Rocket, label: "Deep", desc: "28 scanners · ~20 min", modules: "All standard + IDOR, SSRF, SSTI, CRLF, Subdomains, Wayback, File Upload, Smuggling" },
+              ].map(({ value, icon: Icon, label, desc, modules }) => (
+                <div key={value}>
+                  <RadioGroupItem value={value} id={value} className="peer sr-only" />
+                  <Label
+                    htmlFor={value}
+                    className="flex flex-col rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Icon className="h-5 w-5" />
+                      <span className="font-semibold">{label}</span>
+                    </div>
+                    <span className="text-xs font-medium text-muted-foreground">{desc}</span>
+                    <span className="text-xs text-muted-foreground/70 mt-1">{modules}</span>
+                  </Label>
+                </div>
+              ))}
             </RadioGroup>
           </CardContent>
         </Card>
@@ -131,78 +228,135 @@ export default function NewScan() {
             <CardTitle>Advanced Options</CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-base">Vulnerability Validation</Label>
-                <p className="text-sm text-muted-foreground">Automatically verify findings to reduce false positives.</p>
+            {[
+              { label: "Vulnerability Validation", desc: "Automatically verify findings to reduce false positives.", value: validationEnabled, onChange: setValidationEnabled },
+              { label: "Active Fuzzing", desc: "Inject malformed payloads to discover edge cases.", value: fuzzingEnabled, onChange: setFuzzingEnabled },
+              { label: "Bug Bounty Mode", desc: "Optimize for high-impact, bounty-eligible vulnerabilities (IDOR, auth, SSRF).", value: bugBountyMode, onChange: setBugBountyMode },
+            ].map(({ label, desc, value, onChange }) => (
+              <div key={label} className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-base">{label}</Label>
+                  <p className="text-sm text-muted-foreground">{desc}</p>
+                </div>
+                <Switch checked={value} onCheckedChange={onChange} />
               </div>
-              <Switch checked={validationEnabled} onCheckedChange={setValidationEnabled} />
-            </div>
-            
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-base">Active Fuzzing</Label>
-                <p className="text-sm text-muted-foreground">Inject malformed payloads to discover edge cases.</p>
-              </div>
-              <Switch checked={fuzzingEnabled} onCheckedChange={setFuzzingEnabled} />
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-base">Bug Bounty Mode</Label>
-                <p className="text-sm text-muted-foreground">Optimize for high-impact, bounty-eligible vulnerabilities.</p>
-              </div>
-              <Switch checked={bugBountyMode} onCheckedChange={setBugBountyMode} />
-            </div>
-
-            <div className="space-y-3 pt-4 border-t border-border">
-              <Label className="text-base">Scanner Engines</Label>
-              <div className="grid grid-cols-2 gap-4">
-                {["nuclei", "nmap", "ffuf", "sqlmap", "nikto"].map((engine) => (
-                  <div key={engine} className="flex items-center space-x-2">
-                    <Checkbox 
-                      id={`engine-${engine}`} 
-                      checked={engines.includes(engine)}
-                      onCheckedChange={(checked) => handleEngineChange(engine, checked as boolean)}
-                    />
-                    <label
-                      htmlFor={`engine-${engine}`}
-                      className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 capitalize"
-                    >
-                      {engine}
-                    </label>
-                  </div>
-                ))}
-              </div>
-            </div>
+            ))}
           </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <button
+              type="button"
+              className="flex items-center justify-between w-full"
+              onClick={() => setShowAuthPanel(v => !v)}
+            >
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-primary" />
+                <div>
+                  <CardTitle className="text-base">Authenticated Scanning</CardTitle>
+                  <p className="text-sm text-muted-foreground font-normal">Provide credentials to test authenticated endpoints</p>
+                </div>
+              </div>
+              {showAuthPanel ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </CardHeader>
+          {showAuthPanel && (
+            <CardContent className="space-y-4 pt-0">
+              <Tabs defaultValue="cookie">
+                <TabsList className="w-full">
+                  <TabsTrigger value="cookie" className="flex-1">Session Cookie</TabsTrigger>
+                  <TabsTrigger value="token" className="flex-1">Bearer Token</TabsTrigger>
+                  <TabsTrigger value="headers" className="flex-1">Custom Headers</TabsTrigger>
+                </TabsList>
+                <TabsContent value="cookie" className="space-y-2">
+                  <Label htmlFor="session_cookie">Session Cookie</Label>
+                  <Input
+                    id="session_cookie"
+                    placeholder="session=abc123; auth_token=xyz..."
+                    value={sessionCookie}
+                    onChange={(e) => setSessionCookie(e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">Paste the Cookie header value from an authenticated browser session</p>
+                </TabsContent>
+                <TabsContent value="token" className="space-y-2">
+                  <Label htmlFor="auth_token">Authorization Token</Label>
+                  <Input
+                    id="auth_token"
+                    placeholder="eyJhbGciOiJIUzI1NiJ9..."
+                    value={authToken}
+                    onChange={(e) => setAuthToken(e.target.value)}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">JWT or API token — will be sent as Authorization: Bearer {'<token>'}</p>
+                </TabsContent>
+                <TabsContent value="headers" className="space-y-2">
+                  <Label htmlFor="custom_headers">Custom Request Headers</Label>
+                  <Textarea
+                    id="custom_headers"
+                    placeholder={"X-API-Key: your-key-here\nX-Custom-Header: value"}
+                    value={customHeadersRaw}
+                    onChange={(e) => setCustomHeadersRaw(e.target.value)}
+                    rows={4}
+                    className="font-mono text-sm"
+                  />
+                  <p className="text-xs text-muted-foreground">One header per line in Key: Value format</p>
+                </TabsContent>
+              </Tabs>
+              {(sessionCookie || authToken) && (
+                <Alert className="bg-emerald-500/10 border-emerald-500/20 text-emerald-400">
+                  <Lock className="h-4 w-4" />
+                  <AlertTitle>Authenticated Scan Mode Active</AlertTitle>
+                  <AlertDescription>Scanners will include your credentials to test post-login functionality</AlertDescription>
+                </Alert>
+              )}
+            </CardContent>
+          )}
         </Card>
 
         <Alert variant="destructive" className="bg-destructive/10 border-destructive/20 text-destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Authorization Required</AlertTitle>
           <AlertDescription>
-            Active scanning can be disruptive and may be considered hostile without permission.
+            Active scanning can be disruptive and may be considered hostile without permission. Only scan systems you own or have explicit written authorization to test.
           </AlertDescription>
         </Alert>
 
         <Card>
-          <CardFooter className="pt-6 flex justify-between items-center bg-muted/30">
+          <CardContent className="pt-6 space-y-4">
+            {saveAsTemplate ? (
+              <div className="space-y-2 p-4 border rounded-lg bg-muted/30">
+                <Label>Template Name</Label>
+                <div className="flex gap-2">
+                  <Input placeholder="My Custom Template" value={templateName} onChange={e => setTemplateName(e.target.value)} />
+                  <Button type="button" variant="outline" onClick={handleSaveTemplate} disabled={!templateName}>Save</Button>
+                  <Button type="button" variant="ghost" onClick={() => setSaveAsTemplate(false)}>Cancel</Button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setSaveAsTemplate(true)}
+              >
+                <FileText className="w-4 h-4" /> Save current settings as a template
+              </button>
+            )}
+          </CardContent>
+          <CardFooter className="flex justify-between items-center bg-muted/30 border-t">
             <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="authorized" 
+              <Checkbox
+                id="authorized"
                 checked={authorized}
                 onCheckedChange={(c) => setAuthorized(c as boolean)}
               />
-              <label
-                htmlFor="authorized"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-              >
+              <label htmlFor="authorized" className="text-sm font-medium">
                 I confirm I am authorized to scan this target
               </label>
             </div>
-            <Button type="submit" disabled={!authorized || !targetUrl || createScan.isPending}>
-              {createScan.isPending ? "Initializing..." : "Launch Scan"}
+            <Button type="submit" disabled={!authorized || !targetUrl || createScan.isPending} className="min-w-32">
+              {createScan.isPending ? "Launching..." : "Launch Scan"}
             </Button>
           </CardFooter>
         </Card>
