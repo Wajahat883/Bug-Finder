@@ -3,20 +3,34 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Bug Bounty Pro API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: scans
+    description: Scan job operations
+  - name: findings
+    description: Security findings
+  - name: targets
+    description: Target management
+  - name: dashboard
+    description: Dashboard & statistics
+  - name: settings
+    description: Application settings
+  - name: remediations
+    description: Remediation workflows
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +38,455 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfo"
+        "401":
+          description: Unauthorized
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with dev token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Unauthorized
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required: [message]
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
+  /dashboard/activity:
+    get:
+      operationId: getDashboardActivity
+      tags: [dashboard]
+      summary: Get recent activity feed
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Activity events list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEvent"
+
+  /scan-jobs:
+    get:
+      operationId: listScanJobs
+      tags: [scans]
+      summary: List all scan jobs
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, running, completed, failed, cancelled]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of scan jobs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanJobListResponse"
+
+    post:
+      operationId: createScanJob
+      tags: [scans]
+      summary: Create a new scan job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateScanJobRequest"
+      responses:
+        "201":
+          description: Scan job created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanJob"
+        "400":
+          description: Bad request
+        "429":
+          description: Rate limit exceeded
+
+  /scan-jobs/{id}:
+    get:
+      operationId: getScanJob
+      tags: [scans]
+      summary: Get scan job by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Scan job details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanJob"
+        "404":
+          description: Not found
+
+    delete:
+      operationId: deleteScanJob
+      tags: [scans]
+      summary: Delete a scan job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+
+  /scan-jobs/{id}/findings:
+    get:
+      operationId: getScanJobFindings
+      tags: [scans]
+      summary: Get findings for a scan job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [critical, high, medium, low, info]
+        - name: validation_status
+          in: query
+          schema:
+            type: string
+            enum: [real, false_positive, informational, pending]
+      responses:
+        "200":
+          description: List of findings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Finding"
+
+  /scan-jobs/{id}/attack-surface:
+    get:
+      operationId: getScanJobAttackSurface
+      tags: [scans]
+      summary: Get attack surface graph for a scan job
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Attack surface graph data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttackSurfaceGraph"
+
+  /findings:
+    get:
+      operationId: listFindings
+      tags: [findings]
+      summary: List all findings
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: severity
+          in: query
+          schema:
+            type: string
+        - name: validation_status
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: scan_job_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of findings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingListResponse"
+
+  /findings/{id}:
+    get:
+      operationId: getFinding
+      tags: [findings]
+      summary: Get finding by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Finding details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Finding"
+        "404":
+          description: Not found
+
+    patch:
+      operationId: updateFinding
+      tags: [findings]
+      summary: Update finding (e.g. validation status)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFindingRequest"
+      responses:
+        "200":
+          description: Updated finding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Finding"
+
+  /targets:
+    get:
+      operationId: listTargets
+      tags: [targets]
+      summary: List all scanned targets
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: page_size
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of targets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TargetListResponse"
+
+  /targets/{id}:
+    get:
+      operationId: getTarget
+      tags: [targets]
+      summary: Get target by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Target details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Target"
+        "404":
+          description: Not found
+
+  /settings:
+    get:
+      operationId: getSettings
+      tags: [settings]
+      summary: Get application settings
+      responses:
+        "200":
+          description: Current settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+
+    put:
+      operationId: updateSettings
+      tags: [settings]
+      summary: Update application settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSettingsRequest"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AppSettings"
+
+  /remediations:
+    get:
+      operationId: listRemediations
+      tags: [remediations]
+      summary: List remediations
+      responses:
+        "200":
+          description: List of remediations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Remediation"
+
+    post:
+      operationId: createRemediation
+      tags: [remediations]
+      summary: Create a remediation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRemediationRequest"
+      responses:
+        "201":
+          description: Remediation created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Remediation"
+
+  /remediations/{id}:
+    get:
+      operationId: getRemediation
+      tags: [remediations]
+      summary: Get remediation by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Remediation details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Remediation"
+        "404":
+          description: Not found
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +494,512 @@ components:
       properties:
         status:
           type: string
+        uptime:
+          type: number
+        db:
+          type: string
+        timestamp:
+          type: string
+      required: [status]
+
+    UserInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        github_login:
+          type: string
+        role:
+          type: string
+        authenticated:
+          type: boolean
+      required: [id, github_login, role, authenticated]
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+      required: [username, password]
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/UserInfo"
+      required: [token, user]
+
+    DashboardStats:
+      type: object
+      properties:
+        total_scans:
+          type: integer
+        active_scans:
+          type: integer
+        completed_scans:
+          type: integer
+        failed_scans:
+          type: integer
+        total_findings:
+          type: integer
+        critical_findings:
+          type: integer
+        high_findings:
+          type: integer
+        medium_findings:
+          type: integer
+        low_findings:
+          type: integer
+        info_findings:
+          type: integer
+        total_targets:
+          type: integer
+        risk_score:
+          type: number
+        findings_by_severity:
+          type: array
+          items:
+            $ref: "#/components/schemas/SeverityCount"
+        scans_over_time:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeSeriesPoint"
       required:
+        - total_scans
+        - active_scans
+        - completed_scans
+        - failed_scans
+        - total_findings
+        - critical_findings
+        - high_findings
+        - medium_findings
+        - low_findings
+        - info_findings
+        - total_targets
+        - risk_score
+        - findings_by_severity
+        - scans_over_time
+
+    SeverityCount:
+      type: object
+      properties:
+        severity:
+          type: string
+        count:
+          type: integer
+        color:
+          type: string
+      required: [severity, count, color]
+
+    TimeSeriesPoint:
+      type: object
+      properties:
+        date:
+          type: string
+        scans:
+          type: integer
+        findings:
+          type: integer
+      required: [date, scans, findings]
+
+    ActivityEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+        scan_job_id:
+          type: string
+        severity:
+          type: string
+      required: [id, type, message, timestamp]
+
+    ScanJob:
+      type: object
+      properties:
+        id:
+          type: string
+        target_url:
+          type: string
+        scan_profile:
+          type: string
+          enum: [quick, standard, deep]
+        status:
+          type: string
+          enum: [queued, running, completed, failed, cancelled]
+        progress:
+          type: integer
+        created_at:
+          type: string
+        started_at:
+          type: string
+        completed_at:
+          type: string
+        findings_count:
+          type: integer
+        critical_count:
+          type: integer
+        high_count:
+          type: integer
+        medium_count:
+          type: integer
+        low_count:
+          type: integer
+        info_count:
+          type: integer
+        risk_score:
+          type: number
+        ai_summary:
+          type: string
+        validation_enabled:
+          type: boolean
+        fuzzing_enabled:
+          type: boolean
+        bug_bounty_mode:
+          type: boolean
+        authorization_acknowledged:
+          type: boolean
+        scanner_engines:
+          type: array
+          items:
+            type: string
+        error_message:
+          type: string
+      required:
+        - id
+        - target_url
+        - scan_profile
+        - status
+        - progress
+        - created_at
+        - findings_count
+        - critical_count
+        - high_count
+        - medium_count
+        - low_count
+        - info_count
+        - risk_score
+        - validation_enabled
+        - fuzzing_enabled
+        - bug_bounty_mode
+        - authorization_acknowledged
+
+    CreateScanJobRequest:
+      type: object
+      properties:
+        target_url:
+          type: string
+        scan_profile:
+          type: string
+          enum: [quick, standard, deep]
+        validation_enabled:
+          type: boolean
+          default: false
+        fuzzing_enabled:
+          type: boolean
+          default: false
+        bug_bounty_mode:
+          type: boolean
+          default: false
+        authorization_acknowledged:
+          type: boolean
+        authorization_note:
+          type: string
+        scanner_engines:
+          type: array
+          items:
+            type: string
+      required: [target_url, scan_profile, authorization_acknowledged]
+
+    ScanJobListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScanJob"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+      required: [items, total, page, page_size]
+
+    Finding:
+      type: object
+      properties:
+        id:
+          type: string
+        scan_job_id:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        validation_status:
+          type: string
+          enum: [real, false_positive, informational, pending]
+        confidence:
+          type: number
+        endpoint:
+          type: string
+        description:
+          type: string
+        evidence:
+          type: string
+        recommended_fix:
+          type: string
+        cvss_score:
+          type: number
+        cwe_id:
+          type: string
+        risk_score:
+          type: number
+        scanner_name:
+          type: string
+        created_at:
+          type: string
+        target_url:
+          type: string
+      required:
+        - id
+        - scan_job_id
+        - title
+        - category
+        - severity
+        - validation_status
+        - confidence
+        - endpoint
+        - description
+        - risk_score
+        - scanner_name
+        - created_at
+
+    UpdateFindingRequest:
+      type: object
+      properties:
+        validation_status:
+          type: string
+          enum: [real, false_positive, informational, pending]
+        notes:
+          type: string
+
+    FindingListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Finding"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+      required: [items, total, page, page_size]
+
+    Target:
+      type: object
+      properties:
+        id:
+          type: string
+        url:
+          type: string
+        domain:
+          type: string
+        last_scanned:
+          type: string
+        total_scans:
+          type: integer
+        total_findings:
+          type: integer
+        critical_findings:
+          type: integer
+        high_findings:
+          type: integer
+        risk_score:
+          type: number
+        status:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - url
+        - domain
+        - total_scans
+        - total_findings
+        - critical_findings
+        - high_findings
+        - risk_score
         - status
 
+    TargetListResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Target"
+        total:
+          type: integer
+        page:
+          type: integer
+        page_size:
+          type: integer
+      required: [items, total, page, page_size]
+
+    AttackSurfaceGraph:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphEdge"
+        metrics:
+          $ref: "#/components/schemas/GraphMetrics"
+      required: [nodes, edges]
+
+    GraphNode:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+          enum: [domain, endpoint, finding]
+        severity:
+          type: string
+        metadata:
+          type: object
+      required: [id, label, type]
+
+    GraphEdge:
+      type: object
+      properties:
+        source:
+          type: string
+        target:
+          type: string
+        type:
+          type: string
+      required: [source, target, type]
+
+    GraphMetrics:
+      type: object
+      properties:
+        node_count:
+          type: integer
+        edge_count:
+          type: integer
+        finding_nodes:
+          type: integer
+        endpoint_nodes:
+          type: integer
+      required: [node_count, edge_count, finding_nodes, endpoint_nodes]
+
+    AppSettings:
+      type: object
+      properties:
+        default_export_format:
+          type: string
+          enum: [json, csv, html, pdf, sarif]
+        webhook_url:
+          type: string
+        notifications_enabled:
+          type: boolean
+        ai_analysis_enabled:
+          type: boolean
+        max_concurrent_scans:
+          type: integer
+        api_key:
+          type: string
+        github_login:
+          type: string
+      required:
+        - default_export_format
+        - notifications_enabled
+        - ai_analysis_enabled
+        - max_concurrent_scans
+
+    UpdateSettingsRequest:
+      type: object
+      properties:
+        default_export_format:
+          type: string
+        webhook_url:
+          type: string
+        notifications_enabled:
+          type: boolean
+        ai_analysis_enabled:
+          type: boolean
+        max_concurrent_scans:
+          type: integer
+
+    Remediation:
+      type: object
+      properties:
+        id:
+          type: string
+        finding_id:
+          type: string
+        scan_job_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        patch_snippet:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, resolved, wont_fix]
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - id
+        - finding_id
+        - scan_job_id
+        - title
+        - description
+        - status
+        - created_at
+
+    CreateRemediationRequest:
+      type: object
+      properties:
+        finding_id:
+          type: string
+        scan_job_id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        patch_snippet:
+          type: string
+      required: [finding_id, scan_job_id, title, description]

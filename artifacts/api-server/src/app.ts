@@ -3,8 +3,15 @@ import cors from "cors";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { connectDb } from "./lib/db";
+import { seedData } from "./lib/seed";
 
 const app: Express = express();
+
+// Initialize DB and seed data on startup
+connectDb()
+  .then(() => seedData())
+  .catch((err) => logger.warn({ err }, "DB init/seed error — continuing without database"));
 
 app.use(
   pinoHttp({
@@ -25,7 +32,7 @@ app.use(
     },
   }),
 );
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
