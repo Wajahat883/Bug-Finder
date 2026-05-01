@@ -25,6 +25,11 @@ import AttackSurface from "@/pages/attack-surface";
 import OWASPPage from "@/pages/owasp";
 import Timeline from "@/pages/timeline";
 import Integrations from "@/pages/integrations";
+import ScanTemplates from "@/pages/scan-templates";
+import ScanCompare from "@/pages/scan-compare";
+import ComplianceDashboard from "@/pages/compliance-dashboard";
+import SlaDashboard from "@/pages/sla-dashboard";
+import AiTriage from "@/pages/ai-triage";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -39,9 +44,10 @@ function Router() {
         <AppLayout>
           <Switch>
             <Route path="/dashboard" component={Dashboard} />
-            <Route path="/scans" component={Scans} />
             <Route path="/scans/new" component={NewScan} />
+            <Route path="/scans/compare" component={ScanCompare} />
             <Route path="/scans/:id" component={ScanDetail} />
+            <Route path="/scans" component={Scans} />
             <Route path="/findings" component={Findings} />
             <Route path="/findings/:id" component={FindingDetail} />
             <Route path="/targets" component={Targets} />
@@ -56,6 +62,10 @@ function Router() {
             <Route path="/owasp" component={OWASPPage} />
             <Route path="/timeline" component={Timeline} />
             <Route path="/integrations" component={Integrations} />
+            <Route path="/scan-templates" component={ScanTemplates} />
+            <Route path="/compliance" component={ComplianceDashboard} />
+            <Route path="/sla" component={SlaDashboard} />
+            <Route path="/ai-triage" component={AiTriage} />
             <Route component={NotFound} />
           </Switch>
         </AppLayout>
