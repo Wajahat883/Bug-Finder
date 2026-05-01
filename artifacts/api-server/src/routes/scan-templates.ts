@@ -25,7 +25,7 @@ function formatTemplate(t: Record<string, unknown>) {
 // GET /scan-templates
 router.get("/scan-templates", async (req, res) => {
   try {
-    const templates = await col("scan_templates").find({}).sort({ is_builtin: -1, name: 1 }).toArray() as Array<Record<string, unknown>>;
+    const templates = await col("scan_templates").find({}).sort({ created_at: 1 }).toArray() as Array<Record<string, unknown>>;
 
     // Seed built-in templates if collection is empty
     if (templates.length === 0) {
@@ -40,7 +40,7 @@ router.get("/scan-templates", async (req, res) => {
       for (const t of builtins) {
         await col("scan_templates").insertOne(t);
       }
-      const all = await col("scan_templates").find({}).sort({ is_builtin: -1, name: 1 }).toArray() as Array<Record<string, unknown>>;
+      const all = await col("scan_templates").find({}).sort({ created_at: 1 }).toArray() as Array<Record<string, unknown>>;
       return res.json(all.map(formatTemplate));
     }
 
