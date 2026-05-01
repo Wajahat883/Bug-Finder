@@ -34,6 +34,9 @@ export interface ScanContext {
   emit: EmitFn;
   discoveredEndpoints: string[];
   abortSignal?: AbortSignal;
+  sessionCookie?: string;
+  authToken?: string;
+  customHeaders?: Record<string, string>;
 }
 
 export const FETCH_TIMEOUT = 10000;
