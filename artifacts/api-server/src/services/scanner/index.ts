@@ -17,6 +17,14 @@ import { runAuthCheck } from "./auth";
 import { runIdorCheck } from "./idor";
 import { runPathTraversalCheck } from "./pathtraversal";
 import { runDnsCheck } from "./dns";
+import { runSubdomainEnum, runWaybackCrawl } from "./subdomains";
+import { runJsSecretScan } from "./js-secrets";
+import { runJwtCheck } from "./jwt";
+import { runGraphQLCheck, runWebSocketCheck } from "./graphql";
+import { runSstiCheck, runCrlfCheck, runPrototypePollutionCheck } from "./injection-advanced";
+import { runFileUploadCheck, runDependencyConfusionCheck } from "./file-upload";
+import { runCveLookup } from "./cve-lookup";
+import { runRequestSmugglingCheck, runRateLimitCheck } from "./smuggling";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -28,6 +36,9 @@ export interface ScanJobOptions {
   validationEnabled: boolean;
   fuzzingEnabled: boolean;
   bugBountyMode: boolean;
+  sessionCookie?: string;
+  authToken?: string;
+  customHeaders?: Record<string, string>;
 }
 
 // Scanner pipeline definitions by profile
@@ -38,6 +49,8 @@ const PIPELINE_QUICK = [
   { name: "Cookie Security", fn: (ctx: ScanContext) => runCookieCheck(ctx) },
   { name: "Recon", fn: (ctx: ScanContext) => runReconCheck(ctx) },
   { name: "DNS", fn: (ctx: ScanContext) => runDnsCheck(ctx) },
+  { name: "JS Secrets", fn: (ctx: ScanContext) => runJsSecretScan(ctx) },
+  { name: "CVE Lookup", fn: (ctx: ScanContext) => runCveLookup(ctx) },
 ];
 
 const PIPELINE_STANDARD = [
@@ -47,6 +60,10 @@ const PIPELINE_STANDARD = [
   { name: "SQLi Probe", fn: (ctx: ScanContext) => runSqliCheck(ctx) },
   { name: "Port Scanner", fn: (ctx: ScanContext) => runPortScan(ctx) },
   { name: "Open Redirect", fn: (ctx: ScanContext) => runRedirectCheck(ctx) },
+  { name: "JWT Security", fn: (ctx: ScanContext) => runJwtCheck(ctx) },
+  { name: "Rate Limit", fn: (ctx: ScanContext) => runRateLimitCheck(ctx) },
+  { name: "GraphQL", fn: (ctx: ScanContext) => runGraphQLCheck(ctx) },
+  { name: "Dep Confusion", fn: (ctx: ScanContext) => runDependencyConfusionCheck(ctx) },
 ];
 
 const PIPELINE_DEEP = [
@@ -54,6 +71,14 @@ const PIPELINE_DEEP = [
   { name: "Auth/Session", fn: (ctx: ScanContext) => runAuthCheck(ctx) },
   { name: "IDOR", fn: (ctx: ScanContext) => runIdorCheck(ctx) },
   { name: "Path Traversal/SSRF", fn: (ctx: ScanContext) => runPathTraversalCheck(ctx) },
+  { name: "Subdomain Enum", fn: (ctx: ScanContext) => runSubdomainEnum(ctx) },
+  { name: "Wayback Machine", fn: (ctx: ScanContext) => runWaybackCrawl(ctx) },
+  { name: "SSTI", fn: (ctx: ScanContext) => runSstiCheck(ctx) },
+  { name: "CRLF Injection", fn: (ctx: ScanContext) => runCrlfCheck(ctx) },
+  { name: "Prototype Pollution", fn: (ctx: ScanContext) => runPrototypePollutionCheck(ctx) },
+  { name: "File Upload", fn: (ctx: ScanContext) => runFileUploadCheck(ctx) },
+  { name: "Request Smuggling", fn: (ctx: ScanContext) => runRequestSmugglingCheck(ctx) },
+  { name: "WebSocket", fn: (ctx: ScanContext) => runWebSocketCheck(ctx) },
 ];
 
 function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled: boolean, bugBountyMode: boolean) {
@@ -124,7 +149,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
 }
 
 export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
-  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode } = opts;
+  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode, sessionCookie, authToken, customHeaders } = opts;
 
   const emit = (event: ScannerEvent) => {
     scanEvents.emit(`scan:${jobId}`, event);
@@ -139,6 +164,9 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     bugBountyMode,
     emit,
     discoveredEndpoints,
+    sessionCookie,
+    authToken,
+    customHeaders,
   };
 
   const pipeline = getPipeline(profile, validationEnabled, fuzzingEnabled, bugBountyMode);
