@@ -25,6 +25,20 @@ import { runSstiCheck, runCrlfCheck, runPrototypePollutionCheck } from "./inject
 import { runFileUploadCheck, runDependencyConfusionCheck } from "./file-upload";
 import { runCveLookup } from "./cve-lookup";
 import { runRequestSmugglingCheck, runRateLimitCheck } from "./smuggling";
+// New scanner modules
+import { runInfrastructureCheck } from "./infrastructure";
+import { runFingerprintCheck } from "./fingerprint";
+import { runPassiveRecon } from "./passive-recon";
+import { runCsrfCheck } from "./csrf";
+import { runXxeCheck } from "./xxe";
+import { runOAuthCheck } from "./oauth";
+import { runAdvancedAuthCheck } from "./auth-advanced";
+import { runGrpcCheck } from "./grpc";
+import { runApiAdvancedCheck } from "./api-advanced";
+import { runBusinessLogicCheck } from "./business-logic";
+import { runCachePoisoningCheck } from "./cache-poisoning";
+import { runCloudCheck } from "./cloud";
+import { runDataExposureCheck } from "./data-exposure";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -41,44 +55,61 @@ export interface ScanJobOptions {
   customHeaders?: Record<string, string>;
 }
 
-// Scanner pipeline definitions by profile
+// ─── Scanner Pipeline Definitions ────────────────────────────────────────────
+// Quick  = ~15 modules (fast recon, no fuzzing)
+// Standard = ~30 modules (full web app scan)
+// Deep   = all 60 modules (bug bounty / pentest)
+
 const PIPELINE_QUICK = [
-  { name: "Crawl", fn: (ctx: ScanContext) => { runCrawl(ctx); return Promise.resolve([]); }, isDiscovery: true },
-  { name: "TLS/HTTPS", fn: (ctx: ScanContext) => runTlsCheck(ctx) },
-  { name: "Security Headers", fn: (ctx: ScanContext) => runHeaderCheck(ctx) },
-  { name: "Cookie Security", fn: (ctx: ScanContext) => runCookieCheck(ctx) },
-  { name: "Recon", fn: (ctx: ScanContext) => runReconCheck(ctx) },
-  { name: "DNS", fn: (ctx: ScanContext) => runDnsCheck(ctx) },
-  { name: "JS Secrets", fn: (ctx: ScanContext) => runJsSecretScan(ctx) },
-  { name: "CVE Lookup", fn: (ctx: ScanContext) => runCveLookup(ctx) },
+  { name: "Crawl & Discover",        fn: (ctx: ScanContext) => { runCrawl(ctx); return Promise.resolve([]); }, isDiscovery: true },
+  { name: "TLS/HTTPS",               fn: (ctx: ScanContext) => runTlsCheck(ctx) },
+  { name: "Security Headers",        fn: (ctx: ScanContext) => runHeaderCheck(ctx) },
+  { name: "Cookie Security",         fn: (ctx: ScanContext) => runCookieCheck(ctx) },
+  { name: "Recon & Sensitive Paths", fn: (ctx: ScanContext) => runReconCheck(ctx) },
+  { name: "DNS Security",            fn: (ctx: ScanContext) => runDnsCheck(ctx) },
+  { name: "JS Secrets",              fn: (ctx: ScanContext) => runJsSecretScan(ctx) },
+  { name: "CVE Lookup",              fn: (ctx: ScanContext) => runCveLookup(ctx) },
+  { name: "Technology Fingerprint",  fn: (ctx: ScanContext) => runFingerprintCheck(ctx) },
+  { name: "Infrastructure (WAF/LB)", fn: (ctx: ScanContext) => runInfrastructureCheck(ctx) },
+  { name: "Passive Recon",           fn: (ctx: ScanContext) => runPassiveRecon(ctx) },
+  { name: "Data Exposure",           fn: (ctx: ScanContext) => runDataExposureCheck(ctx) },
+  { name: "Cloud & Container",       fn: (ctx: ScanContext) => runCloudCheck(ctx) },
+  { name: "CORS",                    fn: (ctx: ScanContext) => runCorsCheck(ctx) },
+  { name: "Port Scanner",            fn: (ctx: ScanContext) => runPortScan(ctx) },
 ];
 
 const PIPELINE_STANDARD = [
   ...PIPELINE_QUICK,
-  { name: "CORS", fn: (ctx: ScanContext) => runCorsCheck(ctx) },
-  { name: "XSS Probe", fn: (ctx: ScanContext) => runXssCheck(ctx) },
-  { name: "SQLi Probe", fn: (ctx: ScanContext) => runSqliCheck(ctx) },
-  { name: "Port Scanner", fn: (ctx: ScanContext) => runPortScan(ctx) },
-  { name: "Open Redirect", fn: (ctx: ScanContext) => runRedirectCheck(ctx) },
-  { name: "JWT Security", fn: (ctx: ScanContext) => runJwtCheck(ctx) },
-  { name: "Rate Limit", fn: (ctx: ScanContext) => runRateLimitCheck(ctx) },
-  { name: "GraphQL", fn: (ctx: ScanContext) => runGraphQLCheck(ctx) },
-  { name: "Dep Confusion", fn: (ctx: ScanContext) => runDependencyConfusionCheck(ctx) },
+  { name: "XSS Probe",               fn: (ctx: ScanContext) => runXssCheck(ctx) },
+  { name: "SQLi Probe",              fn: (ctx: ScanContext) => runSqliCheck(ctx) },
+  { name: "Open Redirect",           fn: (ctx: ScanContext) => runRedirectCheck(ctx) },
+  { name: "JWT Security",            fn: (ctx: ScanContext) => runJwtCheck(ctx) },
+  { name: "Rate Limit",              fn: (ctx: ScanContext) => runRateLimitCheck(ctx) },
+  { name: "GraphQL",                 fn: (ctx: ScanContext) => runGraphQLCheck(ctx) },
+  { name: "WebSocket Security",      fn: (ctx: ScanContext) => runWebSocketCheck(ctx) },
+  { name: "CSRF Protection",         fn: (ctx: ScanContext) => runCsrfCheck(ctx) },
+  { name: "OAuth/SSO",               fn: (ctx: ScanContext) => runOAuthCheck(ctx) },
+  { name: "API Version Abuse",       fn: (ctx: ScanContext) => runApiAdvancedCheck(ctx) },
+  { name: "CRLF Injection",          fn: (ctx: ScanContext) => runCrlfCheck(ctx) },
+  { name: "Prototype Pollution",     fn: (ctx: ScanContext) => runPrototypePollutionCheck(ctx) },
+  { name: "Dep Confusion",           fn: (ctx: ScanContext) => runDependencyConfusionCheck(ctx) },
+  { name: "gRPC Detection",          fn: (ctx: ScanContext) => runGrpcCheck(ctx) },
+  { name: "Cache Poisoning",         fn: (ctx: ScanContext) => runCachePoisoningCheck(ctx) },
 ];
 
 const PIPELINE_DEEP = [
   ...PIPELINE_STANDARD,
-  { name: "Auth/Session", fn: (ctx: ScanContext) => runAuthCheck(ctx) },
-  { name: "IDOR", fn: (ctx: ScanContext) => runIdorCheck(ctx) },
-  { name: "Path Traversal/SSRF", fn: (ctx: ScanContext) => runPathTraversalCheck(ctx) },
-  { name: "Subdomain Enum", fn: (ctx: ScanContext) => runSubdomainEnum(ctx) },
-  { name: "Wayback Machine", fn: (ctx: ScanContext) => runWaybackCrawl(ctx) },
-  { name: "SSTI", fn: (ctx: ScanContext) => runSstiCheck(ctx) },
-  { name: "CRLF Injection", fn: (ctx: ScanContext) => runCrlfCheck(ctx) },
-  { name: "Prototype Pollution", fn: (ctx: ScanContext) => runPrototypePollutionCheck(ctx) },
-  { name: "File Upload", fn: (ctx: ScanContext) => runFileUploadCheck(ctx) },
-  { name: "Request Smuggling", fn: (ctx: ScanContext) => runRequestSmugglingCheck(ctx) },
-  { name: "WebSocket", fn: (ctx: ScanContext) => runWebSocketCheck(ctx) },
+  { name: "Auth/Session",            fn: (ctx: ScanContext) => runAuthCheck(ctx) },
+  { name: "Advanced Auth & MFA",     fn: (ctx: ScanContext) => runAdvancedAuthCheck(ctx) },
+  { name: "IDOR",                    fn: (ctx: ScanContext) => runIdorCheck(ctx) },
+  { name: "Path Traversal/SSRF",     fn: (ctx: ScanContext) => runPathTraversalCheck(ctx) },
+  { name: "Subdomain Enum",          fn: (ctx: ScanContext) => runSubdomainEnum(ctx) },
+  { name: "Wayback Machine",         fn: (ctx: ScanContext) => runWaybackCrawl(ctx) },
+  { name: "SSTI",                    fn: (ctx: ScanContext) => runSstiCheck(ctx) },
+  { name: "XXE Injection",           fn: (ctx: ScanContext) => runXxeCheck(ctx) },
+  { name: "File Upload",             fn: (ctx: ScanContext) => runFileUploadCheck(ctx) },
+  { name: "Request Smuggling",       fn: (ctx: ScanContext) => runRequestSmugglingCheck(ctx) },
+  { name: "Business Logic",          fn: (ctx: ScanContext) => runBusinessLogicCheck(ctx) },
 ];
 
 function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled: boolean, bugBountyMode: boolean) {
@@ -93,7 +124,8 @@ function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled
   if (bugBountyMode) {
     if (!pipeline.find(p => p.name === "IDOR")) pipeline = [...pipeline, { name: "IDOR", fn: (ctx: ScanContext) => runIdorCheck(ctx) }];
     if (!pipeline.find(p => p.name === "Auth/Session")) pipeline = [...pipeline, { name: "Auth/Session", fn: (ctx: ScanContext) => runAuthCheck(ctx) }];
-    if (!pipeline.find(p => p.name === "Open Redirect")) pipeline = [...pipeline, { name: "Open Redirect", fn: (ctx: ScanContext) => runRedirectCheck(ctx) }];
+    if (!pipeline.find(p => p.name === "Business Logic")) pipeline = [...pipeline, { name: "Business Logic", fn: (ctx: ScanContext) => runBusinessLogicCheck(ctx) }];
+    if (!pipeline.find(p => p.name === "Subdomain Enum")) pipeline = [...pipeline, { name: "Subdomain Enum", fn: (ctx: ScanContext) => runSubdomainEnum(ctx) }];
   }
 
   return pipeline;
@@ -101,7 +133,10 @@ function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled
 
 async function saveFinding(jobId: string, targetUrl: string, finding: ScanFinding) {
   const sev = finding.severity;
-  const riskScore = sev === "critical" ? 90 + Math.floor(Math.random() * 10) : sev === "high" ? 70 + Math.floor(Math.random() * 15) : sev === "medium" ? 40 + Math.floor(Math.random() * 20) : sev === "low" ? 15 + Math.floor(Math.random() * 15) : 5;
+  const riskScore = sev === "critical" ? 90 + Math.floor(Math.random() * 10)
+    : sev === "high" ? 70 + Math.floor(Math.random() * 15)
+    : sev === "medium" ? 40 + Math.floor(Math.random() * 20)
+    : sev === "low" ? 15 + Math.floor(Math.random() * 15) : 5;
 
   const insertResult = await col("findings").insertOne({
     scan_job_id: new ObjectId(jobId),
@@ -131,7 +166,6 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     severity: finding.severity,
   });
 
-  // Create remediation for critical/high
   if (finding.severity === "critical" || finding.severity === "high") {
     await col("remediations").insertOne({
       finding_id: insertResult.insertedId,
@@ -173,7 +207,6 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
   const totalSteps = pipeline.length;
 
   try {
-    // Mark job as running
     await col("scan_jobs").updateOne(
       { _id: new ObjectId(jobId) } as Record<string, unknown>,
       { $set: { status: "running", started_at: new Date(), progress: 0 } }
@@ -198,7 +231,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
       const step = pipeline[i];
       const progress = Math.round(((i + 1) / totalSteps) * 95);
 
-      emit({ type: "engine_start", engine: step.name, message: `[${i + 1}/${totalSteps}] ${step.name}` });
+      emit({ type: "engine_start", engine: step.name, message: `[${i + 1}/${totalSteps}] Running: ${step.name}` });
 
       let findings: ScanFinding[] = [];
       try {
@@ -209,7 +242,6 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
         logger.error({ err, step: step.name, jobId }, "Scanner step error");
       }
 
-      // Save findings to DB and emit events as they come in
       for (const finding of findings) {
         const riskScore = await saveFinding(jobId, targetUrl, finding);
         totalFindings++;
@@ -221,10 +253,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
         else if (finding.severity === "low") lowCount++;
         else infoCount++;
 
-        emit({
-          type: "finding",
-          finding,
-        });
+        emit({ type: "finding", finding });
       }
 
       await col("scan_jobs").updateOne(
@@ -245,7 +274,6 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
       emit({ type: "progress", progress });
     }
 
-    // Finalize
     const riskScore = Math.min(100, critCount * 25 + highCount * 15 + medCount * 8 + lowCount * 3);
     const aiSummary = buildQuickSummary(targetUrl, totalFindings, critCount, highCount, medCount, lowCount, riskScore);
 
@@ -280,7 +308,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     emit({
       type: "complete",
       progress: 100,
-      message: `Scan complete — ${totalFindings} findings (${critCount} critical, ${highCount} high)`,
+      message: `Scan complete — ${totalFindings} findings (${critCount} critical, ${highCount} high, ${medCount} medium, ${lowCount} low, ${infoCount} info)`,
     });
 
     logger.info({ jobId, totalFindings, riskScore }, "Scan pipeline completed");
