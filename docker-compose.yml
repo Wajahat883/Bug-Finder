@@ -1,0 +1,166 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: bug-finder-redis
+    command: redis-server --save 60 1 --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7-jammy
+    container_name: bug-finder-mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-bugfinder}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-password123}
+      MONGO_INITDB_DATABASE: ${MONGO_DB:-bugfinder}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bug-finder-network
+
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: bug-finder-zap
+    command: >
+      zap.sh -daemon -host 0.0.0.0 -port 8080
+      -config api.disablekey=true
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+      -config connection.timeoutInSecs=20
+    ports:
+      - "8090:8080"
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/JSON/core/view/version/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  api-server:
+    build:
+      context: .
+      dockerfile: artifacts/backend/Dockerfile
+    container_name: bug-finder-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 5000
+      MONGODB_URI: mongodb://${MONGO_USER:-bugfinder}:${MONGO_PASSWORD:-password123}@mongodb:27017/${MONGO_DB:-bugfinder}?authSource=admin
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY}
+      OPENCODE_API_BASE: ${OPENCODE_API_BASE:-https://opencode.ai/zen/v1}
+      OPENCODE_MODEL: ${OPENCODE_MODEL:-nemotron-3-super-free}
+      REDIS_URL: redis://redis:6379
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      JIRA_URL: ${JIRA_URL:-}
+      JIRA_EMAIL: ${JIRA_EMAIL:-}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
+      JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
+      SESSION_SECRET: ${SESSION_SECRET:-bug-finder-secret-change-in-prod}
+      ZAP_URL: http://zap:8080
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@bugfinder.io}
+    ports:
+      - "5000:5000"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: artifacts/frontend/Dockerfile
+    container_name: bug-finder-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-server
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+
+  mongo-backup:
+    image: mongo:7-jammy
+    container_name: bug-finder-backup
+    entrypoint: >
+      sh -c "
+        while true; do
+          sleep 86400;
+          mongodump --uri=\"mongodb://${MONGO_USER:-bugfinder}:${MONGO_PASSWORD:-password123}@mongodb:27017/${MONGO_DB:-bugfinder}?authSource=admin\" --out=/backups/dump_\$(date +%Y%m%d_%H%M%S) --gzip;
+          find /backups -maxdepth 1 -type d -mtime +7 -exec rm -rf {} +;
+          echo \"Backup completed at \$(date)\";
+        done
+      "
+    volumes:
+      - mongo_backups:/backups
+    networks:
+      - bug-finder-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: bug-finder-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: bug-finder-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - bug-finder-network
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  mongo_backups:
+  grafana_data:
+  redis_data:
+
+networks:
+  bug-finder-network:
+    driver: bridge

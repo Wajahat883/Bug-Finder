@@ -1,0 +1,48 @@
+import { Router, type IRouter } from "express";
+import healthRouter from "./health";
+import authRouter from "./auth";
+import dashboardRouter from "./dashboard";
+import scansRouter from "./scans";
+import findingsRouter from "./findings";
+import targetsRouter from "./targets";
+import settingsRouter from "./settings";
+import remediationsRouter from "./remediations";
+import streamRouter from "./stream";
+import auditLogRouter from "./auditlog";
+import webhooksRouter from "./webhooks";
+import integrationsRouter from "./integrations";
+import analyticsRouter from "./analytics";
+import aiRouter from "./ai";
+import scanTemplatesRouter from "./scan-templates";
+import complianceRouter from "./compliance";
+import comparisonRouter from "./comparison";
+import slaRouter from "./sla";
+import reportSchedulesRouter from "./report-schedules";
+import commentsRouter from "./comments";
+import riskTrendRouter from "./risk-trend";
+
+const router: IRouter = Router();
+
+router.use(healthRouter);
+router.use(authRouter);
+router.use(dashboardRouter);
+router.use(scansRouter);
+router.use(findingsRouter);
+router.use(targetsRouter);
+router.use(settingsRouter);
+router.use(remediationsRouter);
+router.use(streamRouter);
+router.use(auditLogRouter);
+router.use(webhooksRouter);
+router.use(integrationsRouter);
+router.use(analyticsRouter);
+router.use(aiRouter);
+router.use(scanTemplatesRouter);
+router.use(complianceRouter);
+router.use(comparisonRouter);
+router.use(slaRouter);
+router.use(reportSchedulesRouter);
+router.use(commentsRouter);
+router.use(riskTrendRouter);
+
+export default router;
