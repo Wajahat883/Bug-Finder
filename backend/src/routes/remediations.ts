@@ -21,10 +21,7 @@ function formatRemediation(r: Record<string, unknown>) {
 
 router.get("/remediations", async (req, res) => {
   try {
-    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    const query: Record<string, unknown> = {};
-    if (session.role !== "admin") query.user_id = session.userId;
-    const all = (await col("remediations").find(query).sort({ created_at: -1 }).toArray()) as Array<Record<string, unknown>>;
+    const all = (await col("remediations").find({}).sort({ created_at: -1 }).toArray()) as Array<Record<string, unknown>>;
     res.json(all.map(formatRemediation));
   } catch (err) {
     logger.error({ err }, "List remediations error");

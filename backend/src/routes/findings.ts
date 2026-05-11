@@ -19,9 +19,7 @@ router.get("/findings", requireAuth, async (req, res) => {
     const scanJobId = req.query["scan_job_id"] as string | undefined;
     const suppressFp = req.query["suppress_fp"] === "true";
 
-    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
-    if (session.role !== "admin") query.user_id = session.userId;
     if (severity) query["severity"] = severity;
     if (valStatus) query["validation_status"] = valStatus;
     if (search) {
@@ -54,10 +52,6 @@ router.get("/findings/:id", requireAuth, async (req, res) => {
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const finding = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!finding) return res.status(404).json({ error: "Finding not found" });
-    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    if (session.role !== "admin" && finding.user_id !== session.userId) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
     res.json(formatFinding(finding));
   } catch (err) {
     logger.error({ err }, "Get finding error");

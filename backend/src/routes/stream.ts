@@ -7,7 +7,8 @@ import { ScannerEvent } from "../services/scanner/types";
 
 const router = Router();
 
-router.get("/scan-jobs/:id/stream", async (req, res) => {
+// Both paths serve SSE streams — frontend uses /api/stream/:id
+router.get(["/stream/:id", "/scan-jobs/:id/stream"], async (req, res) => {
   const { id } = req.params;
 
   res.setHeader("Content-Type", "text/event-stream");

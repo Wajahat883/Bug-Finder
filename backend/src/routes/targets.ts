@@ -36,9 +36,7 @@ router.get("/targets", requireAuth, async (req, res) => {
     const sortBy = (req.query["sort_by"] as string) ?? "last_scanned";
     const sortDir = req.query["sort_dir"] === "asc" ? 1 : -1;
 
-    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
-    if (session.role !== "admin") query.user_id = session.userId;
     if (search) query["domain"] = { $regex: search, $options: "i" };
     if (tag) query["tags"] = tag;
 
@@ -69,12 +67,6 @@ router.get("/targets/:id", requireAuth, async (req, res) => {
 
     const target = (await col("targets").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!target) return res.status(404).json({ error: "Target not found" });
-
-    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    if (session.role !== "admin" && target.user_id !== session.userId) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
-
     res.json(formatTarget(target));
   } catch (err) {
     logger.error({ err }, "Get target error");
