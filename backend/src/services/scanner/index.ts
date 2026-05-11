@@ -41,6 +41,8 @@ import { runCloudCheck } from "./cloud";
 import { runDataExposureCheck } from "./data-exposure";
 import { runZapScan } from "./zap";
 import { runNucleiScan } from "./nuclei";
+import { runPlaywrightScan } from "./playwright";
+import { runOsintEnrichment } from "./osint";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -78,6 +80,7 @@ const PIPELINE_QUICK = [
   { name: "Cloud & Container",       fn: (ctx: ScanContext) => runCloudCheck(ctx) },
   { name: "CORS",                    fn: (ctx: ScanContext) => runCorsCheck(ctx) },
   { name: "Port Scanner",            fn: (ctx: ScanContext) => runPortScan(ctx) },
+  { name: "OSINT Enrichment",        fn: (ctx: ScanContext) => runOsintEnrichment(ctx) },
 ];
 
 const PIPELINE_STANDARD = [
@@ -99,6 +102,8 @@ const PIPELINE_STANDARD = [
   { name: "Cache Poisoning",         fn: (ctx: ScanContext) => runCachePoisoningCheck(ctx) },
   { name: "OWASP ZAP Active Scan",   fn: (ctx: ScanContext) => runZapScan(ctx) },
   { name: "Nuclei Templates",        fn: (ctx: ScanContext) => runNucleiScan(ctx) },
+  { name: "Playwright Browser",      fn: (ctx: ScanContext) => runPlaywrightScan(ctx) },
+  { name: "OSINT Enrichment",        fn: (ctx: ScanContext) => runOsintEnrichment(ctx) },
 ];
 
 const PIPELINE_DEEP = [

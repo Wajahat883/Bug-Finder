@@ -20,6 +20,7 @@ export async function connectDb(): Promise<Db> {
     await client.connect();
     db = client.db();
     logger.info({ uri: uri.replace(/\/\/[^@]+@/, "//***@") }, "MongoDB connected");
+    try { await ensureIndexes(db); } catch (ie) { logger.warn({ err: ie }, "Index creation skipped"); }
     return db;
   } catch (err) {
     logger.warn({ err }, "MongoDB connection failed — using in-memory store");
@@ -133,4 +134,23 @@ function getInMemoryDb(): Db {
 export function col(name: string) {
   const database = db ?? getInMemoryDb();
   return database.collection(name);
+}
+
+async function ensureIndexes(database: Db): Promise<void> {
+  try {
+    await database.collection("findings").createIndex({ scan_job_id: 1 });
+    await database.collection("findings").createIndex({ severity: 1, created_at: -1 });
+    await database.collection("findings").createIndex({ target_url: 1 });
+    await database.collection("findings").createIndex({ category: 1 });
+    await database.collection("scan_jobs").createIndex({ status: 1, created_at: -1 });
+    await database.collection("scan_jobs").createIndex({ target_url: 1 });
+    await database.collection("targets").createIndex({ domain: 1 }, { unique: true, sparse: true });
+    await database.collection("activity_events").createIndex({ timestamp: -1 });
+    await database.collection("remediations").createIndex({ created_at: -1 });
+    await database.collection("audit_log").createIndex({ created_at: -1 });
+    await database.collection("users").createIndex({ email: 1 }, { unique: true, sparse: true });
+    logger.info("Database indexes ensured");
+  } catch (err) {
+    logger.warn({ err }, "Index creation failed — continuing without indexes");
+  }
 }

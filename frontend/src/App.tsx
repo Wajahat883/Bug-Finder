@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import { AppLayout } from "@/components/layout";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { useGetMe } from "@/api-client";
 
 import Landing from "@/pages/landing";
@@ -125,7 +126,9 @@ function App() {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <Router />
+            <ErrorBoundary>
+              <Router />
+            </ErrorBoundary>
           </WouterRouter>
           <Toaster />
         </TooltipProvider>

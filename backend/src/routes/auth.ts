@@ -10,8 +10,9 @@ import { sendPasswordResetEmail } from "../services/email";
 
 const router = Router();
 
-const DEFAULT_ADMIN_EMAIL = "Waji2156@gmail.com";
-const DEFAULT_ADMIN_PASSWORD = "Waji2156..";
+const DEFAULT_ADMIN_EMAIL = process.env["ADMIN_EMAIL"] ?? "admin@bugfinder.local";
+let DEFAULT_ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] ?? "";
+if (!DEFAULT_ADMIN_PASSWORD) { DEFAULT_ADMIN_PASSWORD = crypto.randomBytes(12).toString("hex"); console.log(`=== Auto-generated admin password: ${DEFAULT_ADMIN_PASSWORD} ===`); }
 
 interface SessionData {
   userId?: string;

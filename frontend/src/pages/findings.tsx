@@ -195,7 +195,7 @@ export default function Findings() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-md border border-border">
+          <div className="rounded-md border border-border overflow-auto max-h-[600px]"> 
             <table className="w-full text-sm text-left">
               <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b border-border">
                 <tr>

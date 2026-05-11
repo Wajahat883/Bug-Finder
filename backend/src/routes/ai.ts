@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import OpenAI from "openai";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { aiLimiter } from "../middlewares/rate-limit";
 
 // ── In-memory response cache (TTL: 1 hour, max 200 entries) ──────────────────
 const aiCache = new Map<string, { text: string; expires: number }>();
@@ -189,6 +190,9 @@ function serveCachedSse(res: import("express").Response, text: string): void {
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 const router = Router();
+
+// Apply AI-specific rate limiting (30 req/min)
+router.use(aiLimiter);
 
 // ── Scan Summary ──────────────────────────────────────────────────────────────
 router.post("/ai/scan-summary/:id", async (req, res) => {

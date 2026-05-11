@@ -9,6 +9,7 @@ import { connectDb } from "./lib/db";
 import { seedData } from "./lib/seed";
 import { apiKeyAuth } from "./middlewares/apikey";
 import { ipAllowlistMiddleware } from "./middlewares/ip-allowlist";
+import { globalLimiter } from "./middlewares/rate-limit";
 import { initScheduler } from "./services/scheduler";
 
 const app: Express = express();
@@ -61,6 +62,7 @@ app.use(express.urlencoded({ extended: true }));
 // API key auth runs before routes — sets session if valid key provided
 app.use("/api", apiKeyAuth);
 app.use(ipAllowlistMiddleware);
+app.use("/api", globalLimiter);
 app.use("/api", router);
 
 export default app;

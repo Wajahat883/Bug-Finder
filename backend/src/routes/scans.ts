@@ -122,8 +122,9 @@ router.post("/scan-jobs", async (req, res) => {
       severity: null,
     });
 
-    // Run real scan pipeline in background
-    runScanPipeline({
+    // Enqueue scan via worker queue system
+    const { enqueueScan } = await import("../services/queue/manager");
+    enqueueScan({
       jobId: String(insert.insertedId),
       targetUrl: body.target_url,
       profile: body.scan_profile as "quick" | "standard" | "deep",

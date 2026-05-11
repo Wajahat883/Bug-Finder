@@ -20,6 +20,8 @@ import slaRouter from "./sla";
 import reportSchedulesRouter from "./report-schedules";
 import commentsRouter from "./comments";
 import riskTrendRouter from "./risk-trend";
+import searchRouter from "./search";
+import reportsRouter from "./reports";
 
 const router: IRouter = Router();
 
@@ -44,5 +46,7 @@ router.use(slaRouter);
 router.use(reportSchedulesRouter);
 router.use(commentsRouter);
 router.use(riskTrendRouter);
+router.use(searchRouter);
+router.use(reportsRouter);
 
 export default router;
