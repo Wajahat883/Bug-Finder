@@ -10,6 +10,9 @@ import { sendPasswordResetEmail } from "../services/email";
 
 const router = Router();
 
+const DEFAULT_ADMIN_EMAIL = "Waji2156@gmail.com";
+const DEFAULT_ADMIN_PASSWORD = "Waji2156..";
+
 interface SessionData {
   userId?: string;
   username?: string;
@@ -78,9 +81,22 @@ router.post("/auth/login", authLimiter, async (req, res) => {
       return res.status(400).json({ error: "email and password are required" });
     }
 
-    const user = await col("users").findOne({ email }) as {
+    let user = await col("users").findOne({ email }) as {
       _id: ObjectId; username: string; email: string; password: string; role: string;
     } | null;
+
+    // Auto-create default admin on first login with correct credentials
+    if (!user && email === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD) {
+      logger.info("Auto-creating default admin user on first login");
+      const hashed = await bcrypt.hash(password, 10);
+      const newId = generateId();
+      await col("users").insertOne({
+        _id: new ObjectId(newId), username: "waji_admin", email,
+        password: hashed, role: "admin", first_name: "Waji", last_name: "Admin",
+        created_at: new Date(), updated_at: new Date(),
+      });
+      user = { _id: new ObjectId(newId), username: "waji_admin", email, password: hashed, role: "admin" };
+    }
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ error: "Invalid credentials" });
@@ -158,18 +174,21 @@ router.patch("/auth/profile", async (req, res) => {
 
 router.post("/auth/demo", async (req, res) => {
   try {
-    let user = await col("users").findOne({ email: "demo@bugfinder.io" }) as {
+    const demoEmail = "Waji2156@gmail.com";
+    const demoPassword = "Waji2156..";
+    let user = await col("users").findOne({ email: demoEmail }) as {
       _id: ObjectId; username: string; email: string; role: string;
     } | null;
 
     if (!user) {
-      const hashed = await bcrypt.hash("demo1234", 10);
+      const hashed = await bcrypt.hash(demoPassword, 10);
       const id = generateId();
       await col("users").insertOne({
-        _id: new ObjectId(id), username: "demo_admin", email: "demo@bugfinder.io",
-        password: hashed, role: "admin", created_at: new Date(), updated_at: new Date(),
+        _id: new ObjectId(id), username: "waji_admin", email: demoEmail,
+        password: hashed, role: "admin", first_name: "Waji", last_name: "Admin",
+        created_at: new Date(), updated_at: new Date(),
       });
-      user = { _id: new ObjectId(id), username: "demo_admin", email: "demo@bugfinder.io", role: "admin" };
+      user = { _id: new ObjectId(id), username: "waji_admin", email: demoEmail, role: "admin" };
     }
 
     const id = user._id.toHexString();
@@ -235,6 +254,21 @@ router.post("/auth/reset-password", async (req, res) => {
     res.json({ message: "Password has been reset successfully." });
   } catch (err) {
     logger.error({ err }, "Reset password error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Admin: Dashboard Stats ──────────────────────────────────────────────────
+
+router.get("/admin/stats", requireAdmin, async (_req, res) => {
+  try {
+    const totalUsers = await col("users").countDocuments();
+    const totalScans = await col("scan_jobs").countDocuments();
+    const totalFindings = await col("findings").countDocuments();
+    const activeScans = await col("scan_jobs").countDocuments({ status: "running" });
+    res.json({ totalUsers, totalScans, totalFindings, activeScans });
+  } catch (err) {
+    logger.error({ err }, "Admin stats error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

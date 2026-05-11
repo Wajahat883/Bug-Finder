@@ -52,7 +52,7 @@ export default function Login() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Login failed");
-      nav("/dashboard");
+      nav(d.role === "admin" ? "/adminW" : "/dashboard");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally { setLoading(false); }
@@ -264,13 +264,6 @@ const strength = regForm.password.length === 0 ? 0
               <div className="text-right">
                 <a href="/forgot-password" className="text-xs hover:opacity-80" style={{ color: "#a78bfa" }}>Forgot password?</a>
               </div>
-
-              <p className="text-center text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>
-                Admin?{" "}
-                <a href="/admin" className="hover:opacity-80 transition-opacity" style={{ color: "rgba(255,255,255,0.4)" }}>
-                  Go to Admin Portal →
-                </a>
-              </p>
             </form>
           ) : (
             <form onSubmit={handleRegister} className="space-y-3">

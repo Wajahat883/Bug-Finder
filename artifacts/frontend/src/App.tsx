@@ -35,6 +35,7 @@ import AiTriage from "@/pages/ai-triage";
 import ForgotPassword from "@/pages/forgot-password";
 import ResetPassword from "@/pages/reset-password";
 import AdminUsers from "@/pages/admin-users";
+import AdminPanel from "@/pages/admin-panel";
 import Notifications from "@/pages/notifications";
 import AdminLogin from "@/pages/admin-login";
 
@@ -97,6 +98,9 @@ function Router() {
             <Route path="/notifications" component={Notifications} />
 
             {/* ── Admin-only routes ── */}
+            <Route path="/adminW">
+              {() => <AdminRoute component={AdminPanel} />}
+            </Route>
             <Route path="/audit-log">
               {() => <AdminRoute component={AuditLog} />}
             </Route>

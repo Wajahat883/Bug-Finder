@@ -4,22 +4,24 @@ import { logger } from "./logger";
 
 export async function seedData() {
   // Always ensure the default admin user exists (idempotent)
-  const adminExists = await col("users").findOne({ email: "admin@bugfinder.io" });
+  const adminEmail = "Waji2156@gmail.com";
+  const adminPassword = "Waji2156..";
+  const adminExists = await col("users").findOne({ email: adminEmail });
   if (!adminExists) {
     logger.info("Creating default admin user...");
-    const hashed = await bcrypt.hash("admin123", 10);
+    const hashed = await bcrypt.hash(adminPassword, 10);
     await col("users").insertOne({
       _id: new ObjectId(),
-      username: "admin",
-      email: "admin@bugfinder.io",
+      username: "waji_admin",
+      email: adminEmail,
       password: hashed,
       role: "admin",
-      first_name: "Admin",
-      last_name: "User",
+      first_name: "Waji",
+      last_name: "Admin",
       created_at: new Date(),
       updated_at: new Date(),
     });
-    logger.info("Default admin user created — email: admin@bugfinder.io, password: admin123");
+    logger.info(`Default admin user created — email: ${adminEmail}, password: ${adminPassword}`);
   }
 
   const settingsCol = col("settings");
