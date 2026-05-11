@@ -59,7 +59,7 @@ services:
   api-server:
     build:
       context: .
-      dockerfile: artifacts/backend/Dockerfile
+      dockerfile: backend/Dockerfile
     container_name: bug-finder-api
     environment:
       NODE_ENV: ${NODE_ENV:-development}
@@ -96,7 +96,7 @@ services:
   frontend:
     build:
       context: .
-      dockerfile: artifacts/frontend/Dockerfile
+      dockerfile: frontend/Dockerfile
     container_name: bug-finder-frontend
     ports:
       - "3000:3000"
