@@ -38,7 +38,7 @@ export default function Login() {
   const [error, setError] = useState("");
 
   const [showConfirm, setShowConfirm] = useState(false);
-  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [loginForm, setLoginForm] = useState({ email: "", password: "", rememberMe: false });
   const [regForm, setRegForm] = useState({ firstName: "", lastName: "", email: "", password: "", confirmPassword: "" });
 
   async function handleLogin(e: React.FormEvent) {
@@ -48,7 +48,7 @@ export default function Login() {
       const r = await fetch(`${API}/auth/login`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(loginForm),
+        body: JSON.stringify({ email: loginForm.email, password: loginForm.password, remember_me: loginForm.rememberMe }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Login failed");
@@ -233,6 +233,13 @@ const strength = regForm.password.length === 0 ? 0
                   {showPass ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
               </div>
+
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" checked={loginForm.rememberMe}
+                  onChange={e => setLoginForm(p => ({ ...p, rememberMe: e.target.checked }))}
+                  className="w-4 h-4 rounded accent-purple-600 cursor-pointer" />
+                <span className="text-xs" style={{ color: "rgba(255,255,255,0.38)" }}>Keep me signed in for 30 days</span>
+              </label>
 
               <button
                 type="submit" disabled={loading}

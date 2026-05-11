@@ -106,6 +106,15 @@ router.post("/auth/login", authLimiter, async (req, res) => {
     const id = user._id.toHexString();
     const session = (req as unknown as { session: SessionData }).session;
     session.userId = id; session.username = user.username; session.role = user.role;
+
+    const rememberMe = req.body?.remember_me === true;
+    if (rememberMe) {
+      req.session.cookie.maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+      session.rememberMe = true;
+    } else {
+      req.session.cookie.maxAge = 30 * 60 * 1000; // 30 min inactivity
+    }
+
     await auditFromReq(req, "user.login", "users", id);
     res.json({ id, username: user.username, email: user.email, role: user.role });
   } catch (err) {

@@ -110,6 +110,24 @@ export async function sendReportEmail(to: string | string[], report: ReportData)
   }
 }
 
+export async function sendEmail(opts: { to: string; subject: string; html: string; text?: string }): Promise<boolean> {
+  const transport = createTransport();
+  if (!transport) return false;
+  try {
+    await transport.sendMail({
+      from: process.env["SMTP_FROM"] ?? "noreply@bugfinder.io",
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      text: opts.text ?? opts.html.replace(/<[^>]*>/g, ""),
+    });
+    return true;
+  } catch (err) {
+    logger.error({ err }, "Failed to send email");
+    return false;
+  }
+}
+
 export async function sendPasswordResetEmail(to: string, token: string, baseUrl = "http://localhost:3000"): Promise<boolean> {
   const transport = createTransport();
   if (!transport) {

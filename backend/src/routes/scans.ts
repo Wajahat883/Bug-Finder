@@ -2,7 +2,6 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
-import { runScanPipeline } from "../services/scanner/index";
 
 const router = Router();
 

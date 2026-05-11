@@ -157,6 +157,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -363,8 +364,18 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
       <CommandSearch open={cmdOpen} onClose={() => setCmdOpen(false)} />
 
+      {/* Mobile sidebar toggle */}
+      <button
+        onClick={() => setSidebarOpen(!sidebarOpen)}
+        className="lg:hidden fixed top-3 left-3 z-50 p-2 rounded-md"
+        style={{ background: "hsl(var(--sidebar))", border: "1px solid hsl(var(--sidebar-border))", color: "hsl(var(--sidebar-foreground))" }}
+      >
+        {sidebarOpen ? <X className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
+      </button>
+
       {/* Sidebar */}
-      <aside className="flex flex-col border-r" style={{ width: 200, minWidth: 200, background: "hsl(var(--sidebar))", borderColor: "hsl(var(--sidebar-border))" }}>
+      <aside className={`flex flex-col border-r fixed lg:relative z-40 h-full transition-transform ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
+        style={{ width: 200, minWidth: 200, background: "hsl(var(--sidebar))", borderColor: "hsl(var(--sidebar-border))" }}>
         <div className="flex items-center gap-3 px-4 py-4 flex-shrink-0">
           <div className="w-8 h-8 rounded-md flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
             style={{ background: "linear-gradient(135deg, #6d28d9, #8b5cf6)" }}>B</div>

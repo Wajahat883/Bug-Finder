@@ -22,6 +22,8 @@ import commentsRouter from "./comments";
 import riskTrendRouter from "./risk-trend";
 import searchRouter from "./search";
 import reportsRouter from "./reports";
+import notificationsRouter from "./notifications";
+import apiKeysRouter from "./api-keys";
 
 const router: IRouter = Router();
 
@@ -48,5 +50,7 @@ router.use(commentsRouter);
 router.use(riskTrendRouter);
 router.use(searchRouter);
 router.use(reportsRouter);
+router.use(notificationsRouter);
+router.use(apiKeysRouter);
 
 export default router;
