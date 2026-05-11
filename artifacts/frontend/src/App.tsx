@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/toaster";
@@ -36,21 +36,20 @@ import ForgotPassword from "@/pages/forgot-password";
 import ResetPassword from "@/pages/reset-password";
 import AdminUsers from "@/pages/admin-users";
 import Notifications from "@/pages/notifications";
+import AdminLogin from "@/pages/admin-login";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
 });
 
+// Guard for admin-only pages inside AppLayout — redirects to /admin if not admin
 function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const [, nav] = useLocation();
   const { data: user, isLoading } = useGetMe({ query: { retry: false } });
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Loading…</div>;
   if ((user as Record<string, unknown>)?.role !== "admin") {
-    return (
-      <div className="p-8 text-center">
-        <p className="text-lg font-semibold text-destructive">Access Denied</p>
-        <p className="text-sm text-muted-foreground mt-1">This section requires admin privileges.</p>
-      </div>
-    );
+    nav("/admin");
+    return null;
   }
   return <Component />;
 }
@@ -58,10 +57,19 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
 function Router() {
   return (
     <Switch>
+      {/* ── Public routes (no layout) ── */}
       <Route path="/" component={Landing} />
+
+      {/* User login — /login */}
       <Route path="/login" component={Login} />
+
+      {/* Admin login — /admin (completely separate from /login) */}
+      <Route path="/admin" component={AdminLogin} />
+
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />
+
+      {/* ── Authenticated routes (inside AppLayout) ── */}
       <Route>
         <AppLayout>
           <Switch>
@@ -70,32 +78,35 @@ function Router() {
             <Route path="/scans/compare" component={ScanCompare} />
             <Route path="/scans/:id" component={ScanDetail} />
             <Route path="/scans" component={Scans} />
-            <Route path="/findings" component={Findings} />
             <Route path="/findings/:id" component={FindingDetail} />
-            <Route path="/targets" component={Targets} />
+            <Route path="/findings" component={Findings} />
             <Route path="/targets/:id" component={TargetDetail} />
+            <Route path="/targets" component={Targets} />
             <Route path="/remediations" component={Remediations} />
             <Route path="/system" component={System} />
             <Route path="/settings" component={Settings} />
             <Route path="/cvss" component={CVSSCalculator} />
-            <Route path="/audit-log">
-              {() => <AdminRoute component={AuditLog} />}
-            </Route>
             <Route path="/executive" component={Executive} />
             <Route path="/attack-surface" component={AttackSurface} />
             <Route path="/owasp" component={OWASPPage} />
             <Route path="/timeline" component={Timeline} />
-            <Route path="/integrations">
-              {() => <AdminRoute component={Integrations} />}
-            </Route>
             <Route path="/scan-templates" component={ScanTemplates} />
             <Route path="/compliance" component={ComplianceDashboard} />
             <Route path="/sla" component={SlaDashboard} />
             <Route path="/ai-triage" component={AiTriage} />
+            <Route path="/notifications" component={Notifications} />
+
+            {/* ── Admin-only routes ── */}
+            <Route path="/audit-log">
+              {() => <AdminRoute component={AuditLog} />}
+            </Route>
+            <Route path="/integrations">
+              {() => <AdminRoute component={Integrations} />}
+            </Route>
             <Route path="/admin/users">
               {() => <AdminRoute component={AdminUsers} />}
             </Route>
-            <Route path="/notifications" component={Notifications} />
+
             <Route component={NotFound} />
           </Switch>
         </AppLayout>

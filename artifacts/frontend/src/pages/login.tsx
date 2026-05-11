@@ -84,18 +84,7 @@ export default function Login() {
     } finally { setLoading(false); }
   }
 
-  async function handleDemo() {
-    setLoading(true); setError("");
-    try {
-      const r = await fetch(`${API}/auth/demo`, { method: "POST", credentials: "include" });
-      if (!r.ok) throw new Error("Demo login failed");
-      nav("/dashboard");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Demo failed");
-    } finally { setLoading(false); }
-  }
-
-  const strength = regForm.password.length === 0 ? 0
+const strength = regForm.password.length === 0 ? 0
     : regForm.password.length < 4 ? 1
     : regForm.password.length < 6 ? 2
     : regForm.password.length < 8 ? 3 : 4;
@@ -276,17 +265,11 @@ export default function Login() {
                 <a href="/forgot-password" className="text-xs hover:opacity-80" style={{ color: "#a78bfa" }}>Forgot password?</a>
               </div>
 
-              <button
-                type="button" onClick={handleDemo} disabled={loading}
-                className="w-full py-3.5 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2.5 disabled:opacity-60"
-                style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.6)" }}
-              >
-                {loading ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} style={{ color: "#a78bfa" }} />}
-                Continue as Demo Admin
-              </button>
-
-              <p className="text-center text-xs" style={{ color: "rgba(255,255,255,0.22)" }}>
-                Demo: <span className="font-mono" style={{ color: "rgba(255,255,255,0.38)" }}>demo@bugfinder.io</span> / <span className="font-mono" style={{ color: "rgba(255,255,255,0.38)" }}>demo1234</span>
+              <p className="text-center text-xs" style={{ color: "rgba(255,255,255,0.2)" }}>
+                Admin?{" "}
+                <a href="/admin" className="hover:opacity-80 transition-opacity" style={{ color: "rgba(255,255,255,0.4)" }}>
+                  Go to Admin Portal →
+                </a>
               </p>
             </form>
           ) : (
