@@ -21,24 +21,26 @@ export async function runRequestSmugglingCheck(ctx: ScanContext): Promise<ScanFi
   });
 
   if (teclRes && (teclRes.status === 200 || teclRes.status === 400)) {
-    // If 400 — good, server rejected. If 200 — may be misconfigured
     const body = await teclRes.text().catch(() => "");
     emit({ type: "log", message: `TE-CL probe: HTTP ${teclRes.status}` });
 
     if (teclRes.status === 200 && body.length > 0) {
+      // NOTE: Node's fetch() normalizes TE+CL headers before sending — this probe cannot
+      // reliably detect smuggling. Confidence is intentionally very low.
+      // Full verification requires smuggler.py or Burp Suite's HTTP/1 raw socket mode.
       findings.push({
-        title: "Potential HTTP Request Smuggling: TE-CL Ambiguity",
+        title: "HTTP Request Smuggling — Manual Verification Required",
         category: "Request Smuggling",
-        severity: "high",
+        severity: "medium",
         endpoint: base.origin,
-        description: "The server accepted a request with both Transfer-Encoding and Content-Length headers. This creates ambiguity that can be exploited for HTTP request smuggling attacks, potentially bypassing security controls, poisoning caches, or hijacking user sessions.",
-        evidence: `POST ${base.origin}\nTransfer-Encoding: chunked\nContent-Length: 6\nHTTP ${teclRes.status}`,
-        recommended_fix: "Configure the front-end server to reject requests with both Transfer-Encoding and Content-Length headers. Normalize requests between reverse proxy and backend.",
-        cvss_score: 8.1,
+        description: "The server returned HTTP 200 when sent a request with both Transfer-Encoding and Content-Length headers. NOTE: This probe is inconclusive — Node's fetch() normalizes conflicting headers before transmission. A true TE-CL smuggling attack cannot be confirmed via this scanner. Manual verification with smuggler.py or Burp Suite HTTP/1 raw mode is required.",
+        evidence: `POST ${base.origin}\nTransfer-Encoding: chunked\nContent-Length: 6\nHTTP ${teclRes.status}\n\nLIMITATION: fetch() normalizes headers — this result is a surface indicator only, not a confirmed vulnerability. Verify with: python3 smuggler.py -u ${base.origin}`,
+        recommended_fix: "Use smuggler.py (https://github.com/defparam/smuggler) or Burp Suite to confirm. If confirmed: configure reverse proxy to reject ambiguous requests and normalize TE/CL before forwarding.",
+        cvss_score: 5.0,
         cwe_id: "CWE-444",
-        scanner_name: "Smuggling Probe",
+        scanner_name: "Bug-Finder/Smuggling",
         scanner_family: "network",
-        confidence: 0.6,
+        confidence: 0.1,
       });
     }
   }
@@ -114,7 +116,7 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
         recommended_fix: "Implement rate limiting (max 5 attempts per minute per IP). Add account lockout after repeated failures. Consider CAPTCHA after N failures. Use exponential backoff.",
         cvss_score: 7.5,
         cwe_id: "CWE-307",
-        scanner_name: "Rate Limit Tester",
+        scanner_name: "Bug-Finder/Rate-Limit",
         scanner_family: "web",
         confidence: 0.85,
       });
@@ -151,7 +153,7 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
           recommended_fix: "Do not trust X-Forwarded-For or similar headers for rate limiting unless you control the proxy layer. Use the actual TCP connection IP for rate limit keys.",
           cvss_score: 7.5,
           cwe_id: "CWE-307",
-          scanner_name: "Rate Limit Tester",
+          scanner_name: "Bug-Finder/Rate-Limit",
           scanner_family: "web",
           confidence: 0.75,
         });

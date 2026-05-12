@@ -117,13 +117,138 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "HTML-encode all user input before rendering: use escapeHtml() or a templating engine with auto-escaping. Add Content-Security-Policy: script-src 'self' to limit script execution.",
           cvss_score: domXssConfirmed ? 8.8 : 7.4,
           cwe_id: "CWE-79",
-          scanner_name: "OWASP ZAP",
+          scanner_name: "Bug-Finder",
           scanner_family: "web",
           confidence: domXssConfirmed ? 0.98 : 0.92,
         });
         emit({ type: "log", message: `  [XSS${domXssConfirmed ? " DOM-CONFIRMED" : " CONFIRMED"}] ${endpoint} param=${paramName} line=${lineNumber}` });
         break; // One confirmed finding per param is enough
       }
+    }
+  }
+
+  // ── POST/JSON body XSS injection ──────────────────────────────────────────
+  // Reflected XSS via JSON body — covers APIs that echo back field values in HTML/JSON responses
+  if (profile !== "quick") {
+    const jsonEndpoints = endpoints.slice(0, Math.min(4, budget));
+    for (const endpoint of jsonEndpoints) {
+      for (const paramName of PARAM_NAMES.slice(0, 4)) {
+        const probe = XSS_PROBES[0]!;
+        const jsonKey = `${endpoint}:${paramName}:json`;
+        if (seen.has(jsonKey)) continue;
+
+        const res = await ctxFetch(ctx, endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json, text/html, */*" },
+          body: JSON.stringify({ [paramName]: probe.payload }),
+        });
+        if (!res) continue;
+
+        const ct = res.headers.get("content-type") ?? "";
+        if (!ct.includes("html") && !ct.includes("text") && !ct.includes("json")) continue;
+
+        const body = await res.text().catch(() => "");
+        if (!body.includes(probe.marker)) continue;
+
+        const encodedMarker = probe.marker.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        if (body.includes(encodedMarker) && !body.includes(`<${probe.marker.replace(/[<>]/g, "")}`)) continue;
+
+        // Confirm with second marker
+        const confirmProbe = XSS_CONFIRM_PROBES[0]!;
+        const confirmRes = await ctxFetch(ctx, endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json, text/html, */*" },
+          body: JSON.stringify({ [paramName]: confirmProbe.payload }),
+        });
+        const confirmBody = confirmRes ? await confirmRes.text().catch(() => "") : "";
+        if (!confirmBody.includes(confirmProbe.marker)) continue;
+
+        seen.add(jsonKey);
+        const offset = body.indexOf(probe.marker);
+        const lineNumber = body.slice(0, offset).split("\n").length;
+        const snippet = body.slice(Math.max(0, offset - 100), offset + 100);
+
+        findings.push({
+          title: `Reflected XSS in JSON Body Parameter: ${paramName}`,
+          category: "XSS",
+          severity: "high",
+          endpoint,
+          description: `JSON body field "${paramName}" reflects unsanitized input into the response. Confirmed with two independent markers. APIs that echo JSON fields in HTML or JS responses are vulnerable to XSS even without URL parameters.`,
+          evidence: [
+            `POST ${endpoint}`,
+            `Content-Type: application/json`,
+            `Body: ${JSON.stringify({ [paramName]: probe.payload })}`,
+            `Marker reflected unencoded at response line ${lineNumber} (byte offset ${offset})`,
+            `\nContext:\n${snippet}`,
+            `\nConfirmation: ${JSON.stringify({ [paramName]: confirmProbe.payload })} → marker "${confirmProbe.marker}" also reflected`,
+          ].join("\n"),
+          recommended_fix: "HTML-encode all values before inserting them into HTML — even values sourced from JSON bodies. Use auto-escaping templates and set Content-Security-Policy.",
+          cvss_score: 7.4,
+          cwe_id: "CWE-79",
+          scanner_name: "Bug-Finder",
+          scanner_family: "web",
+          confidence: 0.91,
+        });
+        emit({ type: "log", message: `  [XSS JSON-BODY] ${endpoint} field=${paramName} line=${lineNumber}` });
+      }
+    }
+  }
+
+  // ── Stored XSS tracking ───────────────────────────────────────────────────
+  // Inject into POST (write) endpoints, then probe GET (read) endpoints for reflection
+  if (profile === "deep") {
+    const writeEndpoints = endpoints.filter(ep => ep.includes("/api"));
+    const readEndpoints = endpoints.filter(ep => !ep.includes("/api") || ep.includes("/api/feed") || ep.includes("/api/comments"));
+    const storedMarker = `xssstored${Date.now().toString(36)}`;
+
+    for (const writeEp of writeEndpoints.slice(0, 3)) {
+      // Submit stored XSS payload
+      await ctxFetch(ctx, writeEp, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: `<${storedMarker}>`, message: `<${storedMarker}>`, content: `<${storedMarker}>`, comment: `<${storedMarker}>` }),
+      });
+    }
+
+    // Wait briefly for server to process
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Check read endpoints for reflection of stored marker
+    for (const readEp of readEndpoints.slice(0, 5)) {
+      const res = await ctxFetch(ctx, readEp);
+      if (!res) continue;
+      const body = await res.text().catch(() => "");
+      if (!body.includes(storedMarker)) continue;
+
+      const encodedMarker = storedMarker.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      if (body.includes(encodedMarker)) continue; // encoded = safe
+
+      const offset = body.indexOf(storedMarker);
+      const lineNumber = body.slice(0, offset).split("\n").length;
+      const storedKey = `stored:${readEp}`;
+      if (seen.has(storedKey)) continue;
+      seen.add(storedKey);
+
+      findings.push({
+        title: "Stored XSS Confirmed",
+        category: "XSS",
+        severity: "critical",
+        endpoint: readEp,
+        description: `A stored XSS payload injected into POST write endpoints was reflected unencoded in ${readEp}. Any user who visits this page will execute the attacker's script. This is more severe than reflected XSS as it requires no user interaction beyond visiting the page.`,
+        evidence: [
+          `Payload injected into write endpoints: <${storedMarker}>`,
+          `Marker reflected at GET ${readEp}`,
+          `Line ${lineNumber} in response`,
+          `Snippet: ${body.slice(Math.max(0, offset - 80), offset + 80)}`,
+        ].join("\n"),
+        recommended_fix: "HTML-encode all stored content before rendering. Implement a strict Content-Security-Policy. Sanitize all user input at the point of storage.",
+        cvss_score: 9.0,
+        cwe_id: "CWE-79",
+        scanner_name: "Bug-Finder",
+        scanner_family: "web",
+        confidence: 0.90,
+      });
+      emit({ type: "log", message: `  [STORED XSS CONFIRMED] payload stored then reflected at ${readEp} line=${lineNumber}` });
     }
   }
 

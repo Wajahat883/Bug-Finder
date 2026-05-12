@@ -65,7 +65,7 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
             recommended_fix: "Validate file type by magic bytes (not extension or MIME type). Store uploads outside the web root or in a CDN with execution disabled. Use an allowlist of permitted file types.",
             cvss_score: 9.8,
             cwe_id: "CWE-434",
-            scanner_name: "Upload Scanner",
+            scanner_name: "Bug-Finder/Upload",
             scanner_family: "web",
             confidence: 0.8,
           });
@@ -81,7 +81,7 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
             recommended_fix: "Sanitize SVG files on upload (strip script tags, event handlers). Set Content-Disposition: attachment for uploaded file downloads. Use a dedicated content delivery domain.",
             cvss_score: 7.4,
             cwe_id: "CWE-79",
-            scanner_name: "Upload Scanner",
+            scanner_name: "Bug-Finder/Upload",
             scanner_family: "web",
             confidence: 0.82,
           });
@@ -96,7 +96,7 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
             recommended_fix: "Sanitize filenames on server: use basename() or equivalent to strip directory traversal sequences. Generate server-side filenames rather than using client-provided names.",
             cvss_score: 8.1,
             cwe_id: "CWE-22",
-            scanner_name: "Upload Scanner",
+            scanner_name: "Bug-Finder/Upload",
             scanner_family: "web",
             confidence: 0.78,
           });
@@ -163,7 +163,7 @@ export async function runDependencyConfusionCheck(ctx: ScanContext): Promise<Sca
             recommended_fix: "Block public access to package.json files. Use npm's @scope configuration to pin internal packages to a private registry. Consider using npm config to always use private registry for internal scopes.",
             cvss_score: 8.1,
             cwe_id: "CWE-829",
-            scanner_name: "Dep-Confusion",
+            scanner_name: "Bug-Finder/DepConfusion",
             scanner_family: "web",
             confidence: 0.85,
           });
@@ -179,7 +179,7 @@ export async function runDependencyConfusionCheck(ctx: ScanContext): Promise<Sca
           recommended_fix: "Block public access to dependency manifests via web server configuration. These files should not be in the web root.",
           cvss_score: 5.3,
           cwe_id: "CWE-200",
-          scanner_name: "Dep-Confusion",
+          scanner_name: "Bug-Finder/DepConfusion",
           scanner_family: "web",
           confidence: 0.95,
         });
@@ -195,7 +195,7 @@ export async function runDependencyConfusionCheck(ctx: ScanContext): Promise<Sca
         recommended_fix: `Configure the web server to deny access to ${file.path}. Move it outside the web root.`,
         cvss_score: 5.3,
         cwe_id: "CWE-200",
-        scanner_name: "Dep-Confusion",
+        scanner_name: "Bug-Finder/DepConfusion",
         scanner_family: "web",
         confidence: 0.95,
       });

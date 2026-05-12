@@ -56,7 +56,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Explicitly reject 'none' as an allowed algorithm. Whitelist only the expected algorithms (e.g., RS256 or HS256).",
         cvss_score: 9.8,
         cwe_id: "CWE-347",
-        scanner_name: "JWT-Tool",
+        scanner_name: "Bug-Finder/JWT",
         scanner_family: "web",
         confidence: 0.97,
       });
@@ -101,7 +101,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Always include an 'exp' claim in JWT tokens. Use short expiry times (15-60 minutes) and implement refresh token rotation.",
             cvss_score: 7.5,
             cwe_id: "CWE-613",
-            scanner_name: "JWT-Tool",
+            scanner_name: "Bug-Finder/JWT",
             scanner_family: "web",
             confidence: 0.97,
           });
@@ -122,7 +122,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Remove sensitive data from JWT payloads. Use opaque session tokens if sensitive data is required, or use JWE (encrypted JWT).",
             cvss_score: 6.5,
             cwe_id: "CWE-200",
-            scanner_name: "JWT-Tool",
+            scanner_name: "Bug-Finder/JWT",
             scanner_family: "web",
             confidence: 0.85,
           });

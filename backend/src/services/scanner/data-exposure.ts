@@ -63,7 +63,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
           recommended_fix: `Remove ${pat.name} from API responses. Apply field-level filtering. Use data masking for sensitive fields. Audit all API responses for unintended data exposure.`,
           cvss_score: pat.severity === "critical" ? 9.1 : pat.severity === "high" ? 7.5 : 5.3,
           cwe_id: pat.cwe,
-          scanner_name: "Data Scanner",
+          scanner_name: "Bug-Finder/Data",
           scanner_family: "web",
           confidence: 0.88,
         });
@@ -111,7 +111,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
         recommended_fix: "Configure error handling to return generic error messages in production. Log full stack traces server-side only. Set NODE_ENV=production / DEBUG=false. Never expose internal errors to clients.",
         cvss_score: 5.3,
         cwe_id: "CWE-209",
-        scanner_name: "Data Scanner",
+        scanner_name: "Bug-Finder/Data",
         scanner_family: "web",
         confidence: 0.9,
       });
@@ -130,7 +130,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
         recommended_fix: "Configure error pages to never reveal internal paths. Use generic error messages in production. Set appropriate error reporting levels.",
         cvss_score: 3.7,
         cwe_id: "CWE-200",
-        scanner_name: "Data Scanner",
+        scanner_name: "Bug-Finder/Data",
         scanner_family: "web",
         confidence: 0.85,
       });
@@ -167,7 +167,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
             recommended_fix: `Remove "${check.pattern}" from your CSP. Use nonces or hashes for legitimate inline scripts instead. Test your CSP at https://csp-evaluator.withgoogle.com/`,
             cvss_score: check.cvss,
             cwe_id: "CWE-693",
-            scanner_name: "CSP Analyzer",
+            scanner_name: "Bug-Finder/CSP",
             scanner_family: "web",
             confidence: 0.95,
           });
@@ -188,7 +188,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
         recommended_fix: "Switch from Content-Security-Policy-Report-Only to Content-Security-Policy to enforce the policy.",
         cvss_score: 5.4,
         cwe_id: "CWE-693",
-        scanner_name: "CSP Analyzer",
+        scanner_name: "Bug-Finder/CSP",
         scanner_family: "web",
         confidence: 0.98,
       });

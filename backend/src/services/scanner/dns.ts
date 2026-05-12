@@ -47,7 +47,7 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Ensure public-facing services only resolve to public IP addresses. Review your DNS configuration.",
           cvss_score: 5.3,
           cwe_id: "CWE-200",
-          scanner_name: "Nmap",
+          scanner_name: "Bug-Finder/Port-Scanner",
           scanner_family: "network",
           confidence: 0.9,
         });
@@ -65,7 +65,7 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       recommended_fix: "Verify the target URL is correct and DNS is properly configured.",
       cvss_score: 0,
       cwe_id: "CWE-200",
-      scanner_name: "Nmap",
+      scanner_name: "Bug-Finder/Port-Scanner",
       scanner_family: "network",
       confidence: 0.9,
     });
@@ -87,7 +87,7 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Add a TXT record: v=spf1 include:yourmailprovider.com -all",
         cvss_score: 5.3,
         cwe_id: "CWE-290",
-        scanner_name: "Nmap",
+        scanner_name: "Bug-Finder/Port-Scanner",
         scanner_family: "network",
         confidence: 0.9,
       });
@@ -111,7 +111,7 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Add DMARC: _dmarc.yourdomain.com TXT v=DMARC1; p=reject; rua=mailto:dmarc@yourdomain.com",
           cvss_score: 4.3,
           cwe_id: "CWE-290",
-          scanner_name: "Nmap",
+          scanner_name: "Bug-Finder/Port-Scanner",
           scanner_family: "network",
           confidence: 0.9,
         });

@@ -47,7 +47,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Implement authentication for all gRPC services. Enable TLS. Disable gRPC server reflection in production. Apply input validation on all message fields.",
         cvss_score: 3.7,
         cwe_id: "CWE-284",
-        scanner_name: "gRPC Scanner",
+        scanner_name: "Bug-Finder/gRPC",
         scanner_family: "api",
         confidence: 0.85,
       });
@@ -70,7 +70,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Disable gRPC server reflection in production: remove grpc.reflection.v1alpha.ServerReflectionServer from your gRPC server setup.",
           cvss_score: 5.3,
           cwe_id: "CWE-200",
-          scanner_name: "gRPC Scanner",
+          scanner_name: "Bug-Finder/gRPC",
           scanner_family: "api",
           confidence: 0.9,
         });
@@ -98,7 +98,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Audit all HTTP/2 endpoints for gRPC services. Ensure gRPC services enforce authentication. Disable reflection.",
         cvss_score: 0,
         cwe_id: "CWE-284",
-        scanner_name: "gRPC Scanner",
+        scanner_name: "Bug-Finder/gRPC",
         scanner_family: "api",
         confidence: 0.75,
       });
@@ -130,7 +130,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Restrict access to gRPC admin services. Require authentication for all gRPC endpoints.",
           cvss_score: 5.3,
           cwe_id: "CWE-284",
-          scanner_name: "gRPC Scanner",
+          scanner_name: "Bug-Finder/gRPC",
           scanner_family: "api",
           confidence: 0.8,
         });

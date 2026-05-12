@@ -46,7 +46,7 @@ export async function runRedirectCheck(ctx: ScanContext): Promise<ScanFinding[]>
           recommended_fix: "Validate redirect destinations against a whitelist of allowed URLs. Never use user-supplied input directly as a redirect destination.",
           cvss_score: 6.1,
           cwe_id: "CWE-601",
-          scanner_name: "Acunetix",
+          scanner_name: "Bug-Finder",
           scanner_family: "web",
           confidence: 0.95,
         });

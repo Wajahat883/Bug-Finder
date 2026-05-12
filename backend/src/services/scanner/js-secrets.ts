@@ -105,7 +105,7 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
           recommended_fix: pattern.fix,
           cvss_score: pattern.cvss,
           cwe_id: pattern.cwe,
-          scanner_name: "Trufflehog",
+          scanner_name: "Bug-Finder/Secrets",
           scanner_family: "web",
           confidence: 0.88,
         });
@@ -137,7 +137,7 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
               recommended_fix: "Block access to .env files via web server configuration. Add /.env to .gitignore and rotate any exposed credentials immediately.",
               cvss_score: 9.8,
               cwe_id: "CWE-538",
-              scanner_name: "Trufflehog",
+              scanner_name: "Bug-Finder/Secrets",
               scanner_family: "web",
               confidence: 0.99,
             });
@@ -169,7 +169,7 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
           recommended_fix: "Do not rely on robots.txt for security through obscurity. Protect sensitive paths with proper authentication and access controls.",
           cvss_score: 3.1,
           cwe_id: "CWE-200",
-          scanner_name: "Trufflehog",
+          scanner_name: "Bug-Finder/Secrets",
           scanner_family: "web",
           confidence: 0.95,
         });

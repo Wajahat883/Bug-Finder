@@ -53,7 +53,7 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: `Add HttpOnly flag: Set-Cookie: ${cookieName}=<value>; HttpOnly; Secure; SameSite=Strict`,
         cvss_score: 5.4,
         cwe_id: "CWE-1004",
-        scanner_name: "Burp Suite",
+        scanner_name: "Bug-Finder",
         scanner_family: "web",
         confidence: 0.98,
       });
@@ -72,7 +72,7 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: `Add Secure flag: Set-Cookie: ${cookieName}=<value>; HttpOnly; Secure; SameSite=Strict`,
         cvss_score: 5.3,
         cwe_id: "CWE-614",
-        scanner_name: "Burp Suite",
+        scanner_name: "Bug-Finder",
         scanner_family: "web",
         confidence: 0.95,
       });
@@ -90,7 +90,7 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: `Add SameSite=Strict or SameSite=Lax to the cookie.`,
         cvss_score: 4.3,
         cwe_id: "CWE-352",
-        scanner_name: "Burp Suite",
+        scanner_name: "Bug-Finder",
         scanner_family: "web",
         confidence: 0.9,
       });

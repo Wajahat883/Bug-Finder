@@ -54,7 +54,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
               recommended_fix: "Enforce authentication and authorization on all API versions. Decommission old API versions. Apply the same security controls to every version.",
               cvss_score: 7.5,
               cwe_id: "CWE-285",
-              scanner_name: "API Scanner",
+              scanner_name: "Bug-Finder/API",
               scanner_family: "api",
               confidence: 0.8,
             });
@@ -97,7 +97,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
           recommended_fix: "Use an allowlist (whitelist) of permitted fields. Never blindly bind all request body fields to your data model. Use DTOs/schemas to explicitly permit only safe fields.",
           cvss_score: 9.1,
           cwe_id: "CWE-915",
-          scanner_name: "API Scanner",
+          scanner_name: "Bug-Finder/API",
           scanner_family: "api",
           confidence: 0.75,
         });
@@ -135,7 +135,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
         recommended_fix: "Disable TRACE method in your web server configuration. In Apache: TraceEnable Off. In Nginx: if ($request_method = TRACE) { return 405; }",
         cvss_score: 5.4,
         cwe_id: "CWE-16",
-        scanner_name: "API Scanner",
+        scanner_name: "Bug-Finder/API",
         scanner_family: "api",
         confidence: 0.9,
       });
@@ -156,7 +156,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
           recommended_fix: "Require authentication and authorization for all DELETE requests. Validate that the requesting user owns the resource.",
           cvss_score: 8.1,
           cwe_id: "CWE-306",
-          scanner_name: "API Scanner",
+          scanner_name: "Bug-Finder/API",
           scanner_family: "api",
           confidence: 0.8,
         });

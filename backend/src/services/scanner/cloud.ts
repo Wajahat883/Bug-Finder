@@ -45,7 +45,7 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Disable public bucket access. Enable bucket ACLs. Review all stored files for sensitive content. Enable bucket logging and versioning. Use signed URLs for temporary access.",
         cvss_score: 9.8,
         cwe_id: "CWE-284",
-        scanner_name: "Cloud Scanner",
+        scanner_name: "Bug-Finder/Cloud",
         scanner_family: "cloud",
         confidence: 0.95,
       });
@@ -61,7 +61,7 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Confirm the bucket access policy is correct. Enable bucket-level MFA delete. Monitor for accidental permission changes.",
         cvss_score: 3.1,
         cwe_id: "CWE-284",
-        scanner_name: "Cloud Scanner",
+        scanner_name: "Bug-Finder/Cloud",
         scanner_family: "cloud",
         confidence: 0.85,
       });
@@ -96,7 +96,7 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Block web access to Docker-related files. Never expose Docker registry or management APIs to the internet. Use Docker secrets for credential management.",
         cvss_score: check.cvss,
         cwe_id: "CWE-284",
-        scanner_name: "Cloud Scanner",
+        scanner_name: "Bug-Finder/Cloud",
         scanner_family: "cloud",
         confidence: 0.9,
       });
@@ -142,7 +142,7 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Restrict access to management APIs and configuration endpoints. Use network policies to prevent external access. Enable Kubernetes RBAC. Remove actuator endpoints in production.",
           cvss_score: check.cvss,
           cwe_id: "CWE-284",
-          scanner_name: "Cloud Scanner",
+          scanner_name: "Bug-Finder/Cloud",
           scanner_family: "cloud",
           confidence: 0.9,
         });

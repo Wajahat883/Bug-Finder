@@ -74,7 +74,7 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
         recommended_fix: "Normalize or strip unkeyed headers before caching. Include all headers that influence the response in the cache key. Set Cache-Control: no-store for sensitive pages.",
         cvss_score: isCached ? 8.1 : 5.3,
         cwe_id: "CWE-444",
-        scanner_name: "Cache Poisoning Scanner",
+        scanner_name: "Bug-Finder/Cache",
         scanner_family: "web",
         confidence: isCached ? 0.85 : 0.6,
       });
@@ -101,7 +101,7 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
             recommended_fix: `Strip ${test.header} header at the load balancer/reverse proxy layer. Never honor URL override headers from untrusted clients.`,
             cvss_score: 8.1,
             cwe_id: "CWE-444",
-            scanner_name: "Cache Poisoning Scanner",
+            scanner_name: "Bug-Finder/Cache",
             scanner_family: "web",
             confidence: 0.8,
           });

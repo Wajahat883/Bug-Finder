@@ -96,7 +96,7 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
       recommended_fix: "Audit all subdomains. Decommission unused ones. Apply the same security controls to every subdomain.",
       cvss_score: 5.3,
       cwe_id: "CWE-200",
-      scanner_name: "Subfinder",
+      scanner_name: "Bug-Finder/Subdomain",
       scanner_family: "network",
       confidence: 0.95,
     });
@@ -117,7 +117,7 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
         recommended_fix: `Restrict access to ${sub}. Apply IP allowlisting or VPN requirement. Ensure it has the same security posture as production.`,
         cvss_score: 5.3,
         cwe_id: "CWE-200",
-        scanner_name: "Subfinder",
+        scanner_name: "Bug-Finder/Subdomain",
         scanner_family: "network",
         confidence: 0.8,
       });

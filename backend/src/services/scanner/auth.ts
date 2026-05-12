@@ -150,7 +150,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           "Lock accounts after 10 failed attempts and alert the user via email.",
         cvss_score: 7.5,
         cwe_id: "CWE-307",
-        scanner_name: "Auth Scanner",
+        scanner_name: "Bug-Finder/Auth",
         scanner_family: "web",
         confidence: 0.85,
       });
@@ -201,7 +201,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               "Run automated credential audits as part of CI/CD.",
             cvss_score: 9.8,
             cwe_id: "CWE-798",
-            scanner_name: "Auth Scanner",
+            scanner_name: "Bug-Finder/Auth",
             scanner_family: "web",
             confidence: 0.97,
           });
@@ -248,7 +248,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               "Show a password strength meter in the UI.",
             cvss_score: 5.3,
             cwe_id: "CWE-521",
-            scanner_name: "Auth Scanner",
+            scanner_name: "Bug-Finder/Auth",
             scanner_family: "web",
             confidence: 0.8,
           });
@@ -304,7 +304,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             "Apply consistent response timing to prevent timing-based enumeration.",
           cvss_score: 5.3,
           cwe_id: "CWE-203",
-          scanner_name: "Auth Scanner",
+          scanner_name: "Bug-Finder/Auth",
           scanner_family: "web",
           confidence: 0.75,
         });
@@ -342,7 +342,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             "Implement role-based access control.",
           cvss_score: 7.5,
           cwe_id: "CWE-306",
-          scanner_name: "Auth Scanner",
+          scanner_name: "Bug-Finder/Auth",
           scanner_family: "web",
           confidence: 0.85,
         });
@@ -394,7 +394,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               "\"If an account with this email exists, a reset link has been sent.\"",
             cvss_score: 3.7,
             cwe_id: "CWE-204",
-            scanner_name: "Auth Scanner",
+            scanner_name: "Bug-Finder/Auth",
             scanner_family: "web",
             confidence: 0.8,
           });

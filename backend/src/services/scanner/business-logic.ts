@@ -46,7 +46,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
           recommended_fix: "Validate all price and quantity values server-side. Reject negative, zero, or unreasonably large values. Never trust client-supplied pricing — always calculate server-side from your product catalog.",
           cvss_score: 9.1,
           cwe_id: "CWE-840",
-          scanner_name: "Logic Tester",
+          scanner_name: "Bug-Finder/Logic",
           scanner_family: "web",
           confidence: 0.8,
         });
@@ -74,7 +74,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
           recommended_fix: "Validate quantity/count values server-side. Reject zero, negative, or non-integer quantities for physical goods.",
           cvss_score: 7.5,
           cwe_id: "CWE-840",
-          scanner_name: "Logic Tester",
+          scanner_name: "Bug-Finder/Logic",
           scanner_family: "web",
           confidence: 0.7,
         });
@@ -109,7 +109,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
           recommended_fix: "Enforce role-based access control on all admin endpoints. Use middleware to verify authentication and admin role before handling requests.",
           cvss_score: 9.8,
           cwe_id: "CWE-269",
-          scanner_name: "Logic Tester",
+          scanner_name: "Bug-Finder/Logic",
           scanner_family: "web",
           confidence: 0.85,
         });
@@ -152,7 +152,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
         recommended_fix: "Use database-level atomic operations or distributed locks. For coupons/credits, use optimistic or pessimistic locking. Validate and update in a single atomic transaction.",
         cvss_score: 7.5,
         cwe_id: "CWE-362",
-        scanner_name: "Logic Tester",
+        scanner_name: "Bug-Finder/Logic",
         scanner_family: "web",
         confidence: 0.75,
       });

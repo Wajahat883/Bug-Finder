@@ -163,7 +163,7 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
         recommended_fix: sig.fix,
         cvss_score: sig.cvss,
         cwe_id: sig.cwe,
-        scanner_name: "Wappalyzer",
+        scanner_name: "Bug-Finder/Fingerprint",
         scanner_family: "web",
         confidence: 0.88,
       });
@@ -188,7 +188,7 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
         recommended_fix: `Restrict access to ${path} to trusted IP addresses only. Consider moving admin interfaces to a separate internal network.`,
         cvss_score: 7.5,
         cwe_id: "CWE-284",
-        scanner_name: "Wappalyzer",
+        scanner_name: "Bug-Finder/Fingerprint",
         scanner_family: "web",
         confidence: 0.9,
       });

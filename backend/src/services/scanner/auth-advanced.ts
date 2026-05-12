@@ -74,7 +74,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
           recommended_fix: "Remove all default credentials immediately. Enforce password changes on first login. Implement account lockout after failed attempts.",
           cvss_score: 9.8,
           cwe_id: "CWE-1391",
-          scanner_name: "Hydra",
+          scanner_name: "Bug-Finder/Auth",
           scanner_family: "auth",
           confidence: 0.97,
         });
@@ -114,7 +114,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
               recommended_fix: "Enforce minimum 12-character passwords requiring uppercase, lowercase, numbers, and symbols. Reject passwords from common password lists.",
               cvss_score: 6.2,
               cwe_id: "CWE-521",
-              scanner_name: "Hydra",
+              scanner_name: "Bug-Finder/Auth",
               scanner_family: "auth",
               confidence: 0.8,
             });
@@ -143,7 +143,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
           recommended_fix: "Implement TOTP-based 2FA (Google Authenticator, Authy). Consider hardware key support (WebAuthn/FIDO2). At minimum, send OTP via email/SMS.",
           cvss_score: 5.9,
           cwe_id: "CWE-308",
-          scanner_name: "Hydra",
+          scanner_name: "Bug-Finder/Auth",
           scanner_family: "auth",
           confidence: 0.7,
         });

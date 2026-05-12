@@ -169,7 +169,7 @@ export async function runReconCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: check.fix,
         cvss_score: check.cvss,
         cwe_id: check.cwe,
-        scanner_name: "Nikto",
+        scanner_name: "Bug-Finder/Recon",
         scanner_family: "web",
         confidence: 0.92,
       });

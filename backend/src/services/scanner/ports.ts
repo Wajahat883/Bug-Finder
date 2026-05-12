@@ -99,7 +99,7 @@ export async function runPortScan(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: `Firewall port ${info.port} to restrict access. Only expose services that must be publicly accessible.`,
         cvss_score: info.cvss,
         cwe_id: info.cwe,
-        scanner_name: "Nmap",
+        scanner_name: "Bug-Finder/Port-Scanner",
         scanner_family: "network",
         confidence: 0.98,
       });

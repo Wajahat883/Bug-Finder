@@ -60,7 +60,7 @@ export async function runSstiCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Never pass user input directly to a template engine. Use a sandboxed environment or disable expression evaluation for user-controlled inputs.",
             cvss_score: 9.8,
             cwe_id: "CWE-94",
-            scanner_name: "SSTI Scanner",
+            scanner_name: "Bug-Finder/SSTI",
             scanner_family: "web",
             confidence: 0.92,
           });
@@ -112,7 +112,7 @@ export async function runCrlfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Strip or reject CRLF characters (\\r\\n) from all URL parameters used in HTTP responses. Encode output when inserting user input into headers.",
             cvss_score: 6.1,
             cwe_id: "CWE-113",
-            scanner_name: "CRLF Scanner",
+            scanner_name: "Bug-Finder/CRLF",
             scanner_family: "web",
             confidence: 0.9,
           });
@@ -163,7 +163,7 @@ export async function runPrototypePollutionCheck(ctx: ScanContext): Promise<Scan
               recommended_fix: "Sanitize JSON input to reject __proto__, constructor, and prototype keys. Use Object.create(null) for objects used as maps. Apply a JSON schema validator that explicitly forbids prototype pollution payloads.",
               cvss_score: 7.5,
               cwe_id: "CWE-1321",
-              scanner_name: "Prototype Pollution",
+              scanner_name: "Bug-Finder/ProtoPollution",
               scanner_family: "web",
               confidence: 0.75,
             });

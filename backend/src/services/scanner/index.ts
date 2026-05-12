@@ -44,6 +44,7 @@ import { runNucleiScan } from "./nuclei";
 import { runPlaywrightScan } from "./playwright";
 import { runOsintEnrichment } from "./osint";
 import { runCustomRules } from "./custom-rules";
+import { runSsrfCheck } from "./ssrf";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -103,6 +104,7 @@ const PIPELINE_STANDARD = [
   { name: "Dep Confusion",           fn: (ctx: ScanContext) => runDependencyConfusionCheck(ctx) },
   { name: "gRPC Detection",          fn: (ctx: ScanContext) => runGrpcCheck(ctx) },
   { name: "Cache Poisoning",         fn: (ctx: ScanContext) => runCachePoisoningCheck(ctx) },
+  { name: "SSRF",                    fn: (ctx: ScanContext) => runSsrfCheck(ctx) },
   { name: "OWASP ZAP Active Scan",   fn: (ctx: ScanContext) => runZapScan(ctx) },
   { name: "Nuclei Templates",        fn: (ctx: ScanContext) => runNucleiScan(ctx) },
   { name: "Playwright Browser",      fn: (ctx: ScanContext) => runPlaywrightScan(ctx) },
@@ -122,6 +124,7 @@ const PIPELINE_DEEP = [
   { name: "File Upload",             fn: (ctx: ScanContext) => runFileUploadCheck(ctx) },
   { name: "Request Smuggling",       fn: (ctx: ScanContext) => runRequestSmugglingCheck(ctx) },
   { name: "Business Logic",          fn: (ctx: ScanContext) => runBusinessLogicCheck(ctx) },
+  { name: "SSRF",                    fn: (ctx: ScanContext) => runSsrfCheck(ctx) },
 ];
 
 function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled: boolean, bugBountyMode: boolean) {

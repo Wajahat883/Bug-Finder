@@ -48,7 +48,7 @@ export async function runCorsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             "Replace wildcard CORS with a strict allowlist: Access-Control-Allow-Origin: https://yourdomain.com",
           cvss_score: 7.5,
           cwe_id: "CWE-346",
-          scanner_name: "OWASP ZAP",
+          scanner_name: "Bug-Finder",
           scanner_family: "web",
           confidence: 0.97,
         });
@@ -69,7 +69,7 @@ export async function runCorsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             "Validate Origins against a static allowlist. Never reflect arbitrary origins. Do not combine ACAO: * with credentials.",
           cvss_score: severity === "critical" ? 9.1 : 7.5,
           cwe_id: "CWE-346",
-          scanner_name: "OWASP ZAP",
+          scanner_name: "Bug-Finder",
           scanner_family: "web",
           confidence: 0.93,
         });
@@ -88,7 +88,7 @@ export async function runCorsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Remove null from the allowed origins list.",
           cvss_score: 6.5,
           cwe_id: "CWE-346",
-          scanner_name: "OWASP ZAP",
+          scanner_name: "Bug-Finder",
           scanner_family: "web",
           confidence: 0.9,
         });

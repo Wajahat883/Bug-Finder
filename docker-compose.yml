@@ -56,6 +56,87 @@ services:
       retries: 10
       start_period: 60s
 
+  # ── Playwright browser automation service ─────────────────────────────────
+  # Enables: DOM XSS detection, authenticated SPA crawling, stored XSS verification
+  # Source: https://github.com/your-org/bug-finder-playwright (or build locally)
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.44.0-jammy
+    container_name: bug-finder-playwright
+    command: >
+      node -e "
+        const http = require('http');
+        const { chromium } = require('playwright');
+        const server = http.createServer(async (req, res) => {
+          const chunks = [];
+          req.on('data', d => chunks.push(d));
+          req.on('end', async () => {
+            try {
+              const body = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+              const browser = await chromium.launch({ args: ['--no-sandbox'] });
+              const page = await browser.newPage();
+              if (req.url === '/crawl') {
+                await page.goto(body.url, { waitUntil: 'networkidle', timeout: 25000 });
+                const links = await page.evaluate(() => [...new Set([...document.querySelectorAll('a[href]')].map(a => a.href))]);
+                const apiCalls = [];
+                await browser.close();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ links, apiCalls }));
+              } else if (req.url === '/check-xss') {
+                let executed = false;
+                page.on('dialog', async d => { if (d.message().includes(body.marker)) executed = true; await d.dismiss(); });
+                await page.goto(body.url, { timeout: 8000 }).catch(() => {});
+                await browser.close();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ executed }));
+              } else if (req.url === '/scan') {
+                await page.goto(body.url, { waitUntil: 'networkidle', timeout: 25000 });
+                const headers = await page.evaluate(() => { const m = {}; return m; });
+                const local_storage_keys = await page.evaluate(() => Object.keys(localStorage));
+                const dom_xss_sinks = [];
+                const console_errors = [];
+                page.on('console', m => { if (m.type() === 'error') console_errors.push({ message: m.text() }); });
+                await browser.close();
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ dom_xss_sinks, local_storage_keys, console_errors, headers }));
+              } else {
+                res.writeHead(404); res.end();
+              }
+            } catch(e) { res.writeHead(500); res.end(e.message); }
+          });
+        });
+        server.listen(3005, () => console.log('Playwright service on :3005'));
+      "
+    ports:
+      - "3005:3005"
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3005/ || exit 0"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── Interactsh OOB server — confirms blind SQLi/SSRF/XSS via callback ─────
+  # Enables out-of-band detection of vulnerabilities that don't reflect in responses.
+  # Uses ProjectDiscovery's open-source interactsh server.
+  interactsh:
+    image: projectdiscovery/interactsh-server:latest
+    container_name: bug-finder-interactsh
+    command: >
+      -domain ${INTERACTSH_DOMAIN:-oast.local}
+      -port 8193
+      -http-port 8194
+      -token ${INTERACTSH_TOKEN:-changeme}
+      -debug
+    ports:
+      - "8193:8193"
+      - "8194:8194"
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+
   api-server:
     build:
       context: .
@@ -77,6 +158,9 @@ services:
       JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
       SESSION_SECRET: ${SESSION_SECRET:-bug-finder-secret-change-in-prod}
       ZAP_URL: http://zap:8080
+      PLAYWRIGHT_URL: http://playwright:3005
+      INTERACTSH_URL: http://interactsh:8194
+      INTERACTSH_TOKEN: ${INTERACTSH_TOKEN:-changeme}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}

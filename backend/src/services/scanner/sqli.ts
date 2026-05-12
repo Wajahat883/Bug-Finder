@@ -93,7 +93,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               recommended_fix: "Use parameterized queries or prepared statements. Never concatenate user input into SQL strings.",
               cvss_score: 9.8,
               cwe_id: "CWE-89",
-              scanner_name: "SQLi-Scanner",
+              scanner_name: "Bug-Finder/SQLi",
               scanner_family: "web",
               confidence: 0.95,
             });
@@ -117,7 +117,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               recommended_fix: "Investigate the 500 error. Use parameterized queries to prevent SQL injection.",
               cvss_score: 7.5,
               cwe_id: "CWE-89",
-              scanner_name: "SQLi-Scanner",
+              scanner_name: "Bug-Finder/SQLi",
               scanner_family: "web",
               confidence: 0.65,
             });
@@ -172,7 +172,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
                 recommended_fix: "Use parameterized queries. This type of SQLi is confirmed even without visible errors — the application logic branches on query results.",
                 cvss_score: 9.1,
                 cwe_id: "CWE-89",
-                scanner_name: "SQLi-Scanner",
+                scanner_name: "Bug-Finder/SQLi",
                 scanner_family: "web",
                 confidence: 0.88,
               });
@@ -207,12 +207,84 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
                 recommended_fix: "Use parameterized queries or prepared statements immediately. Time-based blind SQLi is fully exploitable for data extraction via binary search.",
                 cvss_score: 9.8,
                 cwe_id: "CWE-89",
-                scanner_name: "SQLi-Scanner",
+                scanner_name: "Bug-Finder/SQLi",
                 scanner_family: "web",
                 confidence: 0.88,
               });
               emit({ type: "log", message: `  [SQLi-TimeBased] ${elapsed}ms delay at ${endpoint} param=${param}` });
               break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // ── POST/JSON body injection ───────────────────────────────────────────────
+  // Tests the same params but sends them in a JSON POST body — covers REST APIs
+  // that only accept application/json and ignore query strings
+  if (profile !== "quick") {
+    const jsonEndpoints = endpoints.slice(0, Math.min(3, budget));
+    for (const endpoint of jsonEndpoints) {
+      const baseline = await ctxFetch(ctx, endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      if (!baseline) continue;
+      const baseBody = await baseline.text().catch(() => "");
+      const baseLen = baseBody.length;
+
+      for (const param of TEST_PARAMS.slice(0, 4)) {
+        for (const probe of SQL_ERROR_PROBES.slice(0, 3)) {
+          const jsonKey = `${endpoint}:${param}:json-error`;
+          if (seen.has(jsonKey)) continue;
+
+          const res = await ctxFetch(ctx, endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ [param]: probe }),
+          });
+          if (!res) continue;
+
+          const body = (await res.text().catch(() => "")).toLowerCase();
+          const matchedPattern = SQL_ERROR_PATTERNS.find(p => body.includes(p));
+
+          if (matchedPattern) {
+            seen.add(jsonKey);
+            findings.push({
+              title: `SQL Injection (Error-Based) in JSON Body Parameter: ${param}`,
+              category: "Injection",
+              severity: "critical",
+              endpoint,
+              description: `The JSON body parameter "${param}" is vulnerable to SQL injection. The server returned a SQL error when the parameter was sent with a malicious payload via POST application/json.`,
+              evidence: `POST ${endpoint}\nContent-Type: application/json\nBody: ${JSON.stringify({ [param]: probe })}\n\nSQL Error Pattern: "${matchedPattern}"\nResponse snippet:\n${body.slice(Math.max(0, body.indexOf(matchedPattern) - 50), body.indexOf(matchedPattern) + 200)}`,
+              recommended_fix: "Use parameterized queries for all database operations. JSON body parameters are equally injectable if concatenated into queries.",
+              cvss_score: 9.8,
+              cwe_id: "CWE-89",
+              scanner_name: "Bug-Finder/SQLi",
+              scanner_family: "web",
+              confidence: 0.95,
+            });
+            emit({ type: "log", message: `  [SQLi-JSON-Error] Pattern "${matchedPattern}" via POST JSON at ${endpoint} field=${param}` });
+            break;
+          }
+
+          // 500 on POST
+          if (probe === "'" && res.status >= 500) {
+            const key500 = `${endpoint}:${param}:json-500`;
+            if (!seen.has(key500)) {
+              seen.add(key500);
+              findings.push({
+                title: `Possible SQL Injection in JSON Body — Server Error: ${param}`,
+                category: "Injection",
+                severity: "high",
+                endpoint,
+                description: `JSON field "${param}" caused a 500 error when injected with a single quote via POST application/json.`,
+                evidence: `POST ${endpoint}\nContent-Type: application/json\nBody: ${JSON.stringify({ [param]: probe })}\nBaseline: ${baseLen}b / HTTP ${baseline.status}\nWith payload: HTTP ${res.status}`,
+                recommended_fix: "Use parameterized queries. Investigate the 500 error.",
+                cvss_score: 7.5,
+                cwe_id: "CWE-89",
+                scanner_name: "Bug-Finder/SQLi",
+                scanner_family: "web",
+                confidence: 0.65,
+              });
             }
           }
         }

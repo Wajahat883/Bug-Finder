@@ -49,7 +49,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
         recommended_fix: "Disable introspection in production. Most GraphQL libraries support this: e.g., Apollo Server's `introspection: false` option.",
         cvss_score: 5.3,
         cwe_id: "CWE-200",
-        scanner_name: "GraphQL Scanner",
+        scanner_name: "Bug-Finder/GraphQL",
         scanner_family: "web",
         confidence: 0.97,
       });
@@ -74,7 +74,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
             recommended_fix: "Disable query batching or implement per-batch rate limiting and query depth limits.",
             cvss_score: 5.3,
             cwe_id: "CWE-770",
-            scanner_name: "GraphQL Scanner",
+            scanner_name: "Bug-Finder/GraphQL",
             scanner_family: "web",
             confidence: 0.9,
           });
@@ -101,7 +101,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
             recommended_fix: "Disable field suggestions in production GraphQL configuration.",
             cvss_score: 3.1,
             cwe_id: "CWE-200",
-            scanner_name: "GraphQL Scanner",
+            scanner_name: "Bug-Finder/GraphQL",
             scanner_family: "web",
             confidence: 0.85,
           });
@@ -139,7 +139,7 @@ export async function runWebSocketCheck(ctx: ScanContext): Promise<ScanFinding[]
       recommended_fix: "Validate the Origin header on WebSocket handshake. Reject connections from unexpected origins. Use authentication tokens in the WebSocket handshake.",
       cvss_score: 5.4,
       cwe_id: "CWE-346",
-      scanner_name: "WebSocket Scanner",
+      scanner_name: "Bug-Finder/WebSocket",
       scanner_family: "web",
       confidence: 0.9,
     });

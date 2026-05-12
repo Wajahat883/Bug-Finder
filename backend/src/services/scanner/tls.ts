@@ -61,7 +61,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Enable TLS 1.2+ on the server. Obtain a certificate from Let's Encrypt (free) or a commercial CA.",
         cvss_score: 7.5,
         cwe_id: "CWE-319",
-        scanner_name: "TLS-Scanner",
+        scanner_name: "Bug-Finder/TLS",
         scanner_family: "network",
         confidence: 0.95,
       });
@@ -78,7 +78,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Add a 301 permanent redirect from HTTP to HTTPS: return 301 https://$host$request_uri;",
         cvss_score: 5.3,
         cwe_id: "CWE-319",
-        scanner_name: "TLS-Scanner",
+        scanner_name: "Bug-Finder/TLS",
         scanner_family: "network",
         confidence: 0.92,
       });
@@ -109,7 +109,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Disable TLS 1.0 and 1.1. Configure minimum TLS version to 1.2:\nssl_protocols TLSv1.2 TLSv1.3;",
           cvss_score: 6.8,
           cwe_id: "CWE-326",
-          scanner_name: "TLS-Scanner",
+          scanner_name: "Bug-Finder/TLS",
           scanner_family: "network",
           confidence: 0.98,
         });
@@ -124,7 +124,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Disable TLS 1.1. Allow only TLS 1.2 and TLS 1.3.",
           cvss_score: 5.3,
           cwe_id: "CWE-326",
-          scanner_name: "TLS-Scanner",
+          scanner_name: "Bug-Finder/TLS",
           scanner_family: "network",
           confidence: 0.95,
         });
@@ -144,7 +144,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Configure strong cipher suites only:\nssl_ciphers 'ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305';",
           cvss_score: 7.4,
           cwe_id: "CWE-327",
-          scanner_name: "TLS-Scanner",
+          scanner_name: "Bug-Finder/TLS",
           scanner_family: "network",
           confidence: 0.95,
         });
@@ -166,7 +166,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Renew the TLS certificate immediately. Use Let's Encrypt with auto-renewal to prevent future expirations.",
             cvss_score: 9.1,
             cwe_id: "CWE-298",
-            scanner_name: "TLS-Scanner",
+            scanner_name: "Bug-Finder/TLS",
             scanner_family: "network",
             confidence: 1.0,
           });
@@ -181,7 +181,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Renew the certificate immediately. Configure auto-renewal with certbot: certbot renew --pre-hook 'nginx -t'",
             cvss_score: 7.5,
             cwe_id: "CWE-298",
-            scanner_name: "TLS-Scanner",
+            scanner_name: "Bug-Finder/TLS",
             scanner_family: "network",
             confidence: 1.0,
           });
@@ -196,7 +196,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Schedule certificate renewal. Enable auto-renewal with certbot or your CA's ACME client.",
             cvss_score: 4.3,
             cwe_id: "CWE-298",
-            scanner_name: "TLS-Scanner",
+            scanner_name: "Bug-Finder/TLS",
             scanner_family: "network",
             confidence: 1.0,
           });
@@ -218,7 +218,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Replace the self-signed certificate with one from a trusted CA. Let's Encrypt provides free trusted certificates.",
             cvss_score: 5.9,
             cwe_id: "CWE-295",
-            scanner_name: "TLS-Scanner",
+            scanner_name: "Bug-Finder/TLS",
             scanner_family: "network",
             confidence: 0.95,
           });
@@ -242,7 +242,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Add: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
         cvss_score: 5.3,
         cwe_id: "CWE-319",
-        scanner_name: "TLS-Scanner",
+        scanner_name: "Bug-Finder/TLS",
         scanner_family: "network",
         confidence: 0.95,
       });
@@ -258,7 +258,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Update to: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
           cvss_score: 3.1,
           cwe_id: "CWE-319",
-          scanner_name: "TLS-Scanner",
+          scanner_name: "Bug-Finder/TLS",
           scanner_family: "network",
           confidence: 0.9,
         });
@@ -275,7 +275,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Set max-age to at least 31536000 (1 year) for HSTS preload eligibility.",
           cvss_score: 3.1,
           cwe_id: "CWE-319",
-          scanner_name: "TLS-Scanner",
+          scanner_name: "Bug-Finder/TLS",
           scanner_family: "network",
           confidence: 0.95,
         });

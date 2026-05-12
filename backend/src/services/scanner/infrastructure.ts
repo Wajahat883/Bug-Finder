@@ -65,7 +65,7 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
       recommended_fix: "Ensure WAF rules are regularly updated. Test WAF bypass resistance. Confirm WAF is configured to block common attack patterns.",
       cvss_score: 0,
       cwe_id: "CWE-693",
-      scanner_name: "WAF Detector",
+      scanner_name: "Bug-Finder/WAF",
       scanner_family: "infrastructure",
       confidence: 0.85,
     });
@@ -81,7 +81,7 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
       recommended_fix: "Consider deploying a WAF (Cloudflare, AWS WAF, ModSecurity) to filter malicious traffic and protect against common web attacks.",
       cvss_score: 5.3,
       cwe_id: "CWE-693",
-      scanner_name: "WAF Detector",
+      scanner_name: "Bug-Finder/WAF",
       scanner_family: "infrastructure",
       confidence: 0.75,
     });
@@ -109,7 +109,7 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
       recommended_fix: "Ensure all backend nodes have identical security configurations. Test each node for vulnerabilities independently. Confirm session persistence is properly configured.",
       cvss_score: 0,
       cwe_id: "CWE-200",
-      scanner_name: "LB Detector",
+      scanner_name: "Bug-Finder/Infra",
       scanner_family: "infrastructure",
       confidence: 0.8,
     });
@@ -129,7 +129,7 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
       recommended_fix: "Configure your CDN/proxy to strip these headers from responses. Ensure the origin IP is not disclosed in any headers, error pages, or SSL certificates.",
       cvss_score: 5.3,
       cwe_id: "CWE-200",
-      scanner_name: "WAF Detector",
+      scanner_name: "Bug-Finder/WAF",
       scanner_family: "infrastructure",
       confidence: 0.9,
     });

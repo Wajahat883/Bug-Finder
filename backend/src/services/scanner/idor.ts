@@ -71,7 +71,7 @@ export async function runIdorCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Require authentication on all API endpoints. Return HTTP 401 for unauthenticated requests. Implement object-level ownership checks.",
         cvss_score: 9.1,
         cwe_id: "CWE-639",
-        scanner_name: "Burp Suite",
+        scanner_name: "Bug-Finder",
         scanner_family: "web",
         confidence: 0.95,
       });
@@ -107,7 +107,7 @@ export async function runIdorCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Verify object ownership on every request: ensure the authenticated user owns the requested resource. Use UUIDs instead of sequential integers. Implement row-level authorization in database queries.",
         cvss_score: 7.5,
         cwe_id: "CWE-639",
-        scanner_name: "Burp Suite",
+        scanner_name: "Bug-Finder",
         scanner_family: "web",
         confidence,
       });
