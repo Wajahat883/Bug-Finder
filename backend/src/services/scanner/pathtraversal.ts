@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const TRAVERSAL_PROBES = [
   "../../../etc/passwd",
@@ -27,7 +27,7 @@ export async function runPathTraversalCheck(ctx: ScanContext): Promise<ScanFindi
     for (const param of TRAVERSAL_PARAMS.slice(0, 3)) {
       for (const probe of TRAVERSAL_PROBES.slice(0, 2)) {
         const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${probe}`;
-        const res = await safeFetch(testUrl);
+        const res = await ctxFetch(ctx, testUrl);
         if (!res) continue;
 
         const body = await res.text().catch(() => "");
@@ -68,7 +68,7 @@ export async function runPathTraversalCheck(ctx: ScanContext): Promise<ScanFindi
   for (const endpoint of endpoints.slice(0, 3)) {
     for (const param of SSRF_PARAMS.slice(0, 3)) {
       const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(SSRF_TARGET)}`;
-      const res = await safeFetch(testUrl);
+      const res = await ctxFetch(ctx, testUrl);
       if (!res) continue;
 
       const body = await res.text().catch(() => "");

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const STATE_CHANGING_PATHS = [
   "/api/user", "/api/users", "/api/profile", "/api/settings", "/api/account",
@@ -22,7 +22,7 @@ export async function runCsrfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const seen = new Set<string>();
 
   // Check main page for forms without CSRF tokens
-  const mainRes = await safeFetch(targetUrl, { redirect: "follow" });
+  const mainRes = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (mainRes) {
     const body = await mainRes.text().catch(() => "");
     const forms = body.match(/<form[^>]*>[\s\S]*?<\/form>/gi) ?? [];
@@ -68,7 +68,7 @@ export async function runCsrfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     if (seen.has(endpoint)) continue;
 
     // Send a state-changing request without CSRF token/credentials
-    const r = await safeFetch(endpoint, {
+    const r = await ctxFetch(ctx, endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Origin: "https://evil.com", Referer: "https://evil.com" },
       body: JSON.stringify({ test: "csrf-probe" }),

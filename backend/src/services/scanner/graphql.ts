@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const GRAPHQL_PATHS = ["/graphql", "/api/graphql", "/gql", "/query", "/v1/graphql", "/api/v1/graphql"];
 
@@ -26,7 +26,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
     const url = `${base.origin}${path}`;
 
     // Test introspection
-    const introRes = await safeFetch(url, {
+    const introRes = await ctxFetch(ctx, url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: INTROSPECTION_QUERY,
@@ -55,7 +55,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
       });
 
       // Test query batching
-      const batchRes = await safeFetch(url, {
+      const batchRes = await ctxFetch(ctx, url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: BATCH_QUERY,
@@ -83,7 +83,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
       }
 
       // Test field suggestions (info disclosure)
-      const typoRes = await safeFetch(url, {
+      const typoRes = await ctxFetch(ctx, url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: "{ usr { email } }" }),
@@ -124,7 +124,7 @@ export async function runWebSocketCheck(ctx: ScanContext): Promise<ScanFinding[]
   emit({ type: "engine_start", engine: "WebSocket Scanner", message: "Detecting WebSocket endpoints" });
 
   // Detect WebSocket by checking upgrade headers and known paths
-  const wsRes = await safeFetch(targetUrl, {
+  const wsRes = await ctxFetch(ctx, targetUrl, {
     headers: { "Connection": "Upgrade", "Upgrade": "websocket", "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==", "Sec-WebSocket-Version": "13" },
   });
 

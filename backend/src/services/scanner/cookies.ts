@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
@@ -6,7 +6,7 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({ type: "engine_start", engine: "Burp Suite/Cookies", message: "Checking cookie security flags" });
 
-  const res = await safeFetch(targetUrl, { redirect: "follow" });
+  const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
     emit({ type: "engine_done", engine: "Burp Suite/Cookies", message: "Cookie check skipped (unreachable)" });
     return findings;
@@ -22,7 +22,7 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   if (setCookieHeaders.length === 0) {
     emit({ type: "log", message: "No Set-Cookie headers found on root" });
     // Try login page
-    const loginRes = await safeFetch(`${new URL(targetUrl).origin}/login`, { redirect: "follow" });
+    const loginRes = await ctxFetch(ctx, `${new URL(targetUrl).origin}/login`, { redirect: "follow" });
     if (loginRes) {
       loginRes.headers.forEach((value, key) => {
         if (key.toLowerCase() === "set-cookie") setCookieHeaders.push(value);

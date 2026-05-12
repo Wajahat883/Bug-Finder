@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const WAF_SIGNATURES: Array<{ name: string; header?: string; pattern?: RegExp; cookieName?: string }> = [
   { name: "Cloudflare", header: "cf-ray" },
@@ -26,7 +26,7 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
 
   emit({ type: "engine_start", engine: "WAF/LB Detector", message: "Detecting WAF, CDN, and load balancer infrastructure" });
 
-  const res = await safeFetch(targetUrl, { redirect: "follow" });
+  const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
     emit({ type: "log", message: "Target unreachable for infrastructure check" });
     emit({ type: "engine_done", engine: "WAF/LB Detector", message: "Skipped (unreachable)" });
@@ -90,7 +90,7 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
   // Load balancer detection via multiple requests
   const serverHeaders: string[] = [];
   for (let i = 0; i < 3; i++) {
-    const r = await safeFetch(targetUrl, { redirect: "follow" });
+    const r = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
     if (r) {
       const s = r.headers.get("server") ?? r.headers.get("x-served-by") ?? "";
       if (s) serverHeaders.push(s);

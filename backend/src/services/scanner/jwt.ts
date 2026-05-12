@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const COMMON_JWT_SECRETS = ["secret", "password", "123456", "jwt", "key", "auth", "token", "changeme", "test", "dev", "admin", "mysecret", "jwtSecret", "your-256-bit-secret"];
 
@@ -29,7 +29,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const apiBase = base.origin;
 
   // First check if the API uses JWT at all by hitting /api/auth/me or similar
-  const meRes = await safeFetch(`${apiBase}/api/auth/me`, {
+  const meRes = await ctxFetch(ctx, `${apiBase}/api/auth/me`, {
     headers: { "Accept": "application/json" },
   });
 
@@ -38,7 +38,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     const adminPayload = { id: 1, username: "admin", role: "admin", iat: Math.floor(Date.now() / 1000) };
     const algNoneToken = buildAlgNoneJwt(adminPayload);
 
-    const algNoneRes = await safeFetch(`${apiBase}/api/auth/me`, {
+    const algNoneRes = await ctxFetch(ctx, `${apiBase}/api/auth/me`, {
       headers: {
         "Authorization": `Bearer ${algNoneToken}`,
         "Accept": "application/json",
@@ -67,7 +67,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   }
 
   // Check for JWT in responses (detect if JWTs are being issued)
-  const loginRes = await safeFetch(`${apiBase}/api/auth/login`, {
+  const loginRes = await ctxFetch(ctx, `${apiBase}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: "test@test.com", password: "password" }),
@@ -145,7 +145,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       const h = base64UrlEncode(JSON.stringify(header));
       const p = base64UrlEncode(JSON.stringify(payload));
       const token = `${h}.${p}.invalidsignature`;
-      const probeRes = await safeFetch(ep, {
+      const probeRes = await ctxFetch(ctx, ep, {
         headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" },
       });
       if (probeRes && probeRes.status === 200) {

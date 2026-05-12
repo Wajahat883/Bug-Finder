@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const XXE_PROBE = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE xxetest [
@@ -46,7 +46,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     seen.add(endpoint);
 
     // Try standard XXE probe
-    const r = await safeFetch(endpoint, {
+    const r = await ctxFetch(ctx, endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/xml", Accept: "application/xml, text/xml, */*" },
       body: XXE_PROBE,
@@ -102,7 +102,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
 
     // Try SOAP endpoint
-    const soapR = await safeFetch(endpoint, {
+    const soapR = await ctxFetch(ctx, endpoint, {
       method: "POST",
       headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: "test" },
       body: SOAP_XXE_PROBE,
@@ -132,7 +132,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   }
 
   // Check if main endpoint accepts XML
-  const mainR = await safeFetch(targetUrl, {
+  const mainR = await ctxFetch(ctx, targetUrl, {
     method: "POST",
     headers: { "Content-Type": "application/xml" },
     body: XXE_PROBE,

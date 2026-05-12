@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 // PII and sensitive data patterns
 const SENSITIVE_PATTERNS = [
@@ -39,7 +39,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
   ];
 
   for (const endpoint of scanEndpoints.slice(0, budget + 3)) {
-    const r = await safeFetch(endpoint, { redirect: "follow" });
+    const r = await ctxFetch(ctx, endpoint, { redirect: "follow" });
     if (!r) continue;
 
     const body = await r.text().catch(() => "");
@@ -77,7 +77,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
 
   for (const errPath of ERROR_TRIGGER_PATHS.slice(0, budget)) {
     const url = `${base}${errPath}`;
-    const r = await safeFetch(url, { redirect: "manual" });
+    const r = await ctxFetch(ctx, url, { redirect: "manual" });
     if (!r) continue;
 
     const body = await r.text().catch(() => "");
@@ -140,7 +140,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
 
   // 3. CSP analysis
   emit({ type: "log", message: "Analyzing Content Security Policy..." });
-  const mainRes = await safeFetch(targetUrl, { redirect: "follow" });
+  const mainRes = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (mainRes) {
     const csp = mainRes.headers.get("content-security-policy") ?? mainRes.headers.get("content-security-policy-report-only");
 

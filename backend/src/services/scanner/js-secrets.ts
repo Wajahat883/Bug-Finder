@@ -90,6 +90,7 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
         seen.add(key);
 
         const offset = match.index ?? 0;
+        const lineNumber = code.slice(0, offset).split("\n").length;
         const context = code.slice(Math.max(0, offset - 30), offset + Math.min(match[0].length + 30, 100));
         // Redact the actual secret value in evidence
         const redacted = match[0].replace(/[a-zA-Z0-9_/+=]{8,}$/, "****REDACTED****");
@@ -100,7 +101,7 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
           severity: pattern.severity,
           endpoint: jsUrl,
           description: `A ${pattern.name} was found hardcoded in a client-side JavaScript file. Anyone who visits the site can extract this credential from their browser's developer tools.`,
-          evidence: `File: ${jsUrl}\nSecret Type: ${pattern.name}\nContext: ...${context.replace(match[0], redacted)}...`,
+          evidence: `File: ${jsUrl}\nLine: ${lineNumber}\nSecret Type: ${pattern.name}\nContext: ...${context.replace(match[0], redacted)}...`,
           recommended_fix: pattern.fix,
           cvss_score: pattern.cvss,
           cwe_id: pattern.cwe,

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 export async function runRequestSmugglingCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
@@ -10,7 +10,7 @@ export async function runRequestSmugglingCheck(ctx: ScanContext): Promise<ScanFi
 
   // Test 1: TE-CL: Transfer-Encoding + Content-Length conflict
   // We can't actually do a true smuggling test with fetch, but we can probe for header acceptance
-  const teclRes = await safeFetch(base.origin, {
+  const teclRes = await ctxFetch(ctx, base.origin, {
     method: "POST",
     headers: {
       "Transfer-Encoding": "chunked",
@@ -44,7 +44,7 @@ export async function runRequestSmugglingCheck(ctx: ScanContext): Promise<ScanFi
   }
 
   // Test 2: Check if HTTP/2 is supported (downgrade smuggling risk)
-  const h2Res = await safeFetch(base.origin, { headers: { "upgrade": "h2c" } });
+  const h2Res = await ctxFetch(ctx, base.origin, { headers: { "upgrade": "h2c" } });
   if (h2Res && h2Res.headers.get("upgrade") === "h2c") {
     findings.push({
       title: "HTTP/2 Cleartext Upgrade Accepted (H2C Smuggling Risk)",
@@ -88,7 +88,7 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
     let rateLimited = false;
 
     for (let i = 0; i < 6; i++) {
-      const res = await safeFetch(endpoint, {
+      const res = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: `test${i}@test.com`, password: "wrongpassword" }),
@@ -135,7 +135,7 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
     ];
 
     for (const header of bypassHeaders) {
-      const res = await safeFetch(f.endpoint, {
+      const res = await ctxFetch(ctx, f.endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...header },
         body: JSON.stringify({ email: "test@test.com", password: "wrong" }),

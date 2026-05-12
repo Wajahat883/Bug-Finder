@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const UPLOAD_PATHS = ["/upload", "/api/upload", "/file/upload", "/files", "/media/upload", "/images/upload", "/uploads", "/api/files"];
 const DANGEROUS_EXTENSIONS = [".php", ".php5", ".phtml", ".asp", ".aspx", ".jsp", ".jspx", ".shtml", ".cfm"];
@@ -33,14 +33,14 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
   // Check known upload paths
   for (const path of UPLOAD_PATHS) {
     const url = `${base.origin}${path}`;
-    const headRes = await safeFetch(url, { method: "OPTIONS" });
+    const headRes = await ctxFetch(ctx, url, { method: "OPTIONS" });
     if (!headRes || headRes.status === 404) continue;
 
     emit({ type: "log", message: `  File upload endpoint found: ${path}` });
 
     for (const probe of POLYGLOT_PAYLOADS.slice(0, profile === "quick" ? 1 : 2)) {
       const { body, boundary } = buildMultipartBody(probe.filename, probe.content);
-      const uploadRes = await safeFetch(url, {
+      const uploadRes = await ctxFetch(ctx, url, {
         method: "POST",
         headers: { "Content-Type": `multipart/form-data; boundary=${boundary.slice(2)}` },
         body,
@@ -131,7 +131,7 @@ export async function runDependencyConfusionCheck(ctx: ScanContext): Promise<Sca
 
   for (const file of exposedFiles) {
     const url = `${base.origin}${file.path}`;
-    const res = await safeFetch(url);
+    const res = await ctxFetch(ctx, url);
     if (!res || res.status !== 200) continue;
 
     const body = await res.text().catch(() => "");

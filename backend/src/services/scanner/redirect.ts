@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const REDIRECT_PARAMS = ["redirect", "redirect_uri", "redirect_url", "return", "return_url", "returnTo", "next", "url", "goto", "dest", "destination", "target", "ref", "referer", "callback", "continue"];
 const EVIL_URL = "https://evil-test-8c7d.example.com";
@@ -25,7 +25,7 @@ export async function runRedirectCheck(ctx: ScanContext): Promise<ScanFinding[]>
     for (const param of REDIRECT_PARAMS.slice(0, 6)) {
       const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(EVIL_URL)}`;
 
-      const res = await safeFetch(testUrl, { redirect: "manual" });
+      const res = await ctxFetch(ctx, testUrl, { redirect: "manual" });
       if (!res) continue;
 
       const location = res.headers.get("location");

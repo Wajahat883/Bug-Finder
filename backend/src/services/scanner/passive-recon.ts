@@ -1,5 +1,5 @@
 import * as dns from "dns/promises";
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, safeFetch, ctxFetch } from "./types";
 
 export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
@@ -138,7 +138,7 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
   const base = new URL(targetUrl).origin;
   for (const check of sensitivePaths) {
     const url = `${base}${check.path}`;
-    const r = await safeFetch(url, { redirect: "follow" });
+    const r = await ctxFetch(ctx, url, { redirect: "follow" });
     if (r && r.status === 200) {
       const body = await r.text().catch(() => "").then(t => t.slice(0, 200));
       findings.push({

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const DEFAULT_CREDENTIALS = [
   { user: "admin", pass: "admin" },
@@ -35,7 +35,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
     const endpoint = `${base}${path}`;
 
     // First, check if the endpoint exists
-    const probe = await safeFetch(endpoint, {
+    const probe = await ctxFetch(ctx, endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: "probe@test.com", password: "probe" }),
@@ -49,7 +49,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
     // Test default credentials (limited to first 3 for speed)
     const credsBudget = profile === "deep" ? 10 : 3;
     for (const cred of DEFAULT_CREDENTIALS.slice(0, credsBudget)) {
-      const r = await safeFetch(endpoint, {
+      const r = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: cred.user, email: `${cred.user}@example.com`, password: cred.pass }),
@@ -88,7 +88,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
     for (const regPath of registerPaths.slice(0, 2)) {
       const regEndpoint = `${base}${regPath}`;
       for (const weakPass of WEAK_PASSWORDS.slice(0, 2)) {
-        const regR = await safeFetch(regEndpoint, {
+        const regR = await ctxFetch(ctx, regEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -129,7 +129,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
     const has2FA = loginBody.toLowerCase().includes("otp") || loginBody.toLowerCase().includes("2fa") || loginBody.toLowerCase().includes("totp") || loginBody.toLowerCase().includes("mfa");
     if (!has2FA && probe.status !== 404) {
       // Check login page for 2FA indicators
-      const loginPageR = await safeFetch(`${base}/login`, { redirect: "follow" });
+      const loginPageR = await ctxFetch(ctx, `${base}/login`, { redirect: "follow" });
       const loginPageBody = loginPageR ? await loginPageR.text().catch(() => "") : "";
       const page2FA = loginPageBody.toLowerCase().includes("two-factor") || loginPageBody.toLowerCase().includes("authenticator") || loginPageBody.toLowerCase().includes("otp");
       if (!page2FA) {

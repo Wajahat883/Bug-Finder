@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const CART_PATHS = ["/api/cart", "/api/order", "/api/checkout", "/cart", "/order", "/api/purchase", "/api/payment"];
 const PRIV_PATHS = ["/admin", "/api/admin", "/dashboard/admin", "/api/users/all", "/api/reports/all", "/api/settings/all"];
@@ -27,7 +27,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
 
   for (const endpoint of allCartPaths.slice(0, budget)) {
     // Try negative price
-    const negativePriceR = await safeFetch(endpoint, {
+    const negativePriceR = await ctxFetch(ctx, endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ product_id: "1", quantity: 1, price: -99.99, amount: -99.99 }),
@@ -55,7 +55,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
     }
 
     // Try zero quantity
-    const zeroQtyR = await safeFetch(endpoint, {
+    const zeroQtyR = await ctxFetch(ctx, endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ product_id: "1", quantity: 0, count: 0 }),
@@ -91,7 +91,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
   ];
 
   for (const endpoint of allPrivPaths.slice(0, budget)) {
-    const r = await safeFetch(endpoint, { redirect: "follow" });
+    const r = await ctxFetch(ctx, endpoint, { redirect: "follow" });
     if (!r) continue;
 
     if (r.status === 200) {
@@ -130,7 +130,7 @@ export async function runBusinessLogicCheck(ctx: ScanContext): Promise<ScanFindi
     const payload = JSON.stringify({ code: "TESTRACE", coupon: "TESTRACE", voucher: "TESTRACE" });
     // Fire 5 concurrent requests
     const promises = Array.from({ length: 5 }, () =>
-      safeFetch(endpoint, {
+      ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: payload,

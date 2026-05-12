@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const API_PREFIXES = ["/api/v1", "/api/v2", "/api/v3", "/v1", "/v2", "/v3", "/api/1.0", "/api/2.0"];
 const RESOURCE_PATHS = ["/users", "/user", "/profile", "/account", "/admin", "/settings", "/roles"];
@@ -32,7 +32,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
   for (const prefix of API_PREFIXES) {
     for (const resource of RESOURCE_PATHS.slice(0, 3)) {
       const url = `${base}${prefix}${resource}`;
-      const r = await safeFetch(url, { redirect: "follow" });
+      const r = await ctxFetch(ctx, url, { redirect: "follow" });
       if (!r) continue;
       if (r.status !== 404 && r.status !== 405) {
         v1Endpoints.push(url);
@@ -75,7 +75,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
   for (const endpoint of testEndpoints.slice(0, budget)) {
     for (const field of MASS_ASSIGN_FIELDS.slice(0, 4)) {
       const body = { [field.field]: field.value, name: "test", email: `mass_${Date.now()}@test.com` };
-      const r = await safeFetch(endpoint, {
+      const r = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -118,7 +118,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
     const methodResults: Record<string, number> = {};
 
     for (const method of ["GET", "PUT", "DELETE", "TRACE", "PATCH"]) {
-      const r = await safeFetch(endpoint, { method });
+      const r = await ctxFetch(ctx, endpoint, { method });
       if (r) methodResults[method] = r.status;
     }
 

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const CACHE_BUSTER = () => `cp${Date.now()}`;
 
@@ -22,7 +22,7 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
   // First get a baseline response to compare against
   const cb = CACHE_BUSTER();
   const baselineUrl = `${targetUrl}${targetUrl.includes("?") ? "&" : "?"}cb=${cb}`;
-  const baseline = await safeFetch(baselineUrl, { redirect: "follow" });
+  const baseline = await ctxFetch(ctx, baselineUrl, { redirect: "follow" });
   if (!baseline) {
     emit({ type: "engine_done", engine: "Cache Poisoning Scanner", message: "Skipped (unreachable)" });
     return findings;
@@ -50,7 +50,7 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
     const cb2 = CACHE_BUSTER();
     const testUrl = `${targetUrl}${targetUrl.includes("?") ? "&" : "?"}cb=${cb2}`;
 
-    const r = await safeFetch(testUrl, {
+    const r = await ctxFetch(ctx, testUrl, {
       redirect: "follow",
       headers: {
         [test.header]: test.value,
@@ -84,7 +84,7 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
 
     // Check for X-Original-URL / X-Rewrite-URL path override
     if (test.header === "X-Original-URL" || test.header === "X-Rewrite-URL") {
-      const overrideR = await safeFetch(targetUrl, {
+      const overrideR = await ctxFetch(ctx, targetUrl, {
         headers: { [test.header]: "/admin" },
         redirect: "follow",
       });

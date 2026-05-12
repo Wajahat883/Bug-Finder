@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 interface TechSignature {
   name: string;
@@ -140,7 +140,7 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
 
   emit({ type: "engine_start", engine: "Wappalyzer/Fingerprint", message: "Fingerprinting technologies, frameworks, and CMS" });
 
-  const res = await safeFetch(targetUrl, { redirect: "follow" });
+  const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
     emit({ type: "log", message: "Target unreachable for fingerprinting" });
     emit({ type: "engine_done", engine: "Wappalyzer/Fingerprint", message: "Skipped (unreachable)" });
@@ -175,7 +175,7 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
   const versionPaths = ["/wp-login.php", "/administrator/", "/phpmyadmin/", "/manager/html"];
   for (const path of versionPaths) {
     const url = `${new URL(targetUrl).origin}${path}`;
-    const r = await safeFetch(url, { redirect: "manual" });
+    const r = await ctxFetch(ctx, url, { redirect: "manual" });
     if (r && r.status === 200) {
       const name = path.includes("wp-login") ? "WordPress Login Page" : path.includes("administrator") ? "Joomla Admin" : path.includes("phpmyadmin") ? "phpMyAdmin" : "Tomcat Manager";
       findings.push({

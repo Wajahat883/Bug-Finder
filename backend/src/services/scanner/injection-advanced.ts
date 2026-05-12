@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 // Server-Side Template Injection payloads
 const SSTI_PROBES = [
@@ -41,7 +41,7 @@ export async function runSstiCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     for (const probe of SSTI_PROBES.slice(0, 3)) {
       for (const param of TEST_PARAMS.slice(0, 4)) {
         const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(probe.payload)}`;
-        const res = await safeFetch(testUrl);
+        const res = await ctxFetch(ctx, testUrl);
         if (!res) continue;
 
         const body = await res.text().catch(() => "");
@@ -90,7 +90,7 @@ export async function runCrlfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     for (const probe of CRLF_PROBES.slice(0, 2)) {
       for (const param of params.slice(0, 3)) {
         const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${probe}`;
-        const res = await safeFetch(testUrl, { redirect: "manual" });
+        const res = await ctxFetch(ctx, testUrl, { redirect: "manual" });
         if (!res) continue;
 
         const hasInjectedHeader = res.headers.get("x-injected-header") || res.headers.get("x-injected");
@@ -138,7 +138,7 @@ export async function runPrototypePollutionCheck(ctx: ScanContext): Promise<Scan
 
   for (const endpoint of apiEndpoints) {
     for (const probe of PROTO_PROBES.slice(0, 2)) {
-      const res = await safeFetch(endpoint, {
+      const res = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(probe.payload),
@@ -149,7 +149,7 @@ export async function runPrototypePollutionCheck(ctx: ScanContext): Promise<Scan
 
       if (body.includes(probe.check) || res.status === 200) {
         // Follow up with a GET to check if the prototype was polluted
-        const checkRes = await safeFetch(endpoint);
+        const checkRes = await ctxFetch(ctx, endpoint);
         if (checkRes) {
           const checkBody = await checkRes.text().catch(() => "");
           if (checkBody.includes(probe.check)) {

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, safeFetch, ctxFetch } from "./types";
 
 export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, profile } = ctx;
@@ -81,7 +81,7 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   for (const check of dockerPaths) {
     const url = `${base}${check.path}`;
-    const r = await safeFetch(url, { redirect: "follow" });
+    const r = await ctxFetch(ctx, url, { redirect: "follow" });
     if (!r) continue;
 
     const body = await r.text().catch(() => "");
@@ -121,7 +121,7 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   for (const check of k8sPaths) {
     const url = `${base}${check.path}`;
-    const r = await safeFetch(url, { redirect: "follow" });
+    const r = await ctxFetch(ctx, url, { redirect: "follow" });
     if (!r) continue;
 
     const body = await r.text().catch(() => "");

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 interface HeaderCheck {
   header: string;
@@ -87,7 +87,7 @@ export async function runHeaderCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({ type: "engine_start", engine: "OWASP ZAP/Headers", message: "Analyzing HTTP security headers" });
 
-  const res = await safeFetch(targetUrl, { redirect: "follow" });
+  const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
     emit({ type: "log", message: "Could not fetch target for header analysis" });
     emit({ type: "engine_done", engine: "OWASP ZAP/Headers", message: "Header check skipped (unreachable)" });

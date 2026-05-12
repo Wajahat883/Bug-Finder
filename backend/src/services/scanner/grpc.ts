@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const GRPC_PORTS = [50051, 50052, 9090, 9091, 8090];
 const GRPC_WEB_PATHS = ["/grpc", "/grpc-web", "/api/grpc"];
@@ -21,7 +21,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   // Check for gRPC-Web proxy endpoints
   for (const path of GRPC_WEB_PATHS) {
     const url = `${base}${path}`;
-    const r = await safeFetch(url, {
+    const r = await ctxFetch(ctx, url, {
       method: "POST",
       headers: {
         "Content-Type": "application/grpc-web+proto",
@@ -55,7 +55,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
       // Try server reflection (should be disabled in prod)
       const reflectUrl = `${url}/grpc.reflection.v1alpha.ServerReflection/ServerReflectionInfo`;
-      const reflectR = await safeFetch(reflectUrl, {
+      const reflectR = await ctxFetch(ctx, reflectUrl, {
         method: "POST",
         headers: { "Content-Type": "application/grpc-web+proto", "X-Grpc-Web": "1" },
       });
@@ -80,7 +80,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   }
 
   // Check HTTP/2 support (gRPC requires HTTP/2)
-  const h2Res = await safeFetch(targetUrl, { redirect: "follow" });
+  const h2Res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (h2Res) {
     // Node fetch doesn't expose HTTP version directly, but we can check headers
     const via = h2Res.headers.get("via") ?? "";
@@ -113,7 +113,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   for (const adminPath of adminPaths) {
     const adminUrl = `${base}${adminPath}`;
-    const r = await safeFetch(adminUrl, {
+    const r = await ctxFetch(ctx, adminUrl, {
       method: "POST",
       headers: { "Content-Type": "application/grpc+proto" },
     });

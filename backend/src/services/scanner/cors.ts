@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const EVIL_ORIGINS = [
   "https://evil.com",
@@ -21,7 +21,7 @@ export async function runCorsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   for (const endpoint of apiEndpoints) {
     for (const origin of EVIL_ORIGINS) {
-      const res = await safeFetch(endpoint, {
+      const res = await ctxFetch(ctx, endpoint, {
         method: "OPTIONS",
         headers: {
           "Origin": origin,

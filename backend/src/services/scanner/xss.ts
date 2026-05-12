@@ -76,30 +76,52 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         seen.add(key);
 
         const offset = body.indexOf(probe.marker);
+        const lineNumber = body.slice(0, offset).split("\n").length;
         const snippet = body.slice(Math.max(0, offset - 120), offset + 120);
 
+        // ── Fix 6: Playwright DOM XSS check ───────────────────────────────
+        let domXssConfirmed = false;
+        const playwrightUrl = process.env["PLAYWRIGHT_URL"];
+        if (playwrightUrl) {
+          try {
+            const pwRes = await fetch(`${playwrightUrl}/check-xss`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: testUrl, marker: probe.marker }),
+              signal: AbortSignal.timeout(10000),
+            });
+            if (pwRes.ok) {
+              const pwData = await pwRes.json().catch(() => null) as { executed?: boolean } | null;
+              domXssConfirmed = pwData?.executed === true;
+            }
+          } catch { /* Playwright service unavailable — skip DOM check */ }
+        }
+
         findings.push({
-          title: `Reflected XSS in Parameter: ${paramName}`,
+          title: domXssConfirmed ? `DOM XSS Confirmed in Parameter: ${paramName}` : `Reflected XSS in Parameter: ${paramName}`,
           category: "XSS",
-          severity: "high",
+          severity: domXssConfirmed ? "critical" : "high",
           endpoint,
-          description: `Parameter "${paramName}" reflects unsanitized user input directly into the HTML response. Confirmed with two independent probes. An attacker can craft a malicious URL that executes arbitrary JavaScript in the victim's browser when clicked.`,
+          description: domXssConfirmed
+            ? `Parameter "${paramName}" is confirmed DOM-executed XSS. The payload was reflected in the HTML response AND executed by the browser's JavaScript engine, confirming real-world exploitability.`
+            : `Parameter "${paramName}" reflects unsanitized user input directly into the HTML response. Confirmed with two independent probes. An attacker can craft a malicious URL that executes arbitrary JavaScript in the victim's browser when clicked.`,
           evidence: [
             `GET ${testUrl}`,
             `Payload: ${probe.payload}`,
-            `Marker reflected unencoded at byte offset ${offset}`,
+            `Marker reflected unencoded at HTML line ${lineNumber} (byte offset ${offset})`,
             `\nContext:\n${snippet}`,
             `\nConfirmation: GET ${confirmUrl}`,
             `Confirmation marker "${confirmProbe.marker}" also reflected`,
-          ].join("\n"),
+            domXssConfirmed ? `\nPlaywright DOM check: marker executed in browser context — DOM XSS confirmed` : "",
+          ].filter(Boolean).join("\n"),
           recommended_fix: "HTML-encode all user input before rendering: use escapeHtml() or a templating engine with auto-escaping. Add Content-Security-Policy: script-src 'self' to limit script execution.",
-          cvss_score: 7.4,
+          cvss_score: domXssConfirmed ? 8.8 : 7.4,
           cwe_id: "CWE-79",
           scanner_name: "OWASP ZAP",
           scanner_family: "web",
-          confidence: 0.92,
+          confidence: domXssConfirmed ? 0.98 : 0.92,
         });
-        emit({ type: "log", message: `  [XSS CONFIRMED] ${endpoint} param=${paramName} offset=${offset}` });
+        emit({ type: "log", message: `  [XSS${domXssConfirmed ? " DOM-CONFIRMED" : " CONFIRMED"}] ${endpoint} param=${paramName} line=${lineNumber}` });
         break; // One confirmed finding per param is enough
       }
     }

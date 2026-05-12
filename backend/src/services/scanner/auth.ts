@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const LOGIN_PATHS = [
   "/api/auth/login",
@@ -61,10 +61,10 @@ function buildLoginBodies(username: string, password: string): Array<Record<stri
   ];
 }
 
-async function findLoginEndpoint(base: string): Promise<string | null> {
+async function findLoginEndpoint(ctx: ScanContext, base: string): Promise<string | null> {
   for (const path of LOGIN_PATHS) {
     const url = `${base}${path}`;
-    const r = await safeFetch(url, {
+    const r = await ctxFetch(ctx, url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: "probe_check@test.invalid", password: "probe_check_xyz_99" }),
@@ -105,7 +105,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   // ── 1. Discover login endpoint ──────────────────────────────────────────────
   emit({ type: "log", message: "Discovering login endpoint…" });
-  const loginUrl = await findLoginEndpoint(base);
+  const loginUrl = await findLoginEndpoint(ctx, base);
   if (!loginUrl) {
     emit({ type: "log", message: "No login endpoint found — skipping credential tests" });
   }
@@ -117,7 +117,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     const testBody = { username: "ratetest@example.com", password: "wrong_password_probe_123" };
 
     for (let i = 0; i < 8; i++) {
-      const r = await safeFetch(loginUrl, {
+      const r = await ctxFetch(ctx, loginUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(testBody),
@@ -164,15 +164,23 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   if (loginUrl && (profile === "standard" || profile === "deep")) {
     emit({ type: "log", message: "Testing default credentials…" });
     const credBudget = profile === "deep" ? DEFAULT_CREDS.length : 6;
+    let rateLimited = false;
 
     for (const cred of DEFAULT_CREDS.slice(0, credBudget)) {
+      if (rateLimited) break;
       for (const body of buildLoginBodies(cred.username, cred.password).slice(0, 2)) {
-        const r = await safeFetch(loginUrl, {
+        const r = await ctxFetch(ctx, loginUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
         if (!r) continue;
+        // Stop immediately if target is rate-limiting or locking accounts
+        if (r.status === 429 || r.status === 423 || r.status === 503) {
+          emit({ type: "log", message: `  Rate limit/lockout response (${r.status}) — stopping credential test to avoid account lockout` });
+          rateLimited = true;
+          break;
+        }
         if (await isLoginSuccess(r)) {
           findings.push({
             title: `Default Credentials Accepted: ${cred.username} / ${cred.password || "(empty)"}`,
@@ -213,7 +221,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     for (const regPath of registerPaths) {
       const regUrl = `${base}${regPath}`;
       const testEmail = `poltest_${Date.now()}@bugfinder-probe.invalid`;
-      const r = await safeFetch(regUrl, {
+      const r = await ctxFetch(ctx, regUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: testEmail, username: "poltest", password: "123456", firstName: "Pol", lastName: "Test" }),
@@ -258,12 +266,12 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     const nonExistingUser = `nonexistent_probe_${Date.now()}@bugfinder-probe.invalid`;
 
     const [r1, r2] = await Promise.all([
-      safeFetch(loginUrl, {
+      ctxFetch(ctx, loginUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: existingUser, password: "wrong_password_xyz" }),
       }),
-      safeFetch(loginUrl, {
+      ctxFetch(ctx, loginUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: nonExistingUser, password: "wrong_password_xyz" }),
@@ -311,7 +319,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   for (const { path, label } of PROTECTED_PATHS.slice(0, budget)) {
     const url = `${base}${path}`;
-    const r = await safeFetch(url, { headers: { Accept: "application/json" } });
+    const r = await ctxFetch(ctx, url, { headers: { Accept: "application/json" } });
     if (!r) continue;
 
     if (r.status === 200) {
@@ -349,12 +357,12 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     const resetPaths = ["/api/auth/forgot-password", "/api/forgot-password", "/api/password/reset"];
     for (const resetPath of resetPaths) {
       const url = `${base}${resetPath}`;
-      const r1 = await safeFetch(url, {
+      const r1 = await ctxFetch(ctx, url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: "admin@example.com" }),
       });
-      const r2 = await safeFetch(url, {
+      const r2 = await ctxFetch(ctx, url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: "admin@example.com" }),
@@ -363,7 +371,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       if (r1.status === 200 || r1.status === 204) {
         // Flow exists — check if it leaks user existence
         const b1 = await r1.text().catch(() => "");
-        const nonExistR = await safeFetch(url, {
+        const nonExistR = await ctxFetch(ctx, url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: `nonexistent_probe_${Date.now()}@bugfinder.invalid` }),

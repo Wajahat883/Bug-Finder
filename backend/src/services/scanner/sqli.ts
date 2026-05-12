@@ -125,26 +125,36 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         }
       }
 
-      // ── 2. Boolean-based blind detection ────────────────────────────────
+      // ── 2. Boolean-based blind detection (3-pass consistency) ──────────────
       if (profile !== "quick" && !seen.has(`${endpoint}:${param}:error`) && !seen.has(`${endpoint}:${param}:500`)) {
         for (const [truePayload, falsePayload] of BOOLEAN_PAIRS) {
           const trueUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(truePayload)}`;
           const falseUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(falsePayload)}`;
 
-          const [trueRes, falseRes] = await Promise.all([ctxFetch(ctx, trueUrl), ctxFetch(ctx, falseUrl)]);
-          if (!trueRes || !falseRes) continue;
+          // 3-pass consistency: send each condition 3 times to eliminate CDN/A-B variance
+          const trueLengths: number[] = [];
+          const falseLengths: number[] = [];
+          for (let pass = 0; pass < 3; pass++) {
+            const [tRes, fRes] = await Promise.all([ctxFetch(ctx, trueUrl), ctxFetch(ctx, falseUrl)]);
+            if (tRes) trueLengths.push((await tRes.text().catch(() => "")).length);
+            if (fRes) falseLengths.push((await fRes.text().catch(() => "")).length);
+          }
 
-          const trueBody = await trueRes.text().catch(() => "");
-          const falseBody = await falseRes.text().catch(() => "");
+          if (trueLengths.length < 2 || falseLengths.length < 2) continue;
 
-          const trueLen = trueBody.length;
-          const falseLen = falseBody.length;
+          // Check internal consistency of each set — high variance = CDN rotation, not SQLi
+          const trueVariance = Math.max(...trueLengths) - Math.min(...trueLengths);
+          const falseVariance = Math.max(...falseLengths) - Math.min(...falseLengths);
+          if (trueVariance > 60 || falseVariance > 60) {
+            emit({ type: "log", message: `  Boolean pair for ${param} has high variance (${trueVariance}/${falseVariance}b) — skipping (CDN/A-B noise)` });
+            continue;
+          }
 
-          // Significant body length difference between true/false condition = boolean-based blind SQLi
-          const lenDiff = Math.abs(trueLen - falseLen);
-          const baselineDiff = Math.abs(trueLen - baseLen);
+          const trueAvg = trueLengths.reduce((a, b) => a + b, 0) / trueLengths.length;
+          const falseAvg = falseLengths.reduce((a, b) => a + b, 0) / falseLengths.length;
+          const lenDiff = Math.abs(trueAvg - falseAvg);
+          const baselineDiff = Math.abs(trueAvg - baseLen);
 
-          // True condition should match baseline, false condition should differ
           const trueMatchesBaseline = baselineDiff < 50;
           const falseDeviates = lenDiff > 100;
 
@@ -157,16 +167,16 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
                 category: "Injection",
                 severity: "critical",
                 endpoint,
-                description: `Parameter "${param}" is vulnerable to boolean-based blind SQL injection. The response length changes significantly between TRUE and FALSE SQL conditions (${trueLen} vs ${falseLen} bytes), confirming conditional query execution.`,
-                evidence: `TRUE payload: GET ${trueUrl}\nResponse length: ${trueLen} bytes (matches baseline ${baseLen})\n\nFALSE payload: GET ${falseUrl}\nResponse length: ${falseLen} bytes (${lenDiff} byte difference)\n\nThis length difference indicates the database evaluates the boolean condition.`,
+                description: `Parameter "${param}" is vulnerable to boolean-based blind SQL injection. Across 3 independent request pairs, TRUE conditions consistently returned ~${Math.round(trueAvg)} bytes while FALSE conditions returned ~${Math.round(falseAvg)} bytes — confirming conditional query execution.`,
+                evidence: `TRUE payload: GET ${trueUrl}\n3-pass lengths: ${trueLengths.join(", ")} (avg ${Math.round(trueAvg)}, variance ${trueVariance}b)\nBaseline: ${baseLen} bytes\n\nFALSE payload: GET ${falseUrl}\n3-pass lengths: ${falseLengths.join(", ")} (avg ${Math.round(falseAvg)}, variance ${falseVariance}b)\n\nAverage difference: ${Math.round(lenDiff)} bytes — consistent across all 3 passes, ruling out CDN/A-B variation.`,
                 recommended_fix: "Use parameterized queries. This type of SQLi is confirmed even without visible errors — the application logic branches on query results.",
                 cvss_score: 9.1,
                 cwe_id: "CWE-89",
                 scanner_name: "SQLi-Scanner",
                 scanner_family: "web",
-                confidence: 0.82,
+                confidence: 0.88,
               });
-              emit({ type: "log", message: `  [SQLi-Boolean] Blind SQLi detected at ${endpoint} param=${param} (${lenDiff}b diff)` });
+              emit({ type: "log", message: `  [SQLi-Boolean] Blind SQLi at ${endpoint} param=${param} (avg ${Math.round(lenDiff)}b diff over 3 passes)` });
             }
           }
         }

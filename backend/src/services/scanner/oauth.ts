@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
 const OAUTH_PATHS = [
   "/oauth/authorize", "/oauth2/authorize", "/auth/oauth",
@@ -16,7 +16,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const budget = profile === "quick" ? 3 : profile === "standard" ? 6 : OAUTH_PATHS.length;
 
   // Check OpenID Connect discovery document
-  const oidcRes = await safeFetch(`${base}/.well-known/openid-configuration`, {}, 8000);
+  const oidcRes = await ctxFetch(ctx, `${base}/.well-known/openid-configuration`, {}, 8000);
   if (oidcRes && oidcRes.status === 200) {
     let config: Record<string, unknown> = {};
     try { config = await oidcRes.json(); } catch { /* skip */ }
@@ -64,7 +64,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     // Check JWKS endpoint
     const jwksUri = config.jwks_uri as string;
     if (jwksUri) {
-      const jwksRes = await safeFetch(jwksUri, {}, 5000);
+      const jwksRes = await ctxFetch(ctx, jwksUri, {}, 5000);
       if (jwksRes && jwksRes.status === 200) {
         let jwks: Record<string, unknown> = {};
         try { jwks = await jwksRes.json(); } catch { /* skip */ }
@@ -97,7 +97,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
     // Test with open redirect payload
     const testUrl = `${url}?response_type=code&client_id=test&redirect_uri=${encodeURIComponent(attackRedirect)}&state=x`;
-    const r = await safeFetch(testUrl, { redirect: "manual" });
+    const r = await ctxFetch(ctx, testUrl, { redirect: "manual" });
     if (!r) continue;
 
     const location = r.headers.get("location") ?? "";
@@ -125,7 +125,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
     // Test for missing state parameter enforcement
     const noStateUrl = `${url}?response_type=code&client_id=test&redirect_uri=${encodeURIComponent(base + "/callback")}`;
-    const noStateR = await safeFetch(noStateUrl, { redirect: "manual" });
+    const noStateR = await ctxFetch(ctx, noStateUrl, { redirect: "manual" });
     if (noStateR && (noStateR.status === 200 || noStateR.status === 302)) {
       const noStateLocation = noStateR.headers.get("location") ?? "";
       if (!noStateLocation.includes("state=") && noStateR.status === 302) {
