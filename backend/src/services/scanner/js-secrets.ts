@@ -41,7 +41,7 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "Trufflehog/JS", message: "Scanning JavaScript files for hardcoded secrets" });
+  emit({ type: "engine_start", engine: "Bug-Finder/JS-Secrets", message: "Scanning JavaScript files for hardcoded secrets" });
 
   // Collect JS file URLs
   const jsUrls: string[] = [];
@@ -178,6 +178,6 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
     }
   } catch { /* skip */ }
 
-  emit({ type: "engine_done", engine: "Trufflehog/JS", message: `JS secret scan complete — ${findings.length} secret(s) found` });
+  emit({ type: "engine_done", engine: "Bug-Finder/JS-Secrets", message: `JS secret scan complete — ${findings.length} secret(s) found` });
   return findings;
 }

@@ -57,7 +57,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "SQLMap/SQLi", message: "Probing for SQL injection (error-based, boolean-based, time-based)" });
+  emit({ type: "engine_start", engine: "Bug-Finder/SQLi", message: "Probing for SQL injection (error-based, boolean-based, time-based)" });
 
   const budget = profile === "quick" ? 2 : profile === "standard" ? 5 : 10;
   const endpoints = discoveredEndpoints
@@ -189,39 +189,67 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         }
       }
 
-      // ── 3. Time-based blind detection ───────────────────────────────────
+      // ── 3. Time-based blind detection (3-pass, all must exceed threshold) ─
+      // A single slow response can be caused by GC pauses, cold DB queries, or
+      // network jitter. All 3 independent probes must exceed TIME_THRESHOLD_MS
+      // before reporting — this is how sqlmap validates time-based blind SQLi.
       if (profile === "deep" && !seen.has(`${endpoint}:${param}:error`) && !seen.has(`${endpoint}:${param}:boolean`)) {
         for (const probe of TIME_BASED_PROBES) {
           const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(probe)}`;
+          const key = `${endpoint}:${param}:timebased`;
+          if (seen.has(key)) break;
 
-          const start = Date.now();
-          const res = await ctxFetch(ctx, testUrl, { signal: AbortSignal.timeout(8000) });
-          const elapsed = Date.now() - start;
+          const elapsedTimes: number[] = [];
+          let aborted = false;
 
-          if (!res) continue;
-
-          if (elapsed >= TIME_THRESHOLD_MS) {
-            const key = `${endpoint}:${param}:timebased`;
-            if (!seen.has(key)) {
-              seen.add(key);
-              findings.push({
-                title: `SQL Injection (Time-Based Blind) in Parameter: ${param}`,
-                category: "Injection",
-                severity: "critical",
-                endpoint,
-                description: `Parameter "${param}" is vulnerable to time-based blind SQL injection. The server delayed its response by ${elapsed}ms when injected with a sleep payload, confirming the payload was executed by the database engine.`,
-                evidence: `GET ${testUrl}\nPayload: ${probe}\nResponse time: ${elapsed}ms (threshold: ${TIME_THRESHOLD_MS}ms)\n\nA ${elapsed}ms delay strongly indicates the database executed the SLEEP/WAITFOR command inside the query.`,
-                recommended_fix: "Use parameterized queries or prepared statements immediately. Time-based blind SQLi is fully exploitable for data extraction via binary search.",
-                cvss_score: 9.8,
-                cwe_id: "CWE-89",
-                scanner_name: "Bug-Finder/SQLi",
-                scanner_family: "web",
-                confidence: 0.88,
-              });
-              emit({ type: "log", message: `  [SQLi-TimeBased] ${elapsed}ms delay at ${endpoint} param=${param}` });
-              break;
-            }
+          for (let pass = 0; pass < 3; pass++) {
+            const start = Date.now();
+            const res = await ctxFetch(ctx, testUrl, { signal: AbortSignal.timeout(10000) });
+            const elapsed = Date.now() - start;
+            if (!res) { aborted = true; break; }
+            elapsedTimes.push(elapsed);
+            // Short-circuit: if any pass is clearly not delayed, probe is not working
+            if (elapsed < TIME_THRESHOLD_MS - 500) break;
           }
+
+          if (aborted || elapsedTimes.length < 3) continue;
+
+          // All 3 passes must exceed the threshold
+          const allDelayed = elapsedTimes.every(t => t >= TIME_THRESHOLD_MS);
+          if (!allDelayed) {
+            emit({ type: "log", message: `  Time probe partially delayed at ${endpoint} param=${param} — times: ${elapsedTimes.join(", ")}ms — not confirmed` });
+            continue;
+          }
+
+          seen.add(key);
+          const avgMs = Math.round(elapsedTimes.reduce((a, b) => a + b, 0) / elapsedTimes.length);
+          findings.push({
+            title: `SQL Injection (Time-Based Blind) in Parameter: ${param}`,
+            category: "Injection",
+            severity: "critical",
+            endpoint,
+            description: `Parameter "${param}" is confirmed vulnerable to time-based blind SQL injection. The server delayed responses by an average of ${avgMs}ms across 3 independent probes — all exceeded the ${TIME_THRESHOLD_MS}ms threshold. This rules out network jitter and GC pauses. The database engine is executing the SLEEP/WAITFOR payload inside an unsanitized query.`,
+            evidence: [
+              `GET ${testUrl}`,
+              `Payload: ${probe}`,
+              ``,
+              `3-pass timing (all must exceed ${TIME_THRESHOLD_MS}ms):`,
+              `  Pass 1: ${elapsedTimes[0]}ms`,
+              `  Pass 2: ${elapsedTimes[1]}ms`,
+              `  Pass 3: ${elapsedTimes[2]}ms`,
+              `  Average: ${avgMs}ms — ALL exceeded threshold`,
+              ``,
+              `This is a confirmed time-based blind SQLi. Data can be extracted via binary search over the sleep delay.`,
+            ].join("\n"),
+            recommended_fix: "Use parameterized queries or prepared statements immediately. Time-based blind SQLi is fully exploitable for full database exfiltration via binary search.",
+            cvss_score: 9.8,
+            cwe_id: "CWE-89",
+            scanner_name: "Bug-Finder/SQLi",
+            scanner_family: "web",
+            confidence: 0.95,
+          });
+          emit({ type: "log", message: `  [SQLi-TimeBased CONFIRMED 3-pass] avg ${avgMs}ms at ${endpoint} param=${param}` });
+          break;
         }
       }
     }
@@ -385,7 +413,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "SQLMap/SQLi",
+    engine: "Bug-Finder/SQLi",
     message: `SQLi check complete — ${findings.length} issue(s) found`,
   });
 

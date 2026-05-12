@@ -32,47 +32,92 @@ export async function runSstiCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "SSTI Scanner", message: "Probing for Server-Side Template Injection" });
+  emit({ type: "engine_start", engine: "Bug-Finder/SSTI", message: "Probing for Server-Side Template Injection" });
 
   const budget = profile === "quick" ? 2 : profile === "standard" ? 4 : 8;
   const endpoints = discoveredEndpoints.slice(0, budget);
 
+  // Confirmation probe pairs: both must evaluate for a confirmed finding.
+  // Using two distinct expressions eliminates false positives from "49" appearing
+  // in CSS, viewport meta tags, timestamps, or static page content.
+  const SSTI_CONFIRM_PROBES: Array<{ payload: string; marker: string; engine: string }> = [
+    { payload: "{{3*3}}", marker: "9", engine: "Jinja2/Twig" },
+    { payload: "${3*3}", marker: "9", engine: "FreeMarker/Thymeleaf" },
+    { payload: "<%= 3*3 %>", marker: "9", engine: "ERB/EJS" },
+    { payload: "#{3*3}", marker: "9", engine: "Ruby/Pebble" },
+    { payload: "*{3*3}", marker: "9", engine: "Spring Expression" },
+    { payload: "{{3*'3'}}", marker: "333", engine: "Jinja2" },
+  ];
+
   for (const endpoint of endpoints) {
-    for (const probe of SSTI_PROBES.slice(0, 3)) {
+    for (let i = 0; i < Math.min(3, SSTI_PROBES.length); i++) {
+      const probe = SSTI_PROBES[i]!;
+      const confirmProbe = SSTI_CONFIRM_PROBES[i]!;
       for (const param of TEST_PARAMS.slice(0, 4)) {
         const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(probe.payload)}`;
         const res = await ctxFetch(ctx, testUrl);
         if (!res) continue;
 
         const body = await res.text().catch(() => "");
-        if (body.includes(probe.marker)) {
-          const key = `${endpoint}:ssti`;
-          if (seen.has(key)) continue;
-          seen.add(key);
+        if (!body.includes(probe.marker)) continue;
 
-          findings.push({
-            title: `Server-Side Template Injection (${probe.engine})`,
-            category: "Template Injection",
-            severity: "critical",
-            endpoint,
-            description: `The parameter "${param}" is vulnerable to Server-Side Template Injection using ${probe.engine} syntax. The expression ${probe.payload} was evaluated server-side, returning ${probe.marker}. This can lead to Remote Code Execution.`,
-            evidence: `GET ${testUrl}\nPayload: ${probe.payload}\nExpected: ${probe.marker}\nBody response contained evaluation result`,
-            recommended_fix: "Never pass user input directly to a template engine. Use a sandboxed environment or disable expression evaluation for user-controlled inputs.",
-            cvss_score: 9.8,
-            cwe_id: "CWE-94",
-            scanner_name: "Bug-Finder/SSTI",
-            scanner_family: "web",
-            confidence: 0.92,
-          });
-          emit({ type: "log", message: `  [SSTI] ${probe.engine} injection at ${endpoint} param=${param}` });
-          break;
+        // ── Baseline check: "49" must NOT appear on the page without payload ──
+        const baselineRes = await ctxFetch(ctx, endpoint);
+        const baselineBody = baselineRes ? await baselineRes.text().catch(() => "") : "";
+        if (baselineBody.includes(probe.marker)) {
+          emit({ type: "log", message: `  SSTI marker "${probe.marker}" in baseline — not a finding at ${endpoint} [${param}]` });
+          continue;
         }
+
+        // ── Confirmation probe: send a DIFFERENT expression, verify it also evaluates ──
+        const confirmUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(confirmProbe.payload)}`;
+        const confirmRes = await ctxFetch(ctx, confirmUrl);
+        const confirmBody = confirmRes ? await confirmRes.text().catch(() => "") : "";
+
+        if (!confirmBody.includes(confirmProbe.marker) || baselineBody.includes(confirmProbe.marker)) {
+          emit({ type: "log", message: `  SSTI confirmation failed at ${endpoint} [${param}] — likely static content, not execution` });
+          continue;
+        }
+
+        const key = `${endpoint}:ssti`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const offset = body.indexOf(probe.marker);
+        const snippet = body.slice(Math.max(0, offset - 80), offset + 80);
+
+        findings.push({
+          title: `Server-Side Template Injection (${probe.engine})`,
+          category: "Template Injection",
+          severity: "critical",
+          endpoint,
+          description: `Parameter "${param}" is confirmed vulnerable to Server-Side Template Injection using ${probe.engine} syntax. Two independent mathematical expressions were evaluated server-side: "${probe.payload}" → "${probe.marker}" AND "${confirmProbe.payload}" → "${confirmProbe.marker}". Neither result appears in the baseline response. This confirms template execution and can lead to Remote Code Execution.`,
+          evidence: [
+            `Probe 1: GET ${testUrl}`,
+            `  Expression: ${probe.payload} → Expected: ${probe.marker} → Found: YES (offset ${offset})`,
+            `  Context: ...${snippet}...`,
+            ``,
+            `Probe 2: GET ${confirmUrl}`,
+            `  Expression: ${confirmProbe.payload} → Expected: ${confirmProbe.marker} → Found: YES`,
+            ``,
+            `Baseline: GET ${endpoint}`,
+            `  Neither marker present in baseline response — execution confirmed, not static content`,
+          ].join("\n"),
+          recommended_fix: "Never pass user input directly to a template engine. Sandbox the template context. Disable expression evaluation for untrusted inputs. Switch to logic-less templates (Mustache, Handlebars with no helpers) for user-facing content.",
+          cvss_score: 9.8,
+          cwe_id: "CWE-94",
+          scanner_name: "Bug-Finder/SSTI",
+          scanner_family: "web",
+          confidence: 0.97,
+        });
+        emit({ type: "log", message: `  [SSTI CONFIRMED] ${probe.engine} dual-probe confirmed at ${endpoint} param=${param}` });
+        break;
       }
     }
   }
 
   if (findings.length === 0) emit({ type: "log", message: "No SSTI vulnerabilities detected" });
-  emit({ type: "engine_done", engine: "SSTI Scanner", message: `SSTI check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/SSTI", message: `SSTI check complete — ${findings.length} issue(s)` });
   return findings;
 }
 

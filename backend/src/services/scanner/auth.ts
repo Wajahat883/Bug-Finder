@@ -101,7 +101,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const base = new URL(targetUrl).origin;
 
-  emit({ type: "engine_start", engine: "Auth/Session", message: "Starting real authentication security tests" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Auth", message: "Starting real authentication security tests" });
 
   // ── 1. Discover login endpoint ──────────────────────────────────────────────
   emit({ type: "log", message: "Discovering login endpoint…" });
@@ -260,55 +260,102 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   }
 
   // ── 5. Username enumeration ─────────────────────────────────────────────────
+  // Strategy: extract a real email address from the application's own responses
+  // (API endpoints, HTML pages, error messages) rather than assuming "admin@example.com"
+  // exists. Using a hardcoded email that doesn't exist on the target always produces
+  // a false negative — both requests get the same "not found" response.
   if (loginUrl) {
-    emit({ type: "log", message: "Testing username enumeration…" });
-    const existingUser = "admin@example.com";
-    const nonExistingUser = `nonexistent_probe_${Date.now()}@bugfinder-probe.invalid`;
+    emit({ type: "log", message: "Testing username enumeration — extracting real email from application responses…" });
 
-    const [r1, r2] = await Promise.all([
-      ctxFetch(ctx, loginUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: existingUser, password: "wrong_password_xyz" }),
-      }),
-      ctxFetch(ctx, loginUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: nonExistingUser, password: "wrong_password_xyz" }),
-      }),
-    ]);
+    // Attempt to discover a real registered email from the app's own API or HTML
+    let existingUser: string | null = null;
 
-    if (r1 && r2) {
-      const [b1, b2] = await Promise.all([r1.text().catch(() => ""), r2.text().catch(() => "")]);
-      const differentStatus = r1.status !== r2.status;
-      const differentBody = b1.toLowerCase() !== b2.toLowerCase() &&
-        (b1.toLowerCase().includes("invalid password") || b1.toLowerCase().includes("wrong password") ||
-         b2.toLowerCase().includes("user not found") || b2.toLowerCase().includes("no account"));
+    const emailDiscoverySources = [
+      `${base}/api/users`, `${base}/api/v1/users`, `${base}/api/me`,
+      `${base}/api/profile`, `${base}/api/admin/users`, targetUrl,
+    ];
 
-      if (differentStatus || differentBody) {
-        findings.push({
-          title: "Username Enumeration via Login Response",
-          category: "Authentication",
-          severity: "medium",
-          endpoint: loginUrl,
-          description:
-            "The login endpoint returns different responses for valid vs. invalid usernames, " +
-            "allowing attackers to enumerate valid accounts before launching targeted attacks.",
-          evidence:
-            `POST ${loginUrl} — valid user (${existingUser}): HTTP ${r1.status}\n` +
-            `POST ${loginUrl} — invalid user: HTTP ${r2.status}\n` +
-            (differentBody ? `Response bodies differ:\nValid: ${b1.slice(0, 100)}\nInvalid: ${b2.slice(0, 100)}` : "HTTP status codes differ"),
-          recommended_fix:
-            "Return identical HTTP status codes and response bodies for both invalid username and invalid password. " +
-            "Use a generic message like \"Invalid credentials\" instead of \"User not found\" or \"Wrong password\". " +
-            "Apply consistent response timing to prevent timing-based enumeration.",
-          cvss_score: 5.3,
-          cwe_id: "CWE-203",
-          scanner_name: "Bug-Finder/Auth",
-          scanner_family: "web",
-          confidence: 0.75,
-        });
-        emit({ type: "log", message: "  [MEDIUM] Username enumeration detected" });
+    for (const src of emailDiscoverySources) {
+      const r = await ctxFetch(ctx, src, { headers: { Accept: "application/json, text/html" } });
+      if (!r || r.status !== 200) continue;
+      const body = await r.text().catch(() => "");
+      const emailMatch = body.match(/["']?([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})["']?/);
+      if (emailMatch?.[1] && !emailMatch[1].includes("bugfinder") && !emailMatch[1].includes("probe")) {
+        existingUser = emailMatch[1];
+        emit({ type: "log", message: `  Extracted real email from ${src}: ${existingUser}` });
+        break;
+      }
+    }
+
+    if (!existingUser) {
+      emit({ type: "log", message: "  No real email found in app responses — username enumeration test skipped (would produce false negatives with assumed emails)" });
+    } else {
+      const nonExistingUser = `probe_nonexistent_${Date.now()}@bugfinder-probe.invalid`;
+      const wrongPassword = `wrong_probe_password_${Date.now()}`;
+
+      const [r1, r2] = await Promise.all([
+        ctxFetch(ctx, loginUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: existingUser, password: wrongPassword }),
+        }),
+        ctxFetch(ctx, loginUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: nonExistingUser, password: wrongPassword }),
+        }),
+      ]);
+
+      if (r1 && r2) {
+        const [b1, b2] = await Promise.all([r1.text().catch(() => ""), r2.text().catch(() => "")]);
+        const differentStatus = r1.status !== r2.status;
+        const b1lower = b1.toLowerCase();
+        const b2lower = b2.toLowerCase();
+
+        // Detect response body differences that reveal whether the user exists:
+        // - "invalid password" vs "user not found" = explicit enumeration
+        // - significantly different body lengths when statuses are the same
+        const explicitEnumeration =
+          (b1lower.includes("invalid password") || b1lower.includes("wrong password") || b1lower.includes("incorrect password")) &&
+          (b2lower.includes("user not found") || b2lower.includes("no account") || b2lower.includes("email not registered") || b2lower.includes("does not exist"));
+        const sameStatusBodyLenDiff = !differentStatus && Math.abs(b1.length - b2.length) > 30;
+
+        if (differentStatus || explicitEnumeration) {
+          findings.push({
+            title: "Username Enumeration via Login Response",
+            category: "Authentication",
+            severity: "medium",
+            endpoint: loginUrl,
+            description:
+              `The login endpoint returns different responses for valid vs. invalid usernames, allowing attackers to enumerate valid accounts. ` +
+              `Tested with a real email extracted from the application (${existingUser}) vs. a guaranteed non-existent address.`,
+            evidence: [
+              `POST ${loginUrl}`,
+              `  Existing user (${existingUser}): HTTP ${r1.status}`,
+              `  Response: ${b1.slice(0, 120)}`,
+              ``,
+              `  Non-existent user: HTTP ${r2.status}`,
+              `  Response: ${b2.slice(0, 120)}`,
+              ``,
+              differentStatus ? `Status codes differ: ${r1.status} vs ${r2.status}` : "",
+              explicitEnumeration ? "Response messages explicitly reveal user existence" : "",
+            ].filter(Boolean).join("\n"),
+            recommended_fix:
+              "Return identical HTTP status codes and bodies for invalid username and invalid password. " +
+              "Use a constant-time comparison to prevent timing side channels. " +
+              "Generic message: \"Invalid credentials\" — never \"User not found\" or \"Wrong password\".",
+            cvss_score: 5.3,
+            cwe_id: "CWE-203",
+            scanner_name: "Bug-Finder/Auth",
+            scanner_family: "web",
+            confidence: explicitEnumeration ? 0.95 : 0.80,
+          });
+          emit({ type: "log", message: `  [MEDIUM] Username enumeration — status ${r1.status} vs ${r2.status}, explicit=${explicitEnumeration}` });
+        } else if (sameStatusBodyLenDiff) {
+          emit({ type: "log", message: `  Body length diff ${Math.abs(b1.length - b2.length)}b — possible timing/body enumeration (below confidence threshold)` });
+        } else {
+          emit({ type: "log", message: `  Username enumeration: responses identical (status ${r1.status}/${r2.status}, body diff ${Math.abs(b1.length - b2.length)}b) — no issue` });
+        }
       }
     }
   }
@@ -407,7 +454,7 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "Auth/Session",
+    engine: "Bug-Finder/Auth",
     message: `Auth check complete — ${findings.length} issue(s) found`,
   });
 

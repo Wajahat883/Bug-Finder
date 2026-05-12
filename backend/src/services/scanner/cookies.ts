@@ -4,11 +4,11 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Burp Suite/Cookies", message: "Checking cookie security flags" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Cookies", message: "Checking cookie security flags" });
 
   const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
-    emit({ type: "engine_done", engine: "Burp Suite/Cookies", message: "Cookie check skipped (unreachable)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Cookies", message: "Cookie check skipped (unreachable)" });
     return findings;
   }
 
@@ -32,7 +32,7 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   if (setCookieHeaders.length === 0) {
     emit({ type: "log", message: "No cookies set by target" });
-    emit({ type: "engine_done", engine: "Burp Suite/Cookies", message: "No cookies found to analyze" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Cookies", message: "No cookies found to analyze" });
     return findings;
   }
 
@@ -100,7 +100,7 @@ export async function runCookieCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "Burp Suite/Cookies",
+    engine: "Bug-Finder/Cookies",
     message: `Cookie check complete — ${findings.length} issue(s) found`,
   });
 

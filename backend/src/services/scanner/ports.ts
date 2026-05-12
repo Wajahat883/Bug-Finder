@@ -57,21 +57,21 @@ export async function runPortScan(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Nmap/Masscan", message: "Scanning for open dangerous ports" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Ports", message: "Scanning for open dangerous ports" });
 
   let host: string;
   try {
     host = new URL(targetUrl).hostname;
   } catch {
     emit({ type: "log", message: "Invalid target URL for port scan" });
-    emit({ type: "engine_done", engine: "Nmap/Masscan", message: "Port scan skipped" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Ports", message: "Port scan skipped" });
     return findings;
   }
 
   // Skip port scanning for localhost (common in development)
   if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".replit.dev")) {
     emit({ type: "log", message: "Skipping port scan for local/dev host" });
-    emit({ type: "engine_done", engine: "Nmap/Masscan", message: "Port scan skipped (local host)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Ports", message: "Port scan skipped (local host)" });
     return findings;
   }
 
@@ -111,7 +111,7 @@ export async function runPortScan(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "Nmap/Masscan",
+    engine: "Bug-Finder/Ports",
     message: `Port scan complete — ${findings.length} open dangerous port(s) found`,
   });
 

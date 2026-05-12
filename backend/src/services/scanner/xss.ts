@@ -27,7 +27,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "OWASP ZAP/XSS", message: "Probing for reflected XSS vectors" });
+  emit({ type: "engine_start", engine: "Bug-Finder/XSS", message: "Probing for reflected XSS vectors" });
 
   const budget = profile === "quick" ? 3 : profile === "standard" ? 8 : 15;
   const endpoints = discoveredEndpoints
@@ -446,7 +446,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "OWASP ZAP/XSS",
+    engine: "Bug-Finder/XSS",
     message: `XSS check complete — ${findings.length} confirmed issue(s)`,
   });
 

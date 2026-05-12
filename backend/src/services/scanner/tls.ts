@@ -35,7 +35,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Nmap/TLS", message: "Checking TLS configuration (socket-level)" });
+  emit({ type: "engine_start", engine: "Bug-Finder/TLS", message: "Checking TLS configuration (socket-level)" });
 
   const parsed = new URL(targetUrl);
   const isHttps = parsed.protocol === "https:";
@@ -286,7 +286,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "Nmap/TLS",
+    engine: "Bug-Finder/TLS",
     message: `TLS check complete — ${findings.length} issue(s) found`,
   });
 

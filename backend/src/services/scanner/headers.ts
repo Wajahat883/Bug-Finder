@@ -85,12 +85,12 @@ export async function runHeaderCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "OWASP ZAP/Headers", message: "Analyzing HTTP security headers" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Headers", message: "Analyzing HTTP security headers" });
 
   const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
     emit({ type: "log", message: "Could not fetch target for header analysis" });
-    emit({ type: "engine_done", engine: "OWASP ZAP/Headers", message: "Header check skipped (unreachable)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Headers", message: "Header check skipped (unreachable)" });
     return findings;
   }
 
@@ -171,7 +171,7 @@ export async function runHeaderCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "OWASP ZAP/Headers",
+    engine: "Bug-Finder/Headers",
     message: `Header analysis complete — ${findings.length} issue(s) found`,
   });
 

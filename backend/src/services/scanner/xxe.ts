@@ -29,7 +29,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, discoveredEndpoints, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Burp Suite/XXE", message: "Probing for XML External Entity injection" });
+  emit({ type: "engine_start", engine: "Bug-Finder/XXE", message: "Probing for XML External Entity injection" });
 
   const base = new URL(targetUrl).origin;
   const budget = profile === "quick" ? 3 : profile === "standard" ? 6 : XML_ENDPOINTS.length;
@@ -162,6 +162,6 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     emit({ type: "log", message: "No XXE vulnerabilities detected" });
   }
 
-  emit({ type: "engine_done", engine: "Burp Suite/XXE", message: `XXE check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/XXE", message: `XXE check complete — ${findings.length} finding(s)` });
   return findings;
 }

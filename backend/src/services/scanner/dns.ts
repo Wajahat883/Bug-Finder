@@ -5,20 +5,20 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Nmap/DNS", message: "Performing DNS security reconnaissance" });
+  emit({ type: "engine_start", engine: "Bug-Finder/DNS", message: "Performing DNS security reconnaissance" });
 
   let hostname: string;
   try {
     hostname = new URL(targetUrl).hostname;
   } catch {
     emit({ type: "log", message: "Invalid URL for DNS check" });
-    emit({ type: "engine_done", engine: "Nmap/DNS", message: "DNS check skipped" });
+    emit({ type: "engine_done", engine: "Bug-Finder/DNS", message: "DNS check skipped" });
     return findings;
   }
 
   if (hostname === "localhost" || hostname === "127.0.0.1") {
     emit({ type: "log", message: "Skipping DNS checks for localhost" });
-    emit({ type: "engine_done", engine: "Nmap/DNS", message: "DNS check skipped (localhost)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/DNS", message: "DNS check skipped (localhost)" });
     return findings;
   }
 
@@ -128,7 +128,7 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "Nmap/DNS",
+    engine: "Bug-Finder/DNS",
     message: `DNS check complete — ${findings.length} issue(s) found`,
   });
 
