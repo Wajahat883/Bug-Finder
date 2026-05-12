@@ -43,12 +43,14 @@ router.post("/findings/bulk-update", async (req, res) => {
 });
 
 // GET /analytics/dashboard — Enhanced dashboard with MTTR, trends, SLA compliance
-router.get("/analytics/dashboard", async (_req, res) => {
+router.get("/analytics/dashboard", async (req, res) => {
   try {
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
     const [findings, scans, remediations] = await Promise.all([
-      col("findings").find({}).toArray() as Promise<Array<Record<string, unknown>>>,
-      col("scan_jobs").find({ status: "completed" }).sort({ completed_at: -1 }).limit(30).toArray() as Promise<Array<Record<string, unknown>>>,
-      col("remediations").find({}).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("findings").find(userFilter).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("scan_jobs").find({ status: "completed", ...userFilter }).sort({ completed_at: -1 }).limit(30).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("remediations").find(userFilter).toArray() as Promise<Array<Record<string, unknown>>>,
     ]);
 
     const severities: Record<string, number> = {};

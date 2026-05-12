@@ -21,29 +21,32 @@ connectDb()
   .then(() => initScheduler())
   .catch((err) => logger.warn({ err }, "DB init/seed error — continuing without database"));
 
-// POINT 2: CSP hardening via helmet
+const isProdMode = process.env["NODE_ENV"] === "production";
+
+// POINT 9: Correlation IDs on every request
+app.use(correlationMiddleware);
+
+// POINT 2: Security headers via helmet — only CSP-sensitive headers, no COEP that breaks SSE
 app.use(helmet({
-  contentSecurityPolicy: {
+  contentSecurityPolicy: isProdMode ? {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", "ws:", "wss:"],
       fontSrc: ["'self'"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
-      upgradeInsecureRequests: [],
     },
-  },
-  crossOriginEmbedderPolicy: false, // allow SSE cross-origin in dev
+  } : false,  // Disable CSP in dev — avoids blocking localhost cross-port requests
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
-// POINT 2: CORS — only allow configured origins (not wildcard)
-const allowedOrigins = (process.env["ALLOWED_ORIGINS"] ?? "http://localhost:3000,http://localhost:5173").split(",").map(o => o.trim());
-
-// POINT 9: Correlation IDs on every request
-app.use(correlationMiddleware);
+// POINT 2: CORS — allow configured origins, never throw (return 403 instead)
+const allowedOrigins = (process.env["ALLOWED_ORIGINS"] ?? "")
+  .split(",").map(o => o.trim()).filter(Boolean);
 
 app.use(
   pinoHttp({
@@ -61,8 +64,14 @@ app.use(
 
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error(`CORS: origin ${origin} not allowed`));
+    // No origin = same-origin request or server-to-server — always allow
+    if (!origin) return cb(null, true);
+    // In dev (no ALLOWED_ORIGINS set) — allow all origins so frontend works on any port
+    if (allowedOrigins.length === 0) return cb(null, true);
+    // In prod — only allow explicitly listed origins
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    // Blocked — return null (no CORS headers) not an Error (which crashes response)
+    return cb(null, false);
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -70,8 +79,6 @@ app.use(cors({
 }));
 
 app.set("trust proxy", 1);
-app.set("trust proxy", 1);
-const isProd = process.env["NODE_ENV"] === "production";
 const sessionSecret = process.env["SESSION_SECRET"];
 if (!sessionSecret) {
   logger.error("SESSION_SECRET env var is required");
@@ -97,8 +104,8 @@ app.use(
     }),
     cookie: {
       httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? "strict" : "lax",
+      secure: isProdMode,
+      sameSite: isProdMode ? "strict" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   })
@@ -119,7 +126,7 @@ app.use((_req, res) => {
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err }, "Unhandled error");
-  res.status(500).json({ error: isProd ? "Internal server error" : err.message });
+  res.status(500).json({ error: isProdMode ? "Internal server error" : err.message });
 });
 
 export default app;

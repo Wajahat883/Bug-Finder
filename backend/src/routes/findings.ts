@@ -19,7 +19,9 @@ router.get("/findings", requireAuth, async (req, res) => {
     const scanJobId = req.query["scan_job_id"] as string | undefined;
     const suppressFp = req.query["suppress_fp"] === "true";
 
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
+    if (session.role !== "admin") query["user_id"] = session.userId ?? null;
     if (severity) query["severity"] = severity;
     if (valStatus) query["validation_status"] = valStatus;
     if (search) {
@@ -50,7 +52,9 @@ router.get("/findings/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
-    const finding = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+    const finding = (await col("findings").findOne({ _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!finding) return res.status(404).json({ error: "Finding not found" });
     res.json(formatFinding(finding));
   } catch (err) {
@@ -85,8 +89,9 @@ router.patch("/findings/:id", requireAuth, async (req, res) => {
     if (body.fp_reason !== undefined) updates["fp_reason"] = body.fp_reason;
 
     // Track status history
-    const existing = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
-    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const session = (req as unknown as { session: Record<string, unknown> & { userId?: string; role?: string } }).session;
+    const ownerFilter = session["role"] !== "admin" ? { user_id: session["userId"] ?? null } : {};
+    const existing = (await col("findings").findOne({ _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>)) as Record<string, unknown> | null;
     const historyEntry = body.validation_status ? {
       status: body.validation_status,
       changed_by: (session["username"] as string) ?? (session["userId"] as string) ?? "unknown",
@@ -94,8 +99,9 @@ router.patch("/findings/:id", requireAuth, async (req, res) => {
       previous_status: existing?.["validation_status"] ?? null,
     } : null;
 
+    if (!existing) return res.status(404).json({ error: "Finding not found" });
     await col("findings").updateOne(
-      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>,
       {
         $set: updates,
         ...(historyEntry ? { $push: { status_history: historyEntry } } : {}),
@@ -211,10 +217,13 @@ router.post("/findings/bulk", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "No valid finding IDs provided" });
     }
 
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+
     let updated = 0;
 
     if (action === "delete") {
-      const result = await col("findings").deleteMany({ _id: { $in: validIds } } as Record<string, unknown>);
+      const result = await col("findings").deleteMany({ _id: { $in: validIds }, ...ownerFilter } as Record<string, unknown>);
       updated = (result as unknown as { deletedCount: number }).deletedCount ?? validIds.length;
       res.json({ ok: true, action, affected: updated });
       return;
@@ -228,13 +237,13 @@ router.post("/findings/bulk", requireAuth, async (req, res) => {
 
     if (action in statusMap) {
       await col("findings").updateMany(
-        { _id: { $in: validIds } } as Record<string, unknown>,
+        { _id: { $in: validIds }, ...ownerFilter } as Record<string, unknown>,
         { $set: { validation_status: statusMap[action], updated_at: new Date() } }
       );
       updated = validIds.length;
     } else if (action === "assign" && value) {
       await col("findings").updateMany(
-        { _id: { $in: validIds } } as Record<string, unknown>,
+        { _id: { $in: validIds }, ...ownerFilter } as Record<string, unknown>,
         { $set: { assigned_to: value, updated_at: new Date() } }
       );
       updated = validIds.length;
@@ -328,7 +337,9 @@ router.get("/findings/export/:format", requireAuth, async (req, res) => {
     const scanJobId = req.query["scan_job_id"] as string | undefined;
     const severity = req.query["severity"] as string | undefined;
 
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
+    if (session.role !== "admin") query["user_id"] = session.userId ?? null;
     if (scanJobId && ObjectId.isValid(scanJobId)) query["scan_job_id"] = new ObjectId(scanJobId);
     if (severity) query["severity"] = severity;
 
@@ -408,7 +419,9 @@ router.get("/findings/export/:format", requireAuth, async (req, res) => {
 router.get("/scan-jobs/export/:format", requireAuth, async (req, res) => {
   try {
     const { format: fmt } = req.params;
-    const scans = await col("scan_jobs").find({}).sort({ created_at: -1 }).limit(1000).toArray() as Array<Record<string, unknown>>;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+    const scans = await col("scan_jobs").find(ownerFilter).sort({ created_at: -1 }).limit(1000).toArray() as Array<Record<string, unknown>>;
 
     if (fmt === "json") {
       res.setHeader("Content-Type", "application/json");

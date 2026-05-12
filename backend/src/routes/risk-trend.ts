@@ -5,9 +5,11 @@ import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
-router.get("/analytics/risk-trend", requireAuth, async (_req, res) => {
+router.get("/analytics/risk-trend", requireAuth, async (req, res) => {
   try {
-    const findings = await col("findings").find({}).sort({ created_at: 1 }).toArray() as Array<Record<string,unknown>>;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+    const findings = await col("findings").find(userFilter).sort({ created_at: 1 }).toArray() as Array<Record<string,unknown>>;
     const SEV_WEIGHT: Record<string,number> = { critical: 40, high: 20, medium: 8, low: 2, info: 0 };
     const now = Date.now();
     const weeks: Array<{ week: string; risk_score: number; critical: number; high: number; medium: number; low: number; total: number }> = [];

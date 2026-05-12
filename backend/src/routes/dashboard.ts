@@ -10,9 +10,12 @@ router.get("/dashboard/stats", async (req, res) => {
     const findingsCol = col("findings");
     const targetsCol = col("targets");
 
-    const allJobs = (await scanJobsCol.find().toArray()) as Array<Record<string, unknown>>;
-    const allFindings = (await findingsCol.find().toArray()) as Array<Record<string, unknown>>;
-    const totalTargets = await targetsCol.countDocuments();
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+
+    const allJobs = (await scanJobsCol.find(userFilter).toArray()) as Array<Record<string, unknown>>;
+    const allFindings = (await findingsCol.find(userFilter).toArray()) as Array<Record<string, unknown>>;
+    const totalTargets = await targetsCol.countDocuments(userFilter);
 
     const statusCounts = allJobs.reduce<Record<string, number>>((acc, j) => {
       const s = j["status"] as string;

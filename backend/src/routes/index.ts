@@ -31,6 +31,7 @@ import dashboardLayoutRouter from "./dashboard-layout";
 import scheduledScansRouter from "./scheduled-scans";
 import analyticsMetricsRouter from "./analytics-metrics";
 import engagementsRouter from "./engagements";
+import testsRouter from "./tests";
 
 const router: IRouter = Router();
 
@@ -66,5 +67,6 @@ router.use(dashboardLayoutRouter);
 router.use(scheduledScansRouter);
 router.use(analyticsMetricsRouter);
 router.use(engagementsRouter);
+router.use(testsRouter);
 
 export default router;

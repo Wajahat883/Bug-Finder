@@ -20,8 +20,12 @@ router.get("/search", async (req, res) => {
       return res.json({ findings: [], targets: [], scans: [], total: 0 });
     }
 
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const uf = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+
     const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     const searchQuery = {
+      ...uf,
       $or: [
         { title: { $regex: regex } },
         { description: { $regex: regex } },
@@ -43,13 +47,13 @@ router.get("/search", async (req, res) => {
         : Promise.resolve([]),
       !type || type === "targets"
         ? col("targets")
-            .find({ $or: [{ domain: { $regex: regex } }, { url: { $regex: regex } }] })
+            .find({ ...uf, $or: [{ domain: { $regex: regex } }, { url: { $regex: regex } }] })
             .limit(10)
             .toArray()
         : Promise.resolve([]),
       !type || type === "scans"
         ? col("scan_jobs")
-            .find({ $or: [{ target_url: { $regex: regex } }, { ai_summary: { $regex: regex } }] })
+            .find({ ...uf, $or: [{ target_url: { $regex: regex } }, { ai_summary: { $regex: regex } }] })
             .sort({ created_at: -1 })
             .limit(10)
             .toArray()

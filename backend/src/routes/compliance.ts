@@ -190,9 +190,11 @@ router.get("/compliance/findings/:id", async (req, res) => {
 });
 
 // GET /compliance/history — weekly compliance % for last 8 weeks, computed from findings
-router.get("/compliance/history", async (_req, res) => {
+router.get("/compliance/history", async (req, res) => {
   try {
-    const findings = await col("findings").find({}).toArray() as Array<Record<string, unknown>>;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+    const findings = await col("findings").find(userFilter).toArray() as Array<Record<string, unknown>>;
     const now = Date.now();
     const weeks: Array<{ week: string; pci: number; soc2: number; owasp: number; iso: number }> = [];
 
@@ -296,8 +298,10 @@ router.delete("/compliance/attestations/:id", async (req, res) => {
 router.get("/compliance/export/:framework", async (req, res) => {
   try {
     const { framework } = req.params;
-    const findings = await col("findings").find({}).toArray() as Array<Record<string, unknown>>;
-    const remediations = await col("remediations").find({}).toArray() as Array<Record<string, unknown>>;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+    const findings = await col("findings").find(userFilter).toArray() as Array<Record<string, unknown>>;
+    const remediations = await col("remediations").find(userFilter).toArray() as Array<Record<string, unknown>>;
     const attestations = await col("compliance_attestations").find({ framework }).toArray() as Array<Record<string, unknown>>;
     const pack = {
       framework, generated_at: new Date().toISOString(),

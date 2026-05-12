@@ -37,6 +37,33 @@ export interface ScanContext {
   sessionCookie?: string;
   authToken?: string;
   customHeaders?: Record<string, string>;
+  // Auth-aware fetch — pre-bound with session cookie / Bearer token / custom headers
+  authHeaders: Record<string, string>;
+  // Scope enforcement — empty array = unrestricted
+  scopeHosts: string[];
+}
+
+// Returns true if url is within the scan's defined scope
+export function isInScope(ctx: ScanContext, url: string): boolean {
+  if (!ctx.scopeHosts || ctx.scopeHosts.length === 0) return true;
+  try {
+    const host = new URL(url).hostname;
+    return ctx.scopeHosts.some(h => host === h || host.endsWith(`.${h}`));
+  } catch { return false; }
+}
+
+// Auth-aware safeFetch: merges session/token headers into every request
+export async function ctxFetch(
+  ctx: ScanContext,
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = FETCH_TIMEOUT
+): Promise<Response | null> {
+  const merged: RequestInit = {
+    ...options,
+    headers: { ...ctx.authHeaders, ...(options.headers as Record<string, string> ?? {}) },
+  };
+  return safeFetch(url, merged, timeoutMs);
 }
 
 export const FETCH_TIMEOUT = 10000;

@@ -58,6 +58,7 @@ export interface ScanJobOptions {
   sessionCookie?: string;
   authToken?: string;
   customHeaders?: Record<string, string>;
+  scopeHosts?: string[];
 }
 
 // ─── Scanner Pipeline Definitions ────────────────────────────────────────────
@@ -142,7 +143,7 @@ function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled
   return pipeline;
 }
 
-async function saveFinding(jobId: string, targetUrl: string, finding: ScanFinding) {
+async function saveFinding(jobId: string, targetUrl: string, finding: ScanFinding, userId?: string) {
   const sev = finding.severity;
   const riskScore = sev === "critical" ? 90 + Math.floor(Math.random() * 10)
     : sev === "high" ? 70 + Math.floor(Math.random() * 15)
@@ -151,6 +152,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
 
   const insertResult = await col("findings").insertOne({
     scan_job_id: new ObjectId(jobId),
+    user_id: userId ?? null,
     title: finding.title,
     category: finding.category,
     severity: finding.severity,
@@ -194,11 +196,16 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
 }
 
 export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
-  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode, sessionCookie, authToken, customHeaders } = opts;
+  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode, sessionCookie, authToken, customHeaders, scopeHosts } = opts;
 
   const emit = (event: ScannerEvent) => {
     scanEvents.emit(`scan:${jobId}`, event);
   };
+
+  // Build auth headers from session cookie / Bearer token / custom headers
+  const authHeaders: Record<string, string> = { ...(customHeaders ?? {}) };
+  if (sessionCookie) authHeaders["Cookie"] = sessionCookie;
+  if (authToken) authHeaders["Authorization"] = authToken.startsWith("Bearer ") ? authToken : `Bearer ${authToken}`;
 
   const discoveredEndpoints: string[] = [];
   const ctx: ScanContext = {
@@ -212,10 +219,16 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     sessionCookie,
     authToken,
     customHeaders,
+    authHeaders,
+    scopeHosts: scopeHosts ?? [],
   };
 
   const pipeline = getPipeline(profile, validationEnabled, fuzzingEnabled, bugBountyMode);
   const totalSteps = pipeline.length;
+
+  // Resolve the owning user so findings inherit the same user_id
+  const jobDoc = await col("scan_jobs").findOne({ _id: new ObjectId(jobId) } as Record<string, unknown>) as Record<string, unknown> | null;
+  const jobUserId = jobDoc?.["user_id"] as string | undefined;
 
   try {
     await col("scan_jobs").updateOne(
@@ -263,7 +276,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
       }
 
       for (const finding of findings) {
-        const riskScore = await saveFinding(jobId, targetUrl, finding);
+        const riskScore = await saveFinding(jobId, targetUrl, finding, jobUserId);
         totalFindings++;
         maxRiskScore = Math.max(maxRiskScore, riskScore);
 
@@ -344,8 +357,13 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     logger.info({ jobId, totalFindings, riskScore }, "Scan pipeline completed");
 
     // Update target document with scan results, tech stack, subdomains, risk history
-    updateTargetAfterScan(jobId, targetUrl, riskScore, critCount, highCount, totalFindings).catch((err) =>
+    updateTargetAfterScan(jobId, targetUrl, riskScore, critCount, highCount, totalFindings, jobUserId).catch((err) =>
       logger.warn({ err }, "Target update after scan error")
+    );
+
+    // Differential engine — compare with previous completed scan on the same target
+    runDifferentialAnalysis(jobId, targetUrl, jobUserId).catch((err) =>
+      logger.warn({ err }, "Differential analysis error")
     );
 
     // Slack notification for critical/high findings
@@ -365,9 +383,82 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
   }
 }
 
+// Differential engine: mark new / recurring / resolved findings vs the previous scan
+async function runDifferentialAnalysis(jobId: string, targetUrl: string, userId?: string): Promise<void> {
+  let domain: string;
+  try { domain = new URL(targetUrl).hostname; } catch { return; }
+
+  // Find previous completed scan on same target by same user
+  const prevQuery: Record<string, unknown> = {
+    target_url: { $regex: domain, $options: "i" },
+    status: "completed",
+    _id: { $ne: new ObjectId(jobId) },
+  };
+  if (userId) prevQuery["user_id"] = userId;
+
+  const prevScan = (await col("scan_jobs")
+    .find(prevQuery)
+    .sort({ completed_at: -1 })
+    .limit(1)
+    .toArray())[0] as Record<string, unknown> | undefined;
+
+  if (!prevScan) return; // First scan on this target — no diff possible
+
+  const [currentFindings, prevFindings] = await Promise.all([
+    col("findings").find({ scan_job_id: new ObjectId(jobId) } as Record<string, unknown>).toArray() as Promise<Array<Record<string, unknown>>>,
+    col("findings").find({ scan_job_id: prevScan["_id"] } as Record<string, unknown>).toArray() as Promise<Array<Record<string, unknown>>>,
+  ]);
+
+  const key = (f: Record<string, unknown>) => `${String(f["title"])}||${String(f["endpoint"])}`;
+  const prevKeys = new Set(prevFindings.map(key));
+  const currentKeys = new Set(currentFindings.map(key));
+
+  let newCount = 0, recurringCount = 0, resolvedCount = 0;
+
+  // Mark current findings as new or recurring
+  for (const f of currentFindings) {
+    const isRecurring = prevKeys.has(key(f));
+    await col("findings").updateOne(
+      { _id: f["_id"] } as Record<string, unknown>,
+      { $set: { is_new: !isRecurring, is_recurring: isRecurring } }
+    );
+    if (isRecurring) recurringCount++; else newCount++;
+  }
+
+  // Mark previous findings that no longer appear as resolved
+  for (const f of prevFindings) {
+    if (!currentKeys.has(key(f))) {
+      await col("findings").updateOne(
+        { _id: f["_id"] } as Record<string, unknown>,
+        { $set: { is_resolved: true } }
+      );
+      resolvedCount++;
+    }
+  }
+
+  // Store diff stats on the scan job
+  await col("scan_jobs").updateOne(
+    { _id: new ObjectId(jobId) } as Record<string, unknown>,
+    {
+      $set: {
+        diff_stats: {
+          new: newCount,
+          recurring: recurringCount,
+          resolved: resolvedCount,
+          compared_to_scan_id: String(prevScan["_id"]),
+          compared_at: new Date(),
+        },
+      },
+    }
+  );
+
+  logger.info({ jobId, newCount, recurringCount, resolvedCount }, "Differential analysis complete");
+}
+
 async function updateTargetAfterScan(
   jobId: string, targetUrl: string, riskScore: number,
-  critCount: number, highCount: number, totalFindings: number
+  critCount: number, highCount: number, totalFindings: number,
+  userId?: string
 ) {
   let domain: string;
   try { domain = new URL(targetUrl).hostname; } catch { return; }
@@ -404,7 +495,7 @@ async function updateTargetAfterScan(
     } catch { /* ignore */ }
   }
 
-  const existing = (await col("targets").findOne({ domain } as Record<string, unknown>)) as Record<string, unknown> | null;
+  const existing = (await col("targets").findOne({ domain, ...(jobUserId ? { user_id: jobUserId } : {}) } as Record<string, unknown>)) as Record<string, unknown> | null;
 
   const riskHistoryEntry = { score: riskScore, date: new Date().toISOString() };
   let riskHistory = (existing?.["risk_history"] as Array<{ score: number; date: string }>) ?? [];
@@ -418,7 +509,7 @@ async function updateTargetAfterScan(
 
   if (existing) {
     await col("targets").updateOne(
-      { domain } as Record<string, unknown>,
+      { domain, ...(userId ? { user_id: userId } : {}) } as Record<string, unknown>,
       {
         $set: {
           last_scanned: new Date(),
@@ -438,6 +529,7 @@ async function updateTargetAfterScan(
     await col("targets").insertOne({
       url: targetUrl,
       domain,
+      user_id: userId ?? null,
       last_scanned: new Date(),
       risk_score: riskScore,
       total_findings: totalFindings,

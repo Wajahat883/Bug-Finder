@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, safeFetch, ctxFetch } from "./types";
 
 export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, discoveredEndpoints } = ctx;

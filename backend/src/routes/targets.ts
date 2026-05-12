@@ -36,7 +36,9 @@ router.get("/targets", requireAuth, async (req, res) => {
     const sortBy = (req.query["sort_by"] as string) ?? "last_scanned";
     const sortDir = req.query["sort_dir"] === "asc" ? 1 : -1;
 
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
+    if (session.role !== "admin") query["user_id"] = session.userId ?? null;
     if (search) query["domain"] = { $regex: search, $options: "i" };
     if (tag) query["tags"] = tag;
 
@@ -250,13 +252,15 @@ router.get("/attack-surface", requireAuth, async (req, res) => {
   try {
     const tagFilter = req.query["tag"] as string | undefined;
 
-    const targetQuery: Record<string, unknown> = {};
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+    const targetQuery: Record<string, unknown> = { ...ownerFilter };
     if (tagFilter) targetQuery["tags"] = tagFilter;
     const targets = (await col("targets").find(targetQuery).toArray()) as Array<Record<string, unknown>>;
     const domainSet = new Set(targets.map((t) => String(t["domain"])));
 
     // All findings for these targets
-    const allFindings = (await col("findings").find({}).toArray()) as Array<Record<string, unknown>>;
+    const allFindings = (await col("findings").find(ownerFilter).toArray()) as Array<Record<string, unknown>>;
     const scopedFindings = tagFilter
       ? allFindings.filter((f) => {
           try { return domainSet.has(new URL(String(f["target_url"])).hostname); } catch { return false; }

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isInScope } from "./types";
 
 const SQL_ERROR_PATTERNS = [
   "sql syntax",
@@ -57,11 +57,13 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   emit({ type: "engine_start", engine: "SQLMap/SQLi", message: "Probing for SQL injection (error-based, boolean-based, time-based)" });
 
   const budget = profile === "quick" ? 2 : profile === "standard" ? 5 : 10;
-  const endpoints = discoveredEndpoints.filter(ep => ep.includes("/api") || ep.includes("?")).slice(0, budget);
-  if (!endpoints.includes(targetUrl)) endpoints.unshift(targetUrl);
+  const endpoints = discoveredEndpoints
+    .filter(ep => isInScope(ctx, ep) && (ep.includes("/api") || ep.includes("?")))
+    .slice(0, budget);
+  if (!endpoints.includes(targetUrl) && isInScope(ctx, targetUrl)) endpoints.unshift(targetUrl);
 
   for (const endpoint of endpoints.slice(0, budget)) {
-    const baseline = await safeFetch(endpoint);
+    const baseline = await ctxFetch(ctx, endpoint);
     if (!baseline) continue;
     const baseBody = await baseline.text().catch(() => "");
     const baseStatus = baseline.status;
@@ -71,7 +73,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       // ── 1. Error-based detection ─────────────────────────────────────────
       for (const probe of SQL_ERROR_PROBES.slice(0, profile === "quick" ? 2 : SQL_ERROR_PROBES.length)) {
         const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(probe)}`;
-        const res = await safeFetch(testUrl);
+        const res = await ctxFetch(ctx, testUrl);
         if (!res) continue;
 
         const body = (await res.text().catch(() => "")).toLowerCase();
@@ -129,7 +131,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           const trueUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(truePayload)}`;
           const falseUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(falsePayload)}`;
 
-          const [trueRes, falseRes] = await Promise.all([safeFetch(trueUrl), safeFetch(falseUrl)]);
+          const [trueRes, falseRes] = await Promise.all([ctxFetch(ctx, trueUrl), ctxFetch(ctx, falseUrl)]);
           if (!trueRes || !falseRes) continue;
 
           const trueBody = await trueRes.text().catch(() => "");
@@ -176,7 +178,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(probe)}`;
 
           const start = Date.now();
-          const res = await safeFetch(testUrl, { signal: AbortSignal.timeout(8000) });
+          const res = await ctxFetch(ctx, testUrl, { signal: AbortSignal.timeout(8000) });
           const elapsed = Date.now() - start;
 
           if (!res) continue;

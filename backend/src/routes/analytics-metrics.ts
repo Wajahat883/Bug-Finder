@@ -1,14 +1,20 @@
-import { Router } from "express";
+import { Router, Request } from "express";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
+function userFilter(req: Request): Record<string, unknown> {
+  const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+  return session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+}
+
 // GET /metrics/mttr — Mean Time to Remediate grouped by severity (in hours)
-router.get("/metrics/mttr", requireAuth, async (_req, res) => {
+router.get("/metrics/mttr", requireAuth, async (req, res) => {
   try {
-    const findings = (await col("findings").find({ resolved_at: { $exists: true, $ne: null } } as Record<string, unknown>).toArray()) as Array<Record<string, unknown>>;
+    const filter = { resolved_at: { $exists: true, $ne: null }, ...userFilter(req) };
+    const findings = (await col("findings").find(filter as Record<string, unknown>).toArray()) as Array<Record<string, unknown>>;
     const groups: Record<string, number[]> = { critical: [], high: [], medium: [], low: [] };
     for (const f of findings) {
       const sev = String(f["severity"] ?? "");
@@ -34,10 +40,10 @@ router.get("/metrics/mttr", requireAuth, async (_req, res) => {
 });
 
 // GET /metrics/sla-compliance — % remediated within SLA window
-router.get("/metrics/sla-compliance", requireAuth, async (_req, res) => {
+router.get("/metrics/sla-compliance", requireAuth, async (req, res) => {
   try {
     const SLA_HOURS: Record<string, number> = { critical: 24, high: 168, medium: 720, low: 2160 };
-    const findings = (await col("findings").find({}).toArray()) as Array<Record<string, unknown>>;
+    const findings = (await col("findings").find(userFilter(req)).toArray()) as Array<Record<string, unknown>>;
     const result: Record<string, { compliant: number; total: number; pct: number }> = {};
     for (const [sev, hours] of Object.entries(SLA_HOURS)) {
       const sevFindings = findings.filter((f) => String(f["severity"] ?? "") === sev);
@@ -59,9 +65,9 @@ router.get("/metrics/sla-compliance", requireAuth, async (_req, res) => {
 });
 
 // GET /metrics/false-positive-rate — FP rate grouped by scanner_name
-router.get("/metrics/false-positive-rate", requireAuth, async (_req, res) => {
+router.get("/metrics/false-positive-rate", requireAuth, async (req, res) => {
   try {
-    const findings = (await col("findings").find({}).toArray()) as Array<Record<string, unknown>>;
+    const findings = (await col("findings").find(userFilter(req)).toArray()) as Array<Record<string, unknown>>;
     const scanners: Record<string, { total: number; false_positives: number }> = {};
     for (const f of findings) {
       const scanner = String(f["scanner_name"] ?? "unknown");
@@ -83,9 +89,9 @@ router.get("/metrics/false-positive-rate", requireAuth, async (_req, res) => {
 });
 
 // GET /metrics/recurrence-rate — findings that reappeared across scans on same target
-router.get("/metrics/recurrence-rate", requireAuth, async (_req, res) => {
+router.get("/metrics/recurrence-rate", requireAuth, async (req, res) => {
   try {
-    const findings = (await col("findings").find({}).toArray()) as Array<Record<string, unknown>>;
+    const findings = (await col("findings").find(userFilter(req)).toArray()) as Array<Record<string, unknown>>;
     const grouped: Record<string, Set<string>> = {};
     for (const f of findings) {
       const key = `${String(f["title"] ?? "")}||${String(f["endpoint"] ?? "")}`;
@@ -104,9 +110,9 @@ router.get("/metrics/recurrence-rate", requireAuth, async (_req, res) => {
 });
 
 // GET /metrics/risk-velocity — risk score trend per target
-router.get("/metrics/risk-velocity", requireAuth, async (_req, res) => {
+router.get("/metrics/risk-velocity", requireAuth, async (req, res) => {
   try {
-    const scans = (await col("scan_jobs").find({ status: "completed" } as Record<string, unknown>).sort({ created_at: -1 }).limit(200).toArray()) as Array<Record<string, unknown>>;
+    const scans = (await col("scan_jobs").find({ status: "completed", ...userFilter(req) } as Record<string, unknown>).sort({ created_at: -1 }).limit(200).toArray()) as Array<Record<string, unknown>>;
     const byTarget: Record<string, Array<{ score: number; created_at: Date }>> = {};
     for (const s of scans) {
       const url = String(s["target_url"] ?? "");
@@ -128,9 +134,9 @@ router.get("/metrics/risk-velocity", requireAuth, async (_req, res) => {
 });
 
 // GET /analytics/scanner-performance — per-scanner: total findings, avg confidence, fp_rate
-router.get("/analytics/scanner-performance", requireAuth, async (_req, res) => {
+router.get("/analytics/scanner-performance", requireAuth, async (req, res) => {
   try {
-    const findings = (await col("findings").find({}).toArray()) as Array<Record<string, unknown>>;
+    const findings = (await col("findings").find(userFilter(req)).toArray()) as Array<Record<string, unknown>>;
     const scanners: Record<string, { total: number; confidence_sum: number; false_positives: number }> = {};
     for (const f of findings) {
       const s = String(f["scanner_name"] ?? "unknown");
@@ -153,9 +159,9 @@ router.get("/analytics/scanner-performance", requireAuth, async (_req, res) => {
 });
 
 // GET /analytics/finding-trends — findings per day for last 30 days
-router.get("/analytics/finding-trends", requireAuth, async (_req, res) => {
+router.get("/analytics/finding-trends", requireAuth, async (req, res) => {
   try {
-    const findings = (await col("findings").find({}).toArray()) as Array<Record<string, unknown>>;
+    const findings = (await col("findings").find(userFilter(req)).toArray()) as Array<Record<string, unknown>>;
     const today = new Date();
     const trend = Array.from({ length: 30 }, (_, i) => {
       const d = new Date(today);
@@ -175,9 +181,9 @@ router.get("/analytics/finding-trends", requireAuth, async (_req, res) => {
 });
 
 // GET /analytics/top-vulnerable-targets — top 10 targets by finding count + risk score
-router.get("/analytics/top-vulnerable-targets", requireAuth, async (_req, res) => {
+router.get("/analytics/top-vulnerable-targets", requireAuth, async (req, res) => {
   try {
-    const targets = (await col("targets").find({}).sort({ total_findings: -1 }).limit(10).toArray()) as Array<Record<string, unknown>>;
+    const targets = (await col("targets").find(userFilter(req)).sort({ total_findings: -1 }).limit(10).toArray()) as Array<Record<string, unknown>>;
     res.json(targets.map((t) => ({
       id: String(t["_id"]),
       url: t["url"],

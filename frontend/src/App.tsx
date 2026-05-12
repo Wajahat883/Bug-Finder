@@ -40,6 +40,7 @@ import AdminPanel from "@/pages/admin-panel";
 import Notifications from "@/pages/notifications";
 import TwoFactor from "@/pages/two-factor";
 import ScheduledScans from "@/pages/scheduled-scans";
+import TestingDashboard from "@/pages/testing";
 import AdminLogin from "@/pages/admin-login";
 import MetricsDashboard from "@/pages/metrics-dashboard";
 import AnalyticsEnhanced from "@/pages/analytics-enhanced";
@@ -108,6 +109,9 @@ function Router() {
             <Route path="/notifications" component={Notifications} />
             <Route path="/security" component={TwoFactor} />
             <Route path="/scheduled-scans" component={ScheduledScans} />
+            <Route path="/testing">
+              {() => <AdminRoute component={TestingDashboard} />}
+            </Route>
             <Route path="/metrics" component={MetricsDashboard} />
             <Route path="/analytics-enhanced" component={AnalyticsEnhanced} />
             <Route path="/engagements/:id" component={EngagementDetail} />

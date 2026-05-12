@@ -19,10 +19,12 @@ router.post("/notifications/digest", requireAuth, digestLimiter, async (req, res
     const { email: recipient } = req.body as { email?: string };
     if (!recipient) return res.status(400).json({ error: "email is required" });
 
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
     const [recentFindings, recentScans, activeRemediations] = await Promise.all([
-      col("findings").find({}).sort({ created_at: -1 }).limit(10).toArray() as Promise<Array<Record<string, unknown>>>,
-      col("scan_jobs").find({ status: "completed" }).sort({ completed_at: -1 }).limit(5).toArray() as Promise<Array<Record<string, unknown>>>,
-      col("remediations").find({ status: { $in: ["pending", "in_progress"] } }).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("findings").find(userFilter).sort({ created_at: -1 }).limit(10).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("scan_jobs").find({ status: "completed", ...userFilter }).sort({ completed_at: -1 }).limit(5).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("remediations").find({ status: { $in: ["pending", "in_progress"] }, ...userFilter }).toArray() as Promise<Array<Record<string, unknown>>>,
     ]);
 
     const critCount = recentFindings.filter((f) => f["severity"] === "critical").length;

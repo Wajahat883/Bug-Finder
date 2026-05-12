@@ -41,7 +41,9 @@ function getSlaStatus(dueDate: Date, resolvedAt?: Date | null): "on_track" | "at
 router.get("/sla/summary", async (req, res) => {
   try {
     const scanId = req.query["scan_id"] as string | undefined;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
+    if (session?.role !== "admin") query["user_id"] = session?.userId ?? null;
     if (scanId && ObjectId.isValid(scanId)) {
       query["scan_job_id"] = new ObjectId(scanId);
     }
@@ -144,9 +146,11 @@ router.post("/sla/finding/:id/resolve", async (req, res) => {
 });
 
 // GET /sla/velocity — avg time-to-fix (days) per severity for resolved findings
-router.get("/sla/velocity", async (_req, res) => {
+router.get("/sla/velocity", async (req, res) => {
   try {
-    const resolved = await col("findings").find({ resolved_at: { $exists: true, $ne: null } }).toArray() as Array<Record<string, unknown>>;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const uf = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+    const resolved = await col("findings").find({ resolved_at: { $exists: true, $ne: null }, ...uf } as Record<string, unknown>).toArray() as Array<Record<string, unknown>>;
     const SLA_TARGETS: Record<string, number> = { critical: 1, high: 7, medium: 30, low: 90 };
     const groups: Record<string, number[]> = { critical: [], high: [], medium: [], low: [] };
     for (const f of resolved) {
@@ -172,10 +176,12 @@ router.get("/sla/velocity", async (_req, res) => {
 });
 
 // GET /sla/heatmap — breach density per day for last 90 days
-router.get("/sla/heatmap", async (_req, res) => {
+router.get("/sla/heatmap", async (req, res) => {
   try {
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const uf = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-    const findings = await col("findings").find({ created_at: { $gte: ninetyDaysAgo } }).toArray() as Array<Record<string, unknown>>;
+    const findings = await col("findings").find({ created_at: { $gte: ninetyDaysAgo }, ...uf } as Record<string, unknown>).toArray() as Array<Record<string, unknown>>;
     const dayMap: Record<string, number> = {};
     const SLA_DAYS2: Record<string, number> = { critical: 1, high: 7, medium: 30, low: 90, info: 365 };
     for (const f of findings) {
@@ -196,9 +202,11 @@ router.get("/sla/heatmap", async (_req, res) => {
 });
 
 // GET /sla/burn-down — weekly on_track/at_risk/breached/resolved counts for last 6 weeks
-router.get("/sla/burn-down", async (_req, res) => {
+router.get("/sla/burn-down", async (req, res) => {
   try {
-    const findings = await col("findings").find({}).toArray() as Array<Record<string, unknown>>;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+    const findings = await col("findings").find(userFilter).toArray() as Array<Record<string, unknown>>;
     const SLA_DAYS3: Record<string, number> = { critical: 1, high: 7, medium: 30, low: 90, info: 365 };
     const weeks = [];
     for (let i = 5; i >= 0; i--) {

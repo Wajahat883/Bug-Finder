@@ -62,6 +62,7 @@ function pageName(loc: string): string {
   if (loc.startsWith("/notifications")) return "Notifications";
   if (loc.startsWith("/security")) return "2-Factor Auth";
   if (loc.startsWith("/scheduled-scans")) return "Scheduled Scans";
+  if (loc.startsWith("/testing")) return "Testing Dashboard";
   if (loc.startsWith("/scheduled")) return "Scheduled Scans";
   if (loc.startsWith("/metrics")) return "Security Metrics";
   if (loc.startsWith("/analytics-enhanced")) return "Analytics+";
@@ -111,6 +112,7 @@ const NAV_GROUPS = [
     label: "Automation",
     items: [
       { href: "/scheduled-scans", label: "Scheduled",  icon: Timer },
+      { href: "/testing",         label: "Testing",     icon: Activity },
     ],
   },
 ];
@@ -340,7 +342,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const displayName = (user as Record<string, unknown>)?.github_login as string || (user as Record<string, unknown>)?.username as string || "SecOps Lead";
   const displayRole = ((user as Record<string, unknown>)?.role as string)?.toUpperCase() || "ANALYST";
   const isAdmin = (user as Record<string, unknown>)?.role === "admin";
-  const ADMIN_ONLY_PATHS = ["/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel"];
+  const ADMIN_ONLY_PATHS = ["/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel", "/testing"];
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
