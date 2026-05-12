@@ -128,11 +128,20 @@ function makeCollection(name: string): Collection {
       docs.push(full);
       return { insertedId: id };
     },
-    async updateOne(query, update) {
-      const doc = docs.find((d) => matchesQuery(d, query));
-      if (!doc) return;
+    async updateOne(query, update, opts?) {
+      let doc = docs.find((d) => matchesQuery(d, query));
+      if (!doc && opts?.upsert) {
+        const setOnInsert = (update["$setOnInsert"] ?? {}) as Record<string, unknown>;
+        const set = (update["$set"] ?? {}) as Record<string, unknown>;
+        const id = new ObjectId();
+        const newDoc: Doc = { _id: id, ...setOnInsert, ...set };
+        docs.push(newDoc);
+        return { upsertedId: id };
+      }
+      if (!doc) return {};
       const set = (update["$set"] ?? {}) as Record<string, unknown>;
       Object.assign(doc, set);
+      return {};
     },
     async updateMany(query, update) {
       const matches = docs.filter((d) => matchesQuery(d, query));
