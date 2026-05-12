@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
+import { checkSsrf } from "../lib/ssrf-guard";
 
 const router = Router();
 router.use(requireAuth);
@@ -77,6 +78,14 @@ router.post("/scan-jobs", async (req, res) => {
     if (!body.target_url || !body.scan_profile) {
       return res.status(400).json({ error: "target_url and scan_profile are required" });
     }
+
+    // POINT 1: SSRF Protection — block private/internal IPs
+    const ssrfCheck = checkSsrf(body.target_url);
+    if (!ssrfCheck.allowed) {
+      logger.warn({ targetUrl: body.target_url, reason: ssrfCheck.reason }, "SSRF scan attempt blocked");
+      return res.status(400).json({ error: `Scan target not allowed: ${ssrfCheck.reason}` });
+    }
+
     if (!body.authorization_acknowledged) {
       return res.status(400).json({ error: "Authorization must be acknowledged before scanning" });
     }
@@ -123,9 +132,9 @@ router.post("/scan-jobs", async (req, res) => {
       severity: null,
     });
 
-    // Enqueue scan via worker queue system
+    // POINT 4: Backpressure — check queue capacity before accepting job
     const { enqueueScan } = await import("../services/queue/manager");
-    enqueueScan({
+    const enqueueResult = await enqueueScan({
       jobId: String(insert.insertedId),
       targetUrl: body.target_url,
       profile: body.scan_profile as "quick" | "standard" | "deep",
@@ -133,6 +142,11 @@ router.post("/scan-jobs", async (req, res) => {
       fuzzingEnabled: body.fuzzing_enabled ?? false,
       bugBountyMode: body.bug_bounty_mode ?? false,
     });
+    if (!enqueueResult.ok) {
+      // Remove the scan job we just created since it can't be queued
+      await col("scan_jobs").updateOne({ _id: insert.insertedId } as Record<string, unknown>, { $set: { status: "failed", error_message: enqueueResult.reason } });
+      return res.status(503).json({ error: enqueueResult.reason ?? "Queue full" });
+    }
 
     const job = (await col("scan_jobs").findOne({ _id: insert.insertedId } as Record<string, unknown>)) as Record<string, unknown>;
     res.status(201).json(formatJob(job));

@@ -1,0 +1,7 @@
+# POINT 11: Kubernetes manifests
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bug-finder-pro
+  labels:
+    app.kubernetes.io/name: bug-finder-pro

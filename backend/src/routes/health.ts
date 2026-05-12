@@ -1,6 +1,7 @@
 import { Router } from "express";
 import OpenAI from "openai";
 import { col } from "../lib/db";
+import { getQueueStats } from "../services/queue/manager";
 
 
 const router = Router();
@@ -35,7 +36,7 @@ router.get("/healthz", async (_req, res) => {
   let redisStatus: string = "unavailable";
   let zapStatus: string = "unknown";
   let playwrightStatus: string = "unavailable";
-  const queueStats = { pending: 0, running: 0 };
+  const queueStats = await getQueueStats();
 
   try { await col("settings").findOne({}); } catch { dbStatus = "unhealthy"; }
 

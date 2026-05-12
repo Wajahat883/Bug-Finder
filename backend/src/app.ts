@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import cors from "cors";
+import helmet from "helmet";
 import session from "express-session";
 import MongoStore from "connect-mongo";
 import pinoHttp from "pino-http";
@@ -10,6 +11,7 @@ import { seedData } from "./lib/seed";
 import { apiKeyAuth } from "./middlewares/apikey";
 import { ipAllowlistMiddleware } from "./middlewares/ip-allowlist";
 import { globalLimiter } from "./middlewares/rate-limit";
+import { correlationMiddleware } from "./middlewares/correlation";
 import { initScheduler } from "./services/scheduler";
 
 const app: Express = express();
@@ -18,6 +20,30 @@ connectDb()
   .then(() => seedData())
   .then(() => initScheduler())
   .catch((err) => logger.warn({ err }, "DB init/seed error — continuing without database"));
+
+// POINT 2: CSP hardening via helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // allow SSE cross-origin in dev
+}));
+
+// POINT 2: CORS — only allow configured origins (not wildcard)
+const allowedOrigins = (process.env["ALLOWED_ORIGINS"] ?? "http://localhost:3000,http://localhost:5173").split(",").map(o => o.trim());
+
+// POINT 9: Correlation IDs on every request
+app.use(correlationMiddleware);
 
 app.use(
   pinoHttp({
@@ -33,7 +59,15 @@ app.use(
   }),
 );
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-Correlation-ID"],
+}));
 
 app.set("trust proxy", 1);
 app.set("trust proxy", 1);
