@@ -648,6 +648,33 @@ function detectKillChains(findings: Array<Record<string, unknown>>): KillChain[]
   return chains.filter((c) => c.finding_ids.length > 0);
 }
 
+// ── Deduplicate scan findings ─────────────────────────────────────────────────
+router.post("/scan-jobs/:id/deduplicate", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const { clusterFindings } = await import("../services/dedup");
+    const clusters = await clusterFindings(id);
+    let markedCount = 0;
+    for (const cluster of clusters) {
+      if (cluster.cluster.length <= 1) continue;
+      // Mark all but representative as duplicates
+      const duplicateIds = cluster.cluster.slice(1).filter(did => ObjectId.isValid(did)).map(did => new ObjectId(did));
+      if (duplicateIds.length > 0) {
+        await col("findings").updateMany(
+          { _id: { $in: duplicateIds } } as Record<string, unknown>,
+          { $set: { is_duplicate: true, duplicate_of: cluster.representative, updated_at: new Date() } }
+        );
+        markedCount += duplicateIds.length;
+      }
+    }
+    res.json({ clusters, marked_duplicates: markedCount });
+  } catch (err) {
+    logger.error({ err }, "Deduplicate error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── Retest finding ────────────────────────────────────────────────────────────
 router.post("/findings/:id/retest", requireAuth, async (req, res) => {
   try {

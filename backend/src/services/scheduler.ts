@@ -35,6 +35,16 @@ export async function initScheduler() {
     }
   });
 
+  // Attack surface monitoring: daily at 2am
+  cron.schedule("0 2 * * *", async () => {
+    try {
+      const { runAttackSurfaceMonitor } = await import("./monitor/attack-surface-monitor");
+      await runAttackSurfaceMonitor();
+    } catch (err) {
+      logger.error({ err }, "Attack surface monitor cron error");
+    }
+  });
+
   logger.info({ count: scheduled.length }, "Scheduler initialized");
   await initReportSchedules();
 }

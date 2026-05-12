@@ -43,9 +43,14 @@ type Doc = Record<string, unknown> & { _id: ObjectId };
 type Collection = {
   docs: Doc[];
   findOne: (query: Record<string, unknown>) => Doc | null;
-  find: (query?: Record<string, unknown>) => { toArray: () => Doc[]; sort: (s: unknown) => { toArray: () => Doc[] } };
+  find: (query?: Record<string, unknown>) => {
+    toArray: () => Doc[];
+    sort: (s: Record<string, 1 | -1>) => { toArray: () => Doc[] };
+    skip: (n: number) => { toArray: () => Doc[]; sort: (s: Record<string, 1 | -1>) => { toArray: () => Doc[] } };
+    limit: (n: number) => { toArray: () => Doc[]; sort: (s: Record<string, 1 | -1>) => { toArray: () => Doc[] }; skip: (n: number) => { toArray: () => Doc[] } };
+  };
   insertOne: (doc: Record<string, unknown>) => Promise<{ insertedId: ObjectId }>;
-  updateOne: (q: Record<string, unknown>, upd: Record<string, unknown>) => Promise<void>;
+  updateOne: (q: Record<string, unknown>, upd: Record<string, unknown>, opts?: { upsert?: boolean }) => Promise<{ upsertedId?: ObjectId }>;
   updateMany: (q: Record<string, unknown>, upd: Record<string, unknown>) => Promise<void>;
   deleteOne: (q: Record<string, unknown>) => Promise<void>;
   deleteMany: (q: Record<string, unknown>) => Promise<{ deletedCount: number }>;
@@ -84,17 +89,36 @@ function makeCollection(name: string): Collection {
   return {
     docs,
     findOne(query) {
-      if ("_id" in query) {
-        const id = query["_id"];
-        return docs.find((d) => d._id.equals(id as string)) ?? null;
-      }
-      return docs.find((d) => matchesQuery(d, query)) ?? null;
+      const results = docs.filter((d) => matchesQuery(d, query));
+      return results[0] ?? null;
     },
     find(query = {}) {
       const filtered = docs.filter((d) => matchesQuery(d, query));
+      let _skip = 0;
+      let _limit = filtered.length;
+      let _sort: Record<string, 1 | -1> | null = null;
+      const buildInner = (): { toArray: () => Doc[]; sort: (s: Record<string, 1 | -1>) => { toArray: () => Doc[] } } => {
+        let arr = [...filtered];
+        if (_sort) {
+          const [key, dir] = Object.entries(_sort)[0] ?? [];
+          if (key) arr.sort((a, b) => {
+            const av = a[key], bv = b[key];
+            const an = av instanceof Date ? av.getTime() : Number(av ?? 0);
+            const bn = bv instanceof Date ? bv.getTime() : Number(bv ?? 0);
+            return (an - bn) * dir;
+          });
+        }
+        const page = arr.slice(_skip, _skip + _limit);
+        return {
+          toArray: () => page,
+          sort: (s: Record<string, 1 | -1>) => { _sort = s; return buildInner(); },
+        };
+      };
       const self = {
-        toArray: () => filtered,
-        sort: (_s: unknown) => ({ toArray: () => filtered }),
+        toArray: () => buildInner().toArray(),
+        sort: (s: Record<string, 1 | -1>) => { _sort = s; return buildInner(); },
+        skip: (n: number) => { _skip = n; const inner = buildInner(); return { ...inner, skip: (n2: number) => { _skip = n2; return buildInner(); } }; },
+        limit: (n: number) => { _limit = n; const inner = buildInner(); return { ...inner, limit: (n2: number) => { _limit = n2; return buildInner(); } }; },
       };
       return self;
     },

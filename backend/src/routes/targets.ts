@@ -382,4 +382,26 @@ router.get("/attack-surface", requireAuth, async (req, res) => {
   }
 });
 
+// POST /targets/:id/monitor — manually trigger attack surface monitoring for a target
+router.post("/targets/:id/monitor", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const target = (await col("targets").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
+    if (!target) return res.status(404).json({ error: "Target not found" });
+
+    // Run in background
+    import("../services/monitor/attack-surface-monitor").then(({ runAttackSurfaceMonitorForTarget }) => {
+      runAttackSurfaceMonitorForTarget(String(target["_id"]), String(target["url"] ?? "")).catch((err) => {
+        logger.error({ err }, "Manual monitor error");
+      });
+    }).catch(() => {});
+
+    res.json({ ok: true, message: "Attack surface monitoring started in background" });
+  } catch (err) {
+    logger.error({ err }, "Target monitor error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

@@ -29,6 +29,8 @@ import certsRouter from "./certs";
 import webhookLogRouter from "./webhook-log";
 import dashboardLayoutRouter from "./dashboard-layout";
 import scheduledScansRouter from "./scheduled-scans";
+import analyticsMetricsRouter from "./analytics-metrics";
+import engagementsRouter from "./engagements";
 
 const router: IRouter = Router();
 
@@ -62,5 +64,7 @@ router.use(certsRouter);
 router.use(webhookLogRouter);
 router.use(dashboardLayoutRouter);
 router.use(scheduledScansRouter);
+router.use(analyticsMetricsRouter);
+router.use(engagementsRouter);
 
 export default router;

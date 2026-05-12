@@ -3,25 +3,27 @@ import { col, ObjectId } from "./db";
 import { logger } from "./logger";
 
 export async function seedData() {
-  // Always ensure the default admin user exists (idempotent)
-  const adminEmail = "Waji2156@gmail.com";
-  const adminPassword = "Waji2156..";
-  const adminExists = await col("users").findOne({ email: adminEmail });
-  if (!adminExists) {
-    logger.info("Creating default admin user...");
-    const hashed = await bcrypt.hash(adminPassword, 10);
-    await col("users").insertOne({
-      _id: new ObjectId(),
-      username: "waji_admin",
-      email: adminEmail,
-      password: hashed,
-      role: "admin",
-      first_name: "Waji",
-      last_name: "Admin",
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
-    logger.info(`Default admin user created — email: ${adminEmail}, password: ${adminPassword}`);
+  const adminEmail = process.env["ADMIN_EMAIL"];
+  const adminPassword = process.env["ADMIN_PASSWORD"];
+
+  if (adminEmail && adminPassword) {
+    const adminExists = await col("users").findOne({ email: adminEmail });
+    if (!adminExists) {
+      logger.info("Creating default admin user from env vars...");
+      const hashed = await bcrypt.hash(adminPassword, 10);
+      await col("users").insertOne({
+        _id: new ObjectId(),
+        username: "waji_admin",
+        email: adminEmail,
+        password: hashed,
+        role: "admin",
+        first_name: "Waji",
+        last_name: "Admin",
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      logger.info({ email: adminEmail }, "Default admin user created");
+    }
   }
 
   const settingsCol = col("settings");

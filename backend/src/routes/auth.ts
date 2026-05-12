@@ -12,7 +12,7 @@ const router = Router();
 
 const DEFAULT_ADMIN_EMAIL = process.env["ADMIN_EMAIL"] ?? "admin@bugfinder.local";
 let DEFAULT_ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] ?? "";
-if (!DEFAULT_ADMIN_PASSWORD) { DEFAULT_ADMIN_PASSWORD = crypto.randomBytes(12).toString("hex"); console.log(`=== Auto-generated admin password: ${DEFAULT_ADMIN_PASSWORD} ===`); }
+if (!DEFAULT_ADMIN_PASSWORD) { DEFAULT_ADMIN_PASSWORD = crypto.randomBytes(12).toString("hex"); logger.warn("ADMIN_PASSWORD not set — auto-generated a random password (will be printed once)"); console.log(`=== Auto-generated admin password: ${DEFAULT_ADMIN_PASSWORD} ===`); }
 
 interface SessionData {
   userId?: string;
@@ -397,12 +397,44 @@ router.delete("/admin/users/:id", requireAdmin, async (req, res) => {
 // ── 2FA / TOTP ────────────────────────────────────────────────────────────────
 
 // Simple TOTP implementation without external library
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
 function generateTotpSecret(): string {
-  return crypto.randomBytes(20).toString("base64").replace(/[^A-Z2-7]/gi, "A").toUpperCase().slice(0, 32);
+  const bytes = crypto.randomBytes(20);
+  let result = "";
+  for (let i = 0; i < bytes.length; i += 5) {
+    const chunk = [bytes[i] ?? 0, bytes[i + 1] ?? 0, bytes[i + 2] ?? 0, bytes[i + 3] ?? 0, bytes[i + 4] ?? 0];
+    result += BASE32_ALPHABET[(chunk[0] >> 3) & 31];
+    result += BASE32_ALPHABET[((chunk[0] << 2) | (chunk[1] >> 6)) & 31];
+    result += BASE32_ALPHABET[(chunk[1] >> 1) & 31];
+    result += BASE32_ALPHABET[((chunk[1] << 4) | (chunk[2] >> 4)) & 31];
+    result += BASE32_ALPHABET[((chunk[2] << 1) | (chunk[3] >> 7)) & 31];
+    result += BASE32_ALPHABET[(chunk[3] >> 2) & 31];
+    result += BASE32_ALPHABET[((chunk[3] << 3) | (chunk[4] >> 5)) & 31];
+    result += BASE32_ALPHABET[chunk[4] & 31];
+  }
+  return result.slice(0, 32);
+}
+
+function base32Decode(str: string): Buffer {
+  const cleaned = str.replace(/\s/g, "").replace(/=/g, "").toUpperCase();
+  const bits: number[] = [];
+  for (const ch of cleaned) {
+    const val = BASE32_ALPHABET.indexOf(ch);
+    if (val >= 0) {
+      const bin = val.toString(2).padStart(5, "0");
+      for (const c of bin) bits.push(Number(c));
+    }
+  }
+  const bytes: number[] = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.slice(i, i + 8).join(""), 2));
+  }
+  return Buffer.from(bytes);
 }
 
 function getTotpCode(secret: string): string {
-  const key = Buffer.from(secret.replace(/\s/g, "").toUpperCase(), "base64");
+  const key = base32Decode(secret);
   const counter = Math.floor(Date.now() / 30000);
   const buf = Buffer.alloc(8);
   buf.writeBigUInt64BE(BigInt(counter));

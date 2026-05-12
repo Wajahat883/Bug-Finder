@@ -36,21 +36,35 @@ app.use(
 app.use(cors({ origin: true, credentials: true }));
 
 app.set("trust proxy", 1);
+app.set("trust proxy", 1);
+const isProd = process.env["NODE_ENV"] === "production";
+const sessionSecret = process.env["SESSION_SECRET"];
+if (!sessionSecret) {
+  logger.error("SESSION_SECRET env var is required");
+  process.exit(1);
+}
+
+const mongoUrl = process.env["MONGODB_URI"] || process.env["MONGO_URI"];
+if (!mongoUrl) {
+  logger.error("MONGODB_URI or MONGO_URI env var is required for session store");
+  process.exit(1);
+}
+
 app.use(
   session({
     name: "bbp.sid",
-    secret: process.env["SESSION_SECRET"] ?? "bug-finder-secret-change-in-prod",
+    secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
     store: MongoStore.create({
-      mongoUrl: process.env["MONGODB_URI"] ?? "mongodb://bugfinder:password123@mongodb:27017/bugfinder?authSource=admin",
+      mongoUrl,
       collectionName: "sessions",
       ttl: 7 * 24 * 60 * 60,
     }),
     cookie: {
       httpOnly: true,
-      secure: false,
-      sameSite: "lax",
+      secure: isProd,
+      sameSite: isProd ? "strict" : "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000,
     },
   })
@@ -64,5 +78,14 @@ app.use("/api", apiKeyAuth);
 app.use(ipAllowlistMiddleware);
 app.use("/api", globalLimiter);
 app.use("/api", router);
+
+app.use((_req, res) => {
+  res.status(404).json({ error: "Not found" });
+});
+
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error({ err }, "Unhandled error");
+  res.status(500).json({ error: isProd ? "Internal server error" : err.message });
+});
 
 export default app;

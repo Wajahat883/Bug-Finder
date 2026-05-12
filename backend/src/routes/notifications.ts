@@ -1,7 +1,9 @@
 import { Router } from "express";
+import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { sendEmail } from "../services/email";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
@@ -57,6 +59,72 @@ router.post("/notifications/digest", async (req, res) => {
   } catch (err) {
     logger.error({ err }, "Digest error");
     res.status(500).json({ error: "Digest generation failed" });
+  }
+});
+
+// GET /notifications — list notifications for current user
+router.get("/notifications", requireAuth, async (req, res) => {
+  try {
+    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const userId = (session["userId"] as string) ?? null;
+    const query: Record<string, unknown> = userId ? { $or: [{ user_id: userId }, { user_id: { $exists: false } }] } : {};
+    const notifications = await col("notifications").find(query).sort({ created_at: -1 }).limit(100).toArray() as Array<Record<string, unknown>>;
+    res.json(notifications.map((n) => ({
+      id: String(n["_id"]),
+      type: n["type"],
+      title: n["title"],
+      message: n["message"],
+      read: n["read"] ?? false,
+      created_at: n["created_at"],
+      href: n["href"] ?? null,
+      severity: n["severity"] ?? null,
+    })));
+  } catch (err) {
+    logger.error({ err }, "List notifications error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /notifications/unread-count — count of unread notifications
+router.get("/notifications/unread-count", requireAuth, async (req, res) => {
+  try {
+    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const userId = (session["userId"] as string) ?? null;
+    const query: Record<string, unknown> = { read: { $ne: true } };
+    if (userId) query["$or"] = [{ user_id: userId }, { user_id: { $exists: false } }];
+    const count = await col("notifications").countDocuments(query);
+    res.json({ count });
+  } catch (err) {
+    logger.error({ err }, "Unread count error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /notifications/mark-all-read — mark all as read
+router.post("/notifications/mark-all-read", requireAuth, async (req, res) => {
+  try {
+    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const userId = (session["userId"] as string) ?? null;
+    const query: Record<string, unknown> = { read: { $ne: true } };
+    if (userId) query["$or"] = [{ user_id: userId }, { user_id: { $exists: false } }];
+    await col("notifications").updateMany(query, { $set: { read: true, read_at: new Date() } });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Mark all read error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /notifications/:id — delete a single notification
+router.delete("/notifications/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    await col("notifications").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Delete notification error");
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

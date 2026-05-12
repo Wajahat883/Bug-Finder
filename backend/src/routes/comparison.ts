@@ -45,8 +45,41 @@ router.post("/scan-jobs/compare", async (req, res) => {
       category: f["category"],
       severity: f["severity"],
       endpoint: f["endpoint"],
-      cvss_score: f["cvss_score"],
+      cvss_score: f["cvss_score"] ?? null,
+      cwe_id: f["cwe_id"] ?? null,
+      description: f["description"] ?? null,
+      validation_status: f["validation_status"] ?? null,
     });
+
+    // Key by title+endpoint for matching
+    const key = (f: Record<string, unknown>) => `${String(f["title"] ?? "")}||${String(f["endpoint"] ?? "")}`;
+    const mapA = new Map(findingsA.map(f => [key(f), f]));
+    const mapB = new Map(findingsB.map(f => [key(f), f]));
+
+    // Regressed: in A it was resolved/FP, but reappears in B
+    const regressedFindings = findingsB.filter(fb => {
+      const fa = mapA.get(key(fb));
+      if (!fa) return false;
+      const faStatus = String(fa["validation_status"] ?? "");
+      return faStatus === "false_positive" || faStatus === "confirmed" || faStatus === "real";
+    });
+
+    // Severity changes: same finding (by title+endpoint) has different severity between scans
+    const severityChanges: Array<{ id_a: string; id_b: string; title: string; endpoint: string; severity_a: string; severity_b: string }> = [];
+    for (const [k, fb] of mapB.entries()) {
+      const fa = mapA.get(k);
+      if (!fa) continue;
+      if (String(fa["severity"]) !== String(fb["severity"])) {
+        severityChanges.push({
+          id_a: String(fa["_id"]),
+          id_b: String(fb["_id"]),
+          title: String(fb["title"] ?? ""),
+          endpoint: String(fb["endpoint"] ?? ""),
+          severity_a: String(fa["severity"] ?? ""),
+          severity_b: String(fb["severity"] ?? ""),
+        });
+      }
+    }
 
     const riskDelta = (Number(scanB["risk_score"] ?? 0)) - (Number(scanA["risk_score"] ?? 0));
     const severityBreakdown = {
@@ -63,11 +96,15 @@ router.post("/scan-jobs/compare", async (req, res) => {
         new_findings_count: newFindings.length,
         resolved_findings_count: resolvedFindings.length,
         persisted_findings_count: persistedFindings.length,
+        regressed_findings_count: regressedFindings.length,
+        severity_changes_count: severityChanges.length,
       },
       severity_breakdown: severityBreakdown,
       new_findings: newFindings.map(formatFinding),
       resolved_findings: resolvedFindings.map(formatFinding),
       persisted_findings: persistedFindings.map(formatFinding),
+      regressed_findings: regressedFindings.map(formatFinding),
+      severity_changes: severityChanges,
     });
   } catch (err) {
     logger.error({ err }, "Scan comparison error");

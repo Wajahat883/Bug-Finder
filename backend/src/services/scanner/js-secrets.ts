@@ -26,6 +26,14 @@ const SECRET_PATTERNS: SecretPattern[] = [
   { name: "SendGrid API Key", regex: /SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}/g, severity: "high", cvss: 7.5, cwe: "CWE-798", fix: "Rotate your SendGrid API key immediately." },
   { name: "Twilio API Key", regex: /SK[a-zA-Z0-9]{32}/g, severity: "high", cvss: 7.5, cwe: "CWE-798", fix: "Rotate your Twilio API credentials." },
   { name: "Bearer Token", regex: /Authorization['":\s]+['"]Bearer [a-zA-Z0-9_-]{20,}/gi, severity: "high", cvss: 8.1, cwe: "CWE-200", fix: "Do not embed authorization tokens in JavaScript files." },
+  // Enhanced patterns
+  { name: "OpenAI API Key", regex: /sk-[a-zA-Z0-9]{48}/g, severity: "critical", cvss: 9.8, cwe: "CWE-798", fix: "Revoke the OpenAI API key immediately in your OpenAI account settings." },
+  { name: "Anthropic API Key", regex: /sk-ant-[a-zA-Z0-9\-]{90,}/g, severity: "critical", cvss: 9.8, cwe: "CWE-798", fix: "Revoke the Anthropic API key immediately." },
+  { name: "MongoDB URI", regex: /mongodb(\+srv)?:\/\/[^\s"']+/g, severity: "critical", cvss: 9.8, cwe: "CWE-798", fix: "Remove the MongoDB URI from code. Use environment variables." },
+  { name: "PostgreSQL URI", regex: /postgres(ql)?:\/\/[^\s"']+/g, severity: "critical", cvss: 9.8, cwe: "CWE-798", fix: "Remove the PostgreSQL URI from code. Use environment variables." },
+  { name: "Private Key Block", regex: /-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----/g, severity: "critical", cvss: 9.8, cwe: "CWE-321", fix: "Never expose private keys in client code. Rotate the key immediately." },
+  { name: "JWT Token", regex: /eyJ[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}\.[a-zA-Z0-9_-]{20,}/g, severity: "high", cvss: 7.5, cwe: "CWE-200", fix: "Do not embed live JWT tokens in client-side code." },
+  { name: "Twilio Account SID", regex: /AC[a-zA-Z0-9]{32}/g, severity: "high", cvss: 7.5, cwe: "CWE-798", fix: "Rotate your Twilio Account SID and auth token immediately." },
 ];
 
 export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> {
@@ -104,6 +112,70 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
       }
     }
   }
+
+  // ── Exposed .env file check ──────────────────────────────────────────────────
+  const envPaths = ["/.env", "/.env.local", "/.env.production", "/.env.backup", "/.env.dev"];
+  const base2 = new URL(targetUrl);
+  for (const envPath of envPaths) {
+    const envUrl = `${base2.origin}${envPath}`;
+    try {
+      const envRes = await safeFetch(envUrl);
+      if (envRes && envRes.status === 200) {
+        const body = await envRes.text().catch(() => "");
+        if (body.includes("=") && body.length > 10) {
+          const key = `env-exposed:${envPath}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            findings.push({
+              title: `Exposed Environment File: ${envPath}`,
+              category: "Secrets Exposure",
+              severity: "critical",
+              endpoint: envUrl,
+              description: `The file ${envPath} is publicly accessible. Environment files often contain database credentials, API keys, and other sensitive configuration values that should never be exposed.`,
+              evidence: `URL: ${envUrl}\nStatus: 200 OK\nContent preview: ${body.slice(0, 200).replace(/\n/g, " ").substring(0, 150)}...`,
+              recommended_fix: "Block access to .env files via web server configuration. Add /.env to .gitignore and rotate any exposed credentials immediately.",
+              cvss_score: 9.8,
+              cwe_id: "CWE-538",
+              scanner_name: "Trufflehog",
+              scanner_family: "web",
+              confidence: 0.99,
+            });
+            emit({ type: "log", message: `  [CRITICAL] Exposed .env file at ${envUrl}` });
+          }
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  // ── robots.txt path discovery ────────────────────────────────────────────────
+  try {
+    const robotsUrl = `${base2.origin}/robots.txt`;
+    const robotsRes = await safeFetch(robotsUrl);
+    if (robotsRes && robotsRes.status === 200) {
+      const robotsBody = await robotsRes.text().catch(() => "");
+      const disallowPaths = [...robotsBody.matchAll(/^Disallow:\s*(.+)$/gm)]
+        .map(m => m[1]?.trim())
+        .filter(Boolean)
+        .filter(p => p !== "/" && p!.length > 1) as string[];
+      if (disallowPaths.length > 0) {
+        findings.push({
+          title: "Hidden Paths Discovered via robots.txt",
+          category: "Information Disclosure",
+          severity: "info",
+          endpoint: robotsUrl,
+          description: `The robots.txt file reveals ${disallowPaths.length} disallowed path(s) that the site owner likely wants to keep private. Attackers can use this to discover admin panels, backup files, and sensitive endpoints.`,
+          evidence: `Disallowed paths:\n${disallowPaths.slice(0, 20).join("\n")}`,
+          recommended_fix: "Do not rely on robots.txt for security through obscurity. Protect sensitive paths with proper authentication and access controls.",
+          cvss_score: 3.1,
+          cwe_id: "CWE-200",
+          scanner_name: "Trufflehog",
+          scanner_family: "web",
+          confidence: 0.95,
+        });
+        emit({ type: "log", message: `  [INFO] robots.txt reveals ${disallowPaths.length} hidden paths` });
+      }
+    }
+  } catch { /* skip */ }
 
   emit({ type: "engine_done", engine: "Trufflehog/JS", message: `JS secret scan complete — ${findings.length} secret(s) found` });
   return findings;
