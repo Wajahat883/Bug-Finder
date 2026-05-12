@@ -204,6 +204,8 @@ async function ensureIndexes(database: Db): Promise<void> {
     await database.collection("raw_evidence").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
     await database.collection("raw_evidence").createIndex({ finding_id: 1 }, { unique: true });
     await database.collection("raw_evidence").createIndex({ scan_job_id: 1 });
+    await database.collection("scan_credentials").createIndex({ target_id: 1 });
+    await database.collection("scan_credentials").createIndex({ target_id: 1, type: 1, label: 1 });
     logger.info("Database indexes ensured");
   } catch (err) {
     logger.warn({ err }, "Index creation failed — continuing without indexes");

@@ -33,6 +33,7 @@ import analyticsMetricsRouter from "./analytics-metrics";
 import engagementsRouter from "./engagements";
 import testsRouter from "./tests";
 import adminRouter from "./admin";
+import credentialsRouter from "./credentials";
 
 const router: IRouter = Router();
 
@@ -70,5 +71,6 @@ router.use(analyticsMetricsRouter);
 router.use(engagementsRouter);
 router.use(testsRouter);
 router.use(adminRouter);
+router.use(credentialsRouter);
 
 export default router;

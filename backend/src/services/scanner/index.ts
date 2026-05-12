@@ -47,6 +47,7 @@ import { runCustomRules } from "./custom-rules";
 import { runSsrfCheck } from "./ssrf";
 import { runOpenApiDiscovery } from "./openapi";
 import { runRawSmugglingCheck } from "./smuggling-raw";
+import { loadCredentialsForTarget } from "../../lib/credential-vault";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -62,6 +63,7 @@ export interface ScanJobOptions {
   authToken?: string;
   customHeaders?: Record<string, string>;
   scopeHosts?: string[];
+  targetId?: string;        // used to load saved credentials from the vault
 }
 
 // ─── Scanner Pipeline Definitions ────────────────────────────────────────────
@@ -270,7 +272,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
 }
 
 export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
-  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode, sessionCookie, authToken, customHeaders, scopeHosts } = opts;
+  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode, sessionCookie, authToken, customHeaders, scopeHosts, targetId } = opts;
 
   const emit = (event: ScannerEvent) => {
     scanEvents.emit(`scan:${jobId}`, event);
@@ -280,6 +282,27 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
   const authHeaders: Record<string, string> = { ...(customHeaders ?? {}) };
   if (sessionCookie) authHeaders["Cookie"] = sessionCookie;
   if (authToken) authHeaders["Authorization"] = authToken.startsWith("Bearer ") ? authToken : `Bearer ${authToken}`;
+
+  // Load stored credentials from the vault (if a targetId was provided and no
+  // explicit credential was passed in the request — vault fills the gap for
+  // scheduled/automated scans where re-entering creds is not possible).
+  if (targetId && !sessionCookie && !authToken) {
+    try {
+      const vaultCreds = await loadCredentialsForTarget(targetId);
+      for (const cred of vaultCreds) {
+        if (cred.type === "bearer") authHeaders["Authorization"] = `Bearer ${cred.value}`;
+        else if (cred.type === "cookie") authHeaders["Cookie"] = cred.value;
+        else if (cred.type === "apikey") authHeaders["X-Api-Key"] = cred.value;
+        else if (cred.type === "basic") {
+          const encoded = Buffer.from(`${cred.username ?? ""}:${cred.value}`).toString("base64");
+          authHeaders["Authorization"] = `Basic ${encoded}`;
+        }
+      }
+      if (vaultCreds.length > 0) {
+        emit({ type: "log", message: `Credential vault: loaded ${vaultCreds.length} credential(s) for target` });
+      }
+    } catch { /* vault unavailable — proceed unauthenticated */ }
+  }
 
   const discoveredEndpoints: string[] = [];
   const ctx: ScanContext = {
