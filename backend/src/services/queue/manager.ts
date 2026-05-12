@@ -27,16 +27,18 @@ export const queueEvents = new EventEmitter();
 
 const MAX_CONCURRENT_SCANS = 2;
 const MAX_CONCURRENT_AI = 3;
+const MAX_SCAN_RETRIES = 3;
 let activeScans = 0;
 let activeAiJobs = 0;
 
-export function getQueueStats() {
-  return {
-    scanQueue: scanQueue.length,
-    aiQueue: aiQueue.length,
-    activeScans,
-    activeAiJobs,
-  };
+interface ScanJob {
+  jobId: string;
+  targetUrl: string;
+  profile: "quick" | "standard" | "deep";
+  validationEnabled: boolean;
+  fuzzingEnabled: boolean;
+  bugBountyMode: boolean;
+  retryCount?: number;
 }
 
 export async function enqueueScan(job: ScanJob): Promise<void> {
