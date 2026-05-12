@@ -32,7 +32,7 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
             cwe_id: r["cwe-id"] ? String(r["cwe-id"]) : "CWE-200",
             scanner_name: `Nuclei/${r["template-id"] ?? "template"}`,
             scanner_family: "Nuclei",
-            confidence: 85,
+            confidence: 0.85,
           });
         }
       }
@@ -75,7 +75,7 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
             cwe_id: tpl.cwe,
             scanner_name: `Nuclei/${tpl.id}`,
             scanner_family: "Nuclei",
-            confidence: 90,
+            confidence: 0.90,
           });
           ctx.emit({ type: "finding", finding: findings[findings.length - 1] });
         }

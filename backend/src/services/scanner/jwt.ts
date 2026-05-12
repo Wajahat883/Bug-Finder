@@ -136,7 +136,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
-  // Check JWT secret strength
+  // Check JWT secret strength via common secrets
   const testProtectedEndpoints = discoveredEndpoints.filter(ep => ep.includes("/api")).slice(0, 3);
   for (const ep of testProtectedEndpoints) {
     for (const secret of COMMON_JWT_SECRETS.slice(0, 5)) {
@@ -144,8 +144,13 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       const payload = { id: 1, role: "admin", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 3600 };
       const h = base64UrlEncode(JSON.stringify(header));
       const p = base64UrlEncode(JSON.stringify(payload));
-      // Note: we can't actually sign with HMAC without crypto, just probe with a known-bad token and check 403 vs 401
-      break; // Just probe once
+      const token = `${h}.${p}.invalidsignature`;
+      const probeRes = await safeFetch(ep, {
+        headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" },
+      });
+      if (probeRes && probeRes.status === 200) {
+        emit({ type: "log", message: `JWT probe: ${ep} accepted invalid signature — weak secret likely` });
+      }
     }
   }
 

@@ -2,8 +2,11 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
+
+router.use(requireAuth);
 
 // GET /search — Full-text search across findings, targets, and scans
 router.get("/search", async (req, res) => {

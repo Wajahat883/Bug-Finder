@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
@@ -7,8 +8,13 @@ import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
-// POST /notifications/digest — Send a notification digest email
-router.post("/notifications/digest", async (req, res) => {
+const digestLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: "Too many digest requests — try again later" },
+});
+
+router.post("/notifications/digest", requireAuth, digestLimiter, async (req, res) => {
   try {
     const { email: recipient } = req.body as { email?: string };
     if (!recipient) return res.status(400).json({ error: "email is required" });

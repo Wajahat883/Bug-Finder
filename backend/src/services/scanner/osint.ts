@@ -2,8 +2,6 @@ import { ScanContext, ScanFinding } from "./types";
 import { logger } from "../../lib/logger";
 
 const SHODAN_KEY = process.env["SHODAN_API_KEY"] ?? "";
-const CENSYS_ID = process.env["CENSYS_API_ID"] ?? "";
-const CENSYS_SECRET = process.env["CENSYS_API_SECRET"] ?? "";
 
 function getDomain(targetUrl: string): string {
   try { return new URL(targetUrl).hostname; } catch { return targetUrl; }
@@ -125,7 +123,7 @@ export async function runOsintEnrichment(ctx: ScanContext): Promise<ScanFinding[
     }
 
     // 3. No API keys configured
-    if (!SHODAN_KEY && !CENSYS_ID) {
+    if (!SHODAN_KEY) {
       findings.push({
         title: "OSINT API Keys Not Configured — Limited Recon",
         severity: "info",

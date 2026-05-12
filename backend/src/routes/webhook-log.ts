@@ -2,8 +2,11 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
+
+router.use(requireAuth);
 
 // GET /webhooks/delivery-log — View delivery history
 router.get("/webhooks/delivery-log", async (req, res) => {
@@ -39,9 +42,19 @@ router.post("/webhooks/delivery-log/retry/:id", async (req, res) => {
     const delivery = await col("webhook_deliveries").findOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!delivery) return res.status(404).json({ error: "Delivery not found" });
 
+    const url = String(delivery["url"] ?? "");
+    try {
+      const parsed = new URL(url);
+      if (!["https:", "http:"].includes(parsed.protocol)) {
+        return res.status(400).json({ error: "Invalid webhook URL protocol" });
+      }
+    } catch {
+      return res.status(400).json({ error: "Invalid webhook URL" });
+    }
+
     const startTime = Date.now();
     try {
-      const response = await fetch(String(delivery["url"]), {
+      const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ event: delivery["event"], retry: true, original_id: req.params.id }),

@@ -4,8 +4,11 @@ import cron from "node-cron";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { scheduleJob, unscheduleJob } from "../services/scheduler";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
+
+router.use(requireAuth);
 
 // GET /scheduled-scans — List all scheduled scans
 router.get("/scheduled-scans", async (_req, res) => {

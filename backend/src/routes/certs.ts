@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import tls from "tls";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
@@ -61,6 +62,8 @@ async function checkDomainCert(domain: string): Promise<CertInfo> {
     }
   });
 }
+
+router.use(requireAuth);
 
 // GET /certs/check/:targetId — Check SSL cert for a target
 router.get("/certs/check/:targetId", async (req, res) => {

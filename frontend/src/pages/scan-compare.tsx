@@ -14,14 +14,16 @@ interface ScanJob {
 interface ComparisonResult {
   scan_a: { id: string; target_url: string; created_at: string; risk_score: number; findings_count: number };
   scan_b: { id: string; target_url: string; created_at: string; risk_score: number; findings_count: number };
-  summary: { risk_delta: number; risk_trend: string; new_findings_count: number; resolved_findings_count: number; persisted_findings_count: number };
+  summary: { risk_delta: number; risk_trend: string; new_findings_count: number; resolved_findings_count: number; persisted_findings_count: number; regressed_findings_count?: number; severity_changes_count?: number };
   severity_breakdown: {
     a: { critical: number; high: number; medium: number; low: number };
     b: { critical: number; high: number; medium: number; low: number };
   };
-  new_findings: Array<{ id: string; title: string; severity: string; endpoint: string; cvss_score: number }>;
-  resolved_findings: Array<{ id: string; title: string; severity: string; endpoint: string; cvss_score: number }>;
+  new_findings: Array<{ id: string; title: string; severity: string; endpoint: string; cvss_score: number; description?: string; cwe_id?: string }>;
+  resolved_findings: Array<{ id: string; title: string; severity: string; endpoint: string; cvss_score: number; description?: string }>;
   persisted_findings: Array<{ id: string; title: string; severity: string; endpoint: string }>;
+  regressed_findings?: Array<{ id: string; title: string; severity: string; endpoint: string; description?: string }>;
+  severity_changes?: Array<{ id_a: string; id_b: string; title: string; endpoint: string; severity_a: string; severity_b: string }>;
 }
 
 const SEV_COLORS: Record<string, string> = {
@@ -213,6 +215,61 @@ export default function ScanCompare() {
                         <p className="text-xs text-muted-foreground font-mono">{f.endpoint}</p>
                       </div>
                       <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 shrink-0">{f.severity}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Regressed Findings */}
+          {result.regressed_findings && result.regressed_findings.length > 0 && (
+            <Card className="border-orange-500/20">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-orange-400">
+                  <AlertTriangle className="w-4 h-4" /> Regressed Findings ({result.regressed_findings.length})
+                </CardTitle>
+                <CardDescription>Findings previously resolved or marked as false positive that reappeared in the new scan</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {result.regressed_findings.map(f => (
+                    <div key={f.id} className="flex items-center justify-between p-3 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-orange-300">{f.title}</p>
+                        <p className="text-xs text-muted-foreground font-mono truncate">{f.endpoint}</p>
+                        {f.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{f.description}</p>}
+                      </div>
+                      <Badge className={`${SEV_COLORS[f.severity]} border shrink-0 ml-3`}>{f.severity}</Badge>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Severity Changes */}
+          {result.severity_changes && result.severity_changes.length > 0 && (
+            <Card className="border-yellow-500/20">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-yellow-400">
+                  <AlertTriangle className="w-4 h-4" /> Severity Changes ({result.severity_changes.length})
+                </CardTitle>
+                <CardDescription>Findings where severity changed between the two scans</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {result.severity_changes.map((sc, i) => (
+                    <div key={i} className="flex items-center justify-between p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground">{sc.title}</p>
+                        <p className="text-xs text-muted-foreground font-mono truncate">{sc.endpoint}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0 ml-3">
+                        <Badge className={`${SEV_COLORS[sc.severity_a]} border text-[10px]`}>{sc.severity_a}</Badge>
+                        <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                        <Badge className={`${SEV_COLORS[sc.severity_b]} border text-[10px]`}>{sc.severity_b}</Badge>
+                      </div>
                     </div>
                   ))}
                 </div>

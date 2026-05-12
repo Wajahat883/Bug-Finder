@@ -7,7 +7,7 @@ import {
   Calculator, Network, TrendingUp, Clock, Webhook, LogOut,
   ChevronDown, ChevronRight, Bookmark, GitCompare, ClipboardCheck,
   Timer, Sparkles, Moon, Sun, X, Contrast, ExternalLink,
-  UserCircle, KeyRound,
+  UserCircle, KeyRound, BarChart2, Briefcase, Key,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { CommandPalette } from "./command-palette";
@@ -57,8 +57,17 @@ function pageName(loc: string): string {
   if (loc.startsWith("/compliance")) return "Compliance Dashboard";
   if (loc.startsWith("/sla")) return "SLA Tracking";
   if (loc.startsWith("/ai-triage")) return "AI Triage";
+  if (loc.startsWith("/admin/panel")) return "Admin Panel";
   if (loc.startsWith("/admin/users")) return "User Management";
   if (loc.startsWith("/notifications")) return "Notifications";
+  if (loc.startsWith("/security")) return "2-Factor Auth";
+  if (loc.startsWith("/scheduled-scans")) return "Scheduled Scans";
+  if (loc.startsWith("/scheduled")) return "Scheduled Scans";
+  if (loc.startsWith("/metrics")) return "Security Metrics";
+  if (loc.startsWith("/analytics-enhanced")) return "Analytics+";
+  if (loc.startsWith("/engagements/")) return "Engagement Detail";
+  if (loc.startsWith("/engagements")) return "Engagements";
+  if (loc.startsWith("/api-keys")) return "API Keys";
   return "Dashboard";
 }
 
@@ -78,12 +87,15 @@ const NAV_GROUPS = [
   {
     label: "Analytics",
     items: [
-      { href: "/executive",      label: "Executive",     icon: TrendingUp },
-      { href: "/attack-surface", label: "Attack Surface",icon: Network },
-      { href: "/owasp",          label: "OWASP Top 10",  icon: Shield },
-      { href: "/timeline",       label: "Timeline",      icon: Clock },
-      { href: "/compliance",     label: "Compliance",    icon: ClipboardCheck },
-      { href: "/sla",            label: "SLA Tracking",  icon: Timer },
+      { href: "/executive",           label: "Executive",       icon: TrendingUp },
+      { href: "/attack-surface",      label: "Attack Surface",  icon: Network },
+      { href: "/owasp",               label: "OWASP Top 10",    icon: Shield },
+      { href: "/timeline",            label: "Timeline",        icon: Clock },
+      { href: "/compliance",          label: "Compliance",      icon: ClipboardCheck },
+      { href: "/sla",                 label: "SLA Tracking",    icon: Timer },
+      { href: "/metrics",             label: "Metrics",         icon: BarChart2 },
+      { href: "/analytics-enhanced",  label: "Analytics+",      icon: TrendingUp },
+      { href: "/engagements",         label: "Engagements",     icon: Briefcase },
     ],
   },
   {
@@ -96,13 +108,21 @@ const NAV_GROUPS = [
     ],
   },
   {
+    label: "Automation",
+    items: [
+      { href: "/scheduled-scans", label: "Scheduled",  icon: Timer },
+    ],
+  },
+  {
     label: "Config",
     items: [
       { href: "/integrations", label: "Integrations",   icon: Webhook },
+      { href: "/api-keys",     label: "System API Keys",icon: Key },
       { href: "/audit-log",    label: "Audit Log",       icon: ScrollText },
       { href: "/system",       label: "System",          icon: Cpu },
       { href: "/settings",     label: "Settings",        icon: Settings },
       { href: "/admin/users",  label: "User Management", icon: Shield },
+      { href: "/admin/panel",  label: "Admin Panel",     icon: Shield },
     ],
   },
 ];
@@ -332,7 +352,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const displayName = (user as Record<string, unknown>)?.github_login as string || (user as Record<string, unknown>)?.username as string || "SecOps Lead";
   const displayRole = ((user as Record<string, unknown>)?.role as string)?.toUpperCase() || "ANALYST";
   const isAdmin = (user as Record<string, unknown>)?.role === "admin";
-  const ADMIN_ONLY_PATHS = ["/integrations", "/audit-log", "/admin/users"];
+  const ADMIN_ONLY_PATHS = ["/integrations", "/api-keys", "/audit-log", "/admin/users", "/admin/panel"];
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });

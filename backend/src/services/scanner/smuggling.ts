@@ -44,7 +44,6 @@ export async function runRequestSmugglingCheck(ctx: ScanContext): Promise<ScanFi
   }
 
   // Test 2: Check if HTTP/2 is supported (downgrade smuggling risk)
-  const http2headers = new Headers({ "host": base.hostname });
   const h2Res = await safeFetch(base.origin, { headers: { "upgrade": "h2c" } });
   if (h2Res && h2Res.headers.get("upgrade") === "h2c") {
     findings.push({

@@ -52,7 +52,7 @@ export default function Login() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Login failed");
-      nav(d.role === "admin" ? "/adminW" : "/dashboard");
+      nav(d.role === "admin" ? "/admin/panel" : "/dashboard");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally { setLoading(false); }

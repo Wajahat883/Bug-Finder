@@ -41,6 +41,11 @@ import Notifications from "@/pages/notifications";
 import TwoFactor from "@/pages/two-factor";
 import ScheduledScans from "@/pages/scheduled-scans";
 import AdminLogin from "@/pages/admin-login";
+import MetricsDashboard from "@/pages/metrics-dashboard";
+import AnalyticsEnhanced from "@/pages/analytics-enhanced";
+import Engagements from "@/pages/engagements";
+import EngagementDetail from "@/pages/engagement-detail";
+import ApiKeysPage from "@/pages/api-keys";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -101,9 +106,16 @@ function Router() {
             <Route path="/notifications" component={Notifications} />
             <Route path="/security" component={TwoFactor} />
             <Route path="/scheduled-scans" component={ScheduledScans} />
+            <Route path="/metrics" component={MetricsDashboard} />
+            <Route path="/analytics-enhanced" component={AnalyticsEnhanced} />
+            <Route path="/engagements/:id" component={EngagementDetail} />
+            <Route path="/engagements" component={Engagements} />
+            <Route path="/api-keys">
+              {() => <AdminRoute component={ApiKeysPage} />}
+            </Route>
 
             {/* ── Admin-only routes ── */}
-            <Route path="/adminW">
+            <Route path="/admin/panel">
               {() => <AdminRoute component={AdminPanel} />}
             </Route>
             <Route path="/audit-log">

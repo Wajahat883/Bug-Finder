@@ -48,6 +48,10 @@ export async function safeFetch(
 ): Promise<Response | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const userSignal = options.signal;
+  if (userSignal) {
+    userSignal.addEventListener("abort", () => controller.abort(), { once: true });
+  }
   try {
     return await fetch(url, { ...options, signal: controller.signal });
   } catch {

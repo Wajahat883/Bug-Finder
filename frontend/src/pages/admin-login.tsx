@@ -29,7 +29,7 @@ export default function AdminLogin() {
         await fetch(`${API}/auth/logout`, { method: "POST", credentials: "include" });
         throw new Error("Access denied — admin credentials required");
       }
-      nav("/adminW");
+      nav("/admin/panel");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

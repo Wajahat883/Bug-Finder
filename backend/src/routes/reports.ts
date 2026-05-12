@@ -2,10 +2,14 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
-router.get("/reports/scan/:id/pdf", async (req, res) => {
+router.use(requireAuth);
+
+// GET /reports/scan/:id — Generate HTML security scan report
+router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
   try {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });

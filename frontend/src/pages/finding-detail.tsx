@@ -428,6 +428,22 @@ export default function FindingDetail() {
             {(finding as Record<string, unknown>).category && (
               <Badge variant="outline" className="text-[10px]">{String((finding as Record<string, unknown>).category)}</Badge>
             )}
+            {/* EPSS Score Badge */}
+            {(finding as Record<string, unknown>).epss_score != null && (() => {
+              const epss = Number((finding as Record<string, unknown>).epss_score);
+              const color = epss > 0.3 ? "bg-red-500/20 text-red-400 border-red-500/40" : epss > 0.1 ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/40" : "bg-green-500/20 text-green-400 border-green-500/40";
+              return (
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${color}`} title="EPSS: Exploit Prediction Scoring System">
+                  EPSS {(epss * 100).toFixed(1)}%
+                </span>
+              );
+            })()}
+            {/* CISA KEV Badge */}
+            {(finding as Record<string, unknown>).is_cisa_kev === true && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-red-600/20 text-red-300 border-red-600/50" title="CISA Known Exploited Vulnerability">
+                ⚠ CISA KEV — Actively Exploited
+              </span>
+            )}
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">

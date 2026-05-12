@@ -4,11 +4,12 @@ import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { scanEvents } from "../services/scanner/index";
 import { ScannerEvent } from "../services/scanner/types";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
 // Both paths serve SSE streams — frontend uses /api/stream/:id
-router.get(["/stream/:id", "/scan-jobs/:id/stream"], async (req, res) => {
+router.get(["/stream/:id", "/scan-jobs/:id/stream"], requireAuth, async (req, res) => {
   const { id } = req.params;
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -113,18 +114,26 @@ router.get(["/stream/:id", "/scan-jobs/:id/stream"], async (req, res) => {
   });
 });
 
-router.post("/scan-jobs/:id/start-simulation", async (req, res) => {
+router.post("/scan-jobs/:id/start-simulation", requireAuth, async (req, res) => {
   const { id } = req.params;
   try {
-    const job = await col("scan_jobs").findOne({ _id: id } as never);
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan job not found" });
+    const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!job) return res.status(404).json({ error: "Scan job not found" });
-    await col("scan_jobs").updateOne({ _id: id } as never, {
-      $set: { status: "running", progress: 0, started_at: new Date() },
+
+    res.json({ ok: true, message: "Scan queued" });
+
+    const { enqueueScan } = await import("../services/queue/manager");
+    await enqueueScan({
+      jobId: id,
+      targetUrl: String(job["target_url"] ?? ""),
+      profile: (job["scan_profile"] as "quick" | "standard" | "deep") ?? "standard",
+      validationEnabled: Boolean(job["validation_enabled"]),
+      fuzzingEnabled: Boolean(job["fuzzing_enabled"]),
+      bugBountyMode: Boolean(job["bug_bounty_mode"]),
     });
-    res.json({ ok: true, message: "Scan started" });
   } catch (err) {
     logger.error({ err }, "Start scan error");
-    res.status(500).json({ error: "Internal server error" });
   }
 });
 

@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
+router.use(requireAuth);
 
 const DEFAULT_LAYOUT = {
   widgets: [

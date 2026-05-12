@@ -43,7 +43,7 @@ import { runZapScan } from "./zap";
 import { runNucleiScan } from "./nuclei";
 import { runPlaywrightScan } from "./playwright";
 import { runOsintEnrichment } from "./osint";
-import { runCustomRules } from "../../routes/scanner-rules";
+import { runCustomRules } from "./custom-rules";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -66,7 +66,7 @@ export interface ScanJobOptions {
 // Deep   = all 60 modules (bug bounty / pentest)
 
 const PIPELINE_QUICK = [
-  { name: "Crawl & Discover",        fn: (ctx: ScanContext) => { runCrawl(ctx); return Promise.resolve([]); }, isDiscovery: true },
+  { name: "Crawl & Discover",        fn: (ctx: ScanContext) => { runCrawl(ctx); return Promise.resolve([] as ScanFinding[]); }, isDiscovery: true },
   { name: "TLS/HTTPS",               fn: (ctx: ScanContext) => runTlsCheck(ctx) },
   { name: "Security Headers",        fn: (ctx: ScanContext) => runHeaderCheck(ctx) },
   { name: "Cookie Security",         fn: (ctx: ScanContext) => runCookieCheck(ctx) },
@@ -86,7 +86,7 @@ const PIPELINE_QUICK = [
 ];
 
 const PIPELINE_STANDARD = [
-  ...PIPELINE_QUICK,
+  ...PIPELINE_QUICK.filter(p => p.name !== "OSINT Enrichment"),
   { name: "XSS Probe",               fn: (ctx: ScanContext) => runXssCheck(ctx) },
   { name: "SQLi Probe",              fn: (ctx: ScanContext) => runSqliCheck(ctx) },
   { name: "Open Redirect",           fn: (ctx: ScanContext) => runRedirectCheck(ctx) },
@@ -121,8 +121,6 @@ const PIPELINE_DEEP = [
   { name: "File Upload",             fn: (ctx: ScanContext) => runFileUploadCheck(ctx) },
   { name: "Request Smuggling",       fn: (ctx: ScanContext) => runRequestSmugglingCheck(ctx) },
   { name: "Business Logic",          fn: (ctx: ScanContext) => runBusinessLogicCheck(ctx) },
-  { name: "OWASP ZAP Active Scan",   fn: (ctx: ScanContext) => runZapScan(ctx) },
-  { name: "Nuclei Templates",        fn: (ctx: ScanContext) => runNucleiScan(ctx) },
 ];
 
 function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled: boolean, bugBountyMode: boolean) {

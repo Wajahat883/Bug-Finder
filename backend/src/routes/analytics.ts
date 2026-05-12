@@ -2,8 +2,11 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
+
+router.use(requireAuth);
 
 // POST /findings/bulk-update — Bulk update severity or status on multiple findings
 router.post("/findings/bulk-update", async (req, res) => {

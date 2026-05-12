@@ -122,7 +122,38 @@ async function processAiQueue(): Promise<void> {
     try {
       queueEvents.emit("ai:started", { type: job.type, activeAiJobs });
       logger.info({ type: job.type }, "Processing AI job from queue");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      if (job.type === "auto-triage" && job.scanId) {
+        try {
+          const { default: OpenAI } = await import("openai");
+          const openai = new OpenAI({
+            apiKey: process.env["OPENCODE_API_KEY"] ?? "",
+            baseURL: process.env["OPENCODE_API_BASE"] ?? "https://opencode.ai/zen/v1",
+            timeout: 60000,
+          });
+          const model = process.env["OPENCODE_MODEL"] ?? "nemotron-3-super-free";
+          const findingId = job.findingId;
+          let query: Record<string, unknown> = {};
+          if (findingId) {
+            const { ObjectId } = await import("mongodb");
+            query = { _id: new ObjectId(findingId) };
+          }
+          const findings = await col("findings").find(query).limit(5).toArray() as Array<Record<string, unknown>>;
+          for (const finding of findings) {
+            try {
+              const prompt = `You are a security triage expert. Given this vulnerability finding, respond with ONLY a JSON object with two fields: "suggested_severity" (one of: critical, high, medium, low, info) and "confidence_score" (0.0 to 1.0). No explanation. Title: ${finding["title"]} Category: ${finding["category"]} Description: ${String(finding["description"] ?? "").slice(0, 200)}`;
+              const completion = await openai.chat.completions.create({ model, max_tokens: 100, messages: [{ role: "user", content: prompt }], stream: false });
+              const text = completion.choices[0]?.message?.content ?? "{}";
+              const json = JSON.parse(text.trim()) as { suggested_severity?: string; confidence_score?: number };
+              await col("findings").updateOne(
+                { _id: finding["_id"] } as Record<string, unknown>,
+                { $set: { ai_suggested_severity: json.suggested_severity, ai_confidence: json.confidence_score } }
+              );
+            } catch { /* skip individual */ }
+          }
+        } catch { /* AI not available */ }
+      }
+
       queueEvents.emit("ai:completed", { type: job.type, activeAiJobs: activeAiJobs - 1 });
     } catch (err) {
       logger.error({ err, type: job.type }, "AI job failed");

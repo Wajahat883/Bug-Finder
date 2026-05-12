@@ -178,6 +178,7 @@ export default function Findings() {
 
   function exportCSV() { window.open(`/api/findings/export/csv?${params}`, "_blank"); }
   function exportJSON() { window.open(`/api/findings/export/json?${params}`, "_blank"); }
+  function exportSARIF() { window.open(`/api/findings/export/sarif?${params}`, "_blank"); }
 
   function handleSearch(v: string) { setSearch(v); setPage(1); }
   function handleSeverity(v: string) { setSeverityFilter(v); setPage(1); }
@@ -199,6 +200,9 @@ export default function Findings() {
           </Button>
           <Button variant="outline" size="sm" onClick={exportJSON}>
             <Download className="w-4 h-4 mr-1.5" />JSON
+          </Button>
+          <Button variant="outline" size="sm" onClick={exportSARIF}>
+            <Download className="w-4 h-4 mr-1.5" />SARIF
           </Button>
         </div>
       </div>
