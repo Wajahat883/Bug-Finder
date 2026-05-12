@@ -77,11 +77,30 @@ router.patch("/findings/:id", requireAuth, async (req, res) => {
     const updates: Record<string, unknown> = { updated_at: new Date() };
     if (body.validation_status && allowed.includes(body.validation_status)) {
       updates["validation_status"] = body.validation_status;
+      if (body.validation_status === "confirmed" || body.validation_status === "real") {
+        // Track resolved_at when marking as resolved
+      }
     }
     if (body.notes !== undefined) updates["notes"] = body.notes;
     if (body.fp_reason !== undefined) updates["fp_reason"] = body.fp_reason;
 
-    await col("findings").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: updates });
+    // Track status history
+    const existing = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
+    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const historyEntry = body.validation_status ? {
+      status: body.validation_status,
+      changed_by: (session["username"] as string) ?? (session["userId"] as string) ?? "unknown",
+      changed_at: new Date(),
+      previous_status: existing?.["validation_status"] ?? null,
+    } : null;
+
+    await col("findings").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      {
+        $set: updates,
+        ...(historyEntry ? { $push: { status_history: historyEntry } } : {}),
+      } as Record<string, unknown>
+    );
 
     // If marking as false positive + suppress globally, add to suppression list
     if (body.validation_status === "false_positive" && body.suppress_globally) {
@@ -334,7 +353,52 @@ router.get("/findings/export/:format", requireAuth, async (req, res) => {
       return res.send(rows.join("\n"));
     }
 
-    return res.status(400).json({ error: "Unsupported format. Use: json, csv" });
+    if (fmt === "sarif") {
+      const rules = [...new Set(formatted.map((f) => (f as Record<string, unknown>)["cwe_id"] as string).filter(Boolean))].map((cweId) => ({
+        id: cweId,
+        name: cweId.replace("-", ""),
+        shortDescription: { text: cweId },
+        helpUri: `https://cwe.mitre.org/data/definitions/${cweId.replace("CWE-", "")}.html`,
+      }));
+      const results = formatted.map((f) => {
+        const finding = f as Record<string, unknown>;
+        const sev = String(finding["severity"] ?? "medium");
+        const levelMap: Record<string, string> = { critical: "error", high: "error", medium: "warning", low: "note", info: "none" };
+        return {
+          ruleId: String(finding["cwe_id"] ?? "unknown"),
+          level: levelMap[sev] ?? "warning",
+          message: { text: String(finding["title"] ?? "") + "\n\n" + String(finding["description"] ?? "") },
+          locations: [{ physicalLocation: { artifactLocation: { uri: String(finding["endpoint"] ?? "") } } }],
+          properties: {
+            severity: finding["severity"],
+            category: finding["category"],
+            cvss_score: finding["cvss_score"],
+            scanner_name: finding["scanner_name"],
+            finding_id: finding["id"],
+          },
+        };
+      });
+      const sarif = {
+        version: "2.1.0",
+        $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+        runs: [{
+          tool: {
+            driver: {
+              name: "Bug Finder Pro",
+              version: "1.0.0",
+              informationUri: "https://bugfinderpro.com",
+              rules,
+            },
+          },
+          results,
+        }],
+      };
+      res.setHeader("Content-Type", "application/sarif+json");
+      res.setHeader("Content-Disposition", `attachment; filename="findings-${Date.now()}.sarif.json"`);
+      return res.json(sarif);
+    }
+
+    return res.status(400).json({ error: "Unsupported format. Use: json, csv, sarif" });
   } catch (err) {
     logger.error({ err }, "Export findings error");
     res.status(500).json({ error: "Internal server error" });
@@ -613,6 +677,35 @@ router.post("/findings/:id/retest", requireAuth, async (req, res) => {
     runScanPipeline({ jobId: String(insert.insertedId), targetUrl: String(finding["target_url"] ?? finding["endpoint"]), profile: "quick", validationEnabled: true, fuzzingEnabled: false, bugBountyMode: false }).catch(() => {});
     res.json({ ok: true, scan_id: String(insert.insertedId) });
   } catch(err) { logger.error({err},"retest error"); res.status(500).json({ error: "Internal server error" }); }
+});
+
+// ── Finding status history ────────────────────────────────────────────────────
+router.get("/findings/:id/history", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const finding = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+    res.json({ history: (finding["status_history"] as unknown[]) ?? [] });
+  } catch (err) {
+    logger.error({ err }, "Finding history error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Enrich finding with EPSS + CISA KEV ──────────────────────────────────────
+router.post("/findings/:id/enrich", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const { enrichFindingWithIntel } = await import("../services/vuln-intel");
+    await enrichFindingWithIntel(id);
+    const updated = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown>;
+    res.json(formatFinding(updated));
+  } catch (err) {
+    logger.error({ err }, "Finding enrich error");
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // ── Assign finding ────────────────────────────────────────────────────────────
