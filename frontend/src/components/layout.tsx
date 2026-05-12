@@ -113,18 +113,6 @@ const NAV_GROUPS = [
       { href: "/scheduled-scans", label: "Scheduled",  icon: Timer },
     ],
   },
-  {
-    label: "Config",
-    items: [
-      { href: "/integrations", label: "Integrations",   icon: Webhook },
-      { href: "/api-keys",     label: "System API Keys",icon: Key },
-      { href: "/audit-log",    label: "Audit Log",       icon: ScrollText },
-      { href: "/system",       label: "System",          icon: Cpu },
-      { href: "/settings",     label: "Settings",        icon: Settings },
-      { href: "/admin/users",  label: "User Management", icon: Shield },
-      { href: "/admin/panel",  label: "Admin Panel",     icon: Shield },
-    ],
-  },
 ];
 
 // ─── Severity helpers ─────────────────────────────────────────────────────────
@@ -352,7 +340,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const displayName = (user as Record<string, unknown>)?.github_login as string || (user as Record<string, unknown>)?.username as string || "SecOps Lead";
   const displayRole = ((user as Record<string, unknown>)?.role as string)?.toUpperCase() || "ANALYST";
   const isAdmin = (user as Record<string, unknown>)?.role === "admin";
-  const ADMIN_ONLY_PATHS = ["/integrations", "/api-keys", "/audit-log", "/admin/users", "/admin/panel"];
+  const ADMIN_ONLY_PATHS = ["/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel"];
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });

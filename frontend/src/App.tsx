@@ -92,7 +92,9 @@ function Router() {
             <Route path="/targets/:id" component={TargetDetail} />
             <Route path="/targets" component={Targets} />
             <Route path="/remediations" component={Remediations} />
-            <Route path="/system" component={System} />
+            <Route path="/system">
+              {() => <AdminRoute component={System} />}
+            </Route>
             <Route path="/settings" component={Settings} />
             <Route path="/cvss" component={CVSSCalculator} />
             <Route path="/executive" component={Executive} />
