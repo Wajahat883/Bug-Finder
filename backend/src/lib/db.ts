@@ -189,6 +189,10 @@ async function ensureIndexes(database: Db): Promise<void> {
     await database.collection("findings").createIndex({ severity: 1, created_at: -1 });
     await database.collection("findings").createIndex({ target_url: 1 });
     await database.collection("findings").createIndex({ category: 1 });
+    // Deduplication key index — enables O(1) lookup before each insert
+    await database.collection("findings").createIndex({ dedup_key: 1, target_url: 1 });
+    await database.collection("findings").createIndex({ validation_status: 1 });
+    await database.collection("findings").createIndex({ last_seen_at: -1 });
     await database.collection("scan_jobs").createIndex({ status: 1, created_at: -1 });
     await database.collection("scan_jobs").createIndex({ target_url: 1 });
     await database.collection("targets").createIndex({ domain: 1 }, { unique: true, sparse: true });
@@ -196,6 +200,10 @@ async function ensureIndexes(database: Db): Promise<void> {
     await database.collection("remediations").createIndex({ created_at: -1 });
     await database.collection("audit_log").createIndex({ created_at: -1 });
     await database.collection("users").createIndex({ email: 1 }, { unique: true, sparse: true });
+    // raw_evidence: TTL index auto-deletes documents after expires_at
+    await database.collection("raw_evidence").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+    await database.collection("raw_evidence").createIndex({ finding_id: 1 }, { unique: true });
+    await database.collection("raw_evidence").createIndex({ scan_job_id: 1 });
     logger.info("Database indexes ensured");
   } catch (err) {
     logger.warn({ err }, "Index creation failed — continuing without indexes");

@@ -97,30 +97,48 @@ function Router() {
               {() => <AdminRoute component={System} />}
             </Route>
             <Route path="/settings" component={Settings} />
-            <Route path="/cvss" component={CVSSCalculator} />
-            <Route path="/executive" component={Executive} />
-            <Route path="/attack-surface" component={AttackSurface} />
-            <Route path="/owasp" component={OWASPPage} />
-            <Route path="/timeline" component={Timeline} />
-            <Route path="/scan-templates" component={ScanTemplates} />
-            <Route path="/compliance" component={ComplianceDashboard} />
-            <Route path="/sla" component={SlaDashboard} />
-            <Route path="/ai-triage" component={AiTriage} />
             <Route path="/notifications" component={Notifications} />
             <Route path="/security" component={TwoFactor} />
             <Route path="/scheduled-scans" component={ScheduledScans} />
+
+            {/* ── Analytics — Admin-only routes ── */}
+            <Route path="/cvss">
+              {() => <AdminRoute component={CVSSCalculator} />}
+            </Route>
+            <Route path="/executive">
+              {() => <AdminRoute component={Executive} />}
+            </Route>
+            <Route path="/attack-surface">
+              {() => <AdminRoute component={AttackSurface} />}
+            </Route>
+            <Route path="/scan-templates">
+              {() => <AdminRoute component={ScanTemplates} />}
+            </Route>
+            <Route path="/compliance">
+              {() => <AdminRoute component={ComplianceDashboard} />}
+            </Route>
+            <Route path="/sla">
+              {() => <AdminRoute component={SlaDashboard} />}
+            </Route>
+            <Route path="/engagements/:id">
+              {() => <AdminRoute component={EngagementDetail} />}
+            </Route>
+            <Route path="/engagements">
+              {() => <AdminRoute component={Engagements} />}
+            </Route>
+            <Route path="/owasp" component={OWASPPage} />
+            <Route path="/timeline" component={Timeline} />
+            <Route path="/metrics" component={MetricsDashboard} />
+            <Route path="/analytics-enhanced" component={AnalyticsEnhanced} />
+            <Route path="/ai-triage" component={AiTriage} />
+
+            {/* ── Admin-only routes ── */}
             <Route path="/testing">
               {() => <AdminRoute component={TestingDashboard} />}
             </Route>
-            <Route path="/metrics" component={MetricsDashboard} />
-            <Route path="/analytics-enhanced" component={AnalyticsEnhanced} />
-            <Route path="/engagements/:id" component={EngagementDetail} />
-            <Route path="/engagements" component={Engagements} />
             <Route path="/api-keys">
               {() => <AdminRoute component={ApiKeysPage} />}
             </Route>
-
-            {/* ── Admin-only routes ── */}
             <Route path="/admin/panel">
               {() => <AdminRoute component={AdminPanel} />}
             </Route>

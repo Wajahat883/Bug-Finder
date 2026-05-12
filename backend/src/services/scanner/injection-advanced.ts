@@ -147,12 +147,14 @@ export async function runPrototypePollutionCheck(ctx: ScanContext): Promise<Scan
       if (!res) continue;
       const body = await res.text().catch(() => "");
 
-      if (body.includes(probe.check) || res.status === 200) {
+      if (res.status === 200) {
         // Follow up with a GET to check if the prototype was polluted
         const checkRes = await ctxFetch(ctx, endpoint);
         if (checkRes) {
           const checkBody = await checkRes.text().catch(() => "");
-          if (checkBody.includes(probe.check)) {
+          // Must see isAdmin:true — not just the string "isAdmin" (would fire on isAdmin:false)
+          const polluted = /["']?isAdmin["']?\s*:\s*true/.test(checkBody);
+          if (polluted) {
             findings.push({
               title: "Prototype Pollution in API Endpoint",
               category: "Injection",

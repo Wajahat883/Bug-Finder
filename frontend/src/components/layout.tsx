@@ -342,7 +342,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const displayName = (user as Record<string, unknown>)?.github_login as string || (user as Record<string, unknown>)?.username as string || "SecOps Lead";
   const displayRole = ((user as Record<string, unknown>)?.role as string)?.toUpperCase() || "ANALYST";
   const isAdmin = (user as Record<string, unknown>)?.role === "admin";
-  const ADMIN_ONLY_PATHS = ["/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel", "/testing"];
+  const ADMIN_ONLY_PATHS = [
+    "/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel", "/testing",
+    "/executive", "/attack-surface", "/compliance", "/sla", "/engagements", "/scan-templates", "/cvss",
+  ];
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });

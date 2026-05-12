@@ -25,6 +25,18 @@ export interface ScannerEvent {
 
 export type EmitFn = (event: ScannerEvent) => void;
 
+export interface DiscoveredForm {
+  action: string;      // absolute URL
+  method: "GET" | "POST";
+  fields: string[];    // input/textarea/select name attributes
+}
+
+export interface DiscoveredParam {
+  endpoint: string;    // absolute URL with method, e.g. "GET /api/users"
+  name: string;        // parameter name
+  location: "query" | "body" | "path" | "header";
+}
+
 export interface ScanContext {
   targetUrl: string;
   profile: "quick" | "standard" | "deep";
@@ -33,6 +45,8 @@ export interface ScanContext {
   bugBountyMode: boolean;
   emit: EmitFn;
   discoveredEndpoints: string[];
+  discoveredForms: DiscoveredForm[];
+  discoveredParams: DiscoveredParam[];
   abortSignal?: AbortSignal;
   sessionCookie?: string;
   authToken?: string;
@@ -41,6 +55,9 @@ export interface ScanContext {
   authHeaders: Record<string, string>;
   // Scope enforcement — empty array = unrestricted
   scopeHosts: string[];
+  // Re-authentication callback — called when a probe returns 401 mid-scan.
+  // Refreshes ctx.authHeaders in-place and returns true if successful.
+  reauthenticate?: () => Promise<boolean>;
 }
 
 // Returns true if url is within the scan's defined scope
@@ -52,24 +69,53 @@ export function isInScope(ctx: ScanContext, url: string): boolean {
   } catch { return false; }
 }
 
-// Auth-aware safeFetch: merges session/token headers into every request
+// Auth-aware safeFetch: merges session/token headers into every request.
+// Automatically retries once with refreshed credentials when a 401 is received
+// and a reauthenticate() callback is registered on the context.
 export async function ctxFetch(
   ctx: ScanContext,
   url: string,
   options: RequestInit = {},
   timeoutMs = FETCH_TIMEOUT
 ): Promise<Response | null> {
-  const merged: RequestInit = {
+  const buildMerged = () => ({
     ...options,
     headers: { ...ctx.authHeaders, ...(options.headers as Record<string, string> ?? {}) },
-  };
-  return safeFetch(url, merged, timeoutMs);
+  });
+
+  let res = await safeFetch(url, buildMerged(), timeoutMs);
+
+  // On 401, attempt re-authentication once and retry
+  if (res?.status === 401 && ctx.reauthenticate) {
+    const refreshed = await ctx.reauthenticate();
+    if (refreshed) {
+      res = await safeFetch(url, buildMerged(), timeoutMs);
+    }
+  }
+
+  return res;
 }
 
 export const FETCH_TIMEOUT = 10000;
 
-// POINT 8 & 9: Per-target throttle state — tracks last request time and adaptive delay
+// Per-target throttle state — tracks last request time and adaptive delay.
+// Capped at 500 hosts with LRU eviction to prevent unbounded memory growth during
+// large scans or long-running server uptime.
+const TARGET_THROTTLE_MAX = 500;
 const targetThrottle = new Map<string, { lastMs: number; delayMs: number }>();
+
+function throttleSet(host: string, val: { lastMs: number; delayMs: number }): void {
+  if (targetThrottle.size >= TARGET_THROTTLE_MAX && !targetThrottle.has(host)) {
+    // Evict the entry with the oldest lastMs (LRU)
+    let oldestKey = "";
+    let oldestMs = Infinity;
+    for (const [k, v] of targetThrottle) {
+      if (v.lastMs < oldestMs) { oldestMs = v.lastMs; oldestKey = k; }
+    }
+    if (oldestKey) targetThrottle.delete(oldestKey);
+  }
+  throttleSet(host, val);
+}
 
 function getHostKey(url: string): string {
   try { return new URL(url).hostname; } catch { return url; }
@@ -107,20 +153,20 @@ export async function safeFetch(
     if (res.status === 429 || res.status === 503) {
       const retryAfter = res.headers.get("retry-after");
       const backoff = retryAfter ? parseInt(retryAfter) * 1000 : Math.min(state.delayMs * 2, 5000);
-      targetThrottle.set(host, { lastMs: Date.now(), delayMs: backoff });
+      throttleSet(host, { lastMs: Date.now(), delayMs: backoff });
     } else if (latency > 3000) {
       // Slow target — increase delay proportionally
       const newDelay = Math.min(state.delayMs + 200, 3000);
-      targetThrottle.set(host, { lastMs: Date.now(), delayMs: newDelay });
+      throttleSet(host, { lastMs: Date.now(), delayMs: newDelay });
     } else {
       // Fast response — gradually recover toward base delay
       const newDelay = Math.max(state.delayMs - 20, 150);
-      targetThrottle.set(host, { lastMs: Date.now(), delayMs: newDelay });
+      throttleSet(host, { lastMs: Date.now(), delayMs: newDelay });
     }
 
     return res;
   } catch {
-    targetThrottle.set(host, { lastMs: Date.now(), delayMs: Math.min(state.delayMs + 100, 3000) });
+    throttleSet(host, { lastMs: Date.now(), delayMs: Math.min(state.delayMs + 100, 3000) });
     return null;
   } finally {
     clearTimeout(timer);
@@ -129,4 +175,36 @@ export async function safeFetch(
 
 export function resetThrottle(host: string): void {
   targetThrottle.delete(host);
+}
+
+// WAF/block detection — returns true if the response looks like a WAF challenge or block page.
+// Modules can call this after each probe and back off + warn when triggered.
+export function isWafBlock(res: Response | null, body: string): boolean {
+  if (!res) return false;
+  if (res.status === 403 || res.status === 429 || res.status === 406 || res.status === 503) return true;
+  const ct = res.headers.get("content-type") ?? "";
+  const server = (res.headers.get("server") ?? "").toLowerCase();
+  // CloudFlare challenge
+  if (server.includes("cloudflare") && res.status === 403) return true;
+  // Akamai / Imperva / Sucuri block pages contain these strings
+  const bodyLower = body.slice(0, 500).toLowerCase();
+  if (
+    bodyLower.includes("access denied") ||
+    bodyLower.includes("blocked by") ||
+    bodyLower.includes("security check") ||
+    bodyLower.includes("ddos protection") ||
+    bodyLower.includes("ray id") ||            // Cloudflare
+    bodyLower.includes("reference #")          // Akamai
+  ) return true;
+  return false;
+}
+
+// Adaptive WAF backoff — call when isWafBlock returns true.
+// Doubles the host's throttle delay (up to 10s) and emits a warning.
+export function handleWafBlock(ctx: ScanContext, url: string): void {
+  const host = getHostKey(url);
+  const state = targetThrottle.get(host) ?? { lastMs: 0, delayMs: 150 };
+  const newDelay = Math.min(state.delayMs * 2, 10000);
+  throttleSet(host, { lastMs: Date.now(), delayMs: newDelay });
+  ctx.emit({ type: "log", message: `  [WAF] Block detected at ${host} — backing off to ${newDelay}ms between requests` });
 }

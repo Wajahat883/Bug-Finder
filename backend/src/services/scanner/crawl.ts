@@ -1,4 +1,4 @@
-import { ScanContext, ctxFetch } from "./types";
+import { ScanContext, DiscoveredForm, ctxFetch } from "./types";
 
 const COMMON_PATHS = [
   "/", "/login", "/register", "/api", "/api/v1", "/api/v2",
@@ -129,6 +129,30 @@ export async function runCrawl(ctx: ScanContext): Promise<void> {
     const srcMatches = [...html.matchAll(/src=["']([^"'#?]+)["']/g)];
     const actionMatches = [...html.matchAll(/action=["']([^"'#?]+)["']/g)];
 
+    // Extract <form> elements for injection surface
+    const formPattern = /<form([^>]*)>([\s\S]*?)<\/form>/gi;
+    let formMatch: RegExpExecArray | null;
+    while ((formMatch = formPattern.exec(html)) !== null) {
+      const formAttrs = formMatch[1] ?? "";
+      const formBody = formMatch[2] ?? "";
+      const actionM = /action=["']([^"']+)["']/i.exec(formAttrs);
+      const methodM = /method=["']([^"']+)["']/i.exec(formAttrs);
+      const rawAction = actionM?.[1] ?? targetUrl;
+      const method = (methodM?.[1]?.toUpperCase() === "GET" ? "GET" : "POST") as "GET" | "POST";
+      try {
+        const action = new URL(rawAction, base).toString();
+        if (!action.startsWith(base.origin)) continue;
+        const fieldNames = [...formBody.matchAll(/(?:input|textarea|select)[^>]*\bname=["']([^"']+)["']/gi)].map(m => m[1]).filter(Boolean) as string[];
+        if (fieldNames.length > 0) {
+          const form: DiscoveredForm = { action, method, fields: fieldNames };
+          if (!ctx.discoveredForms.some(f => f.action === action && f.method === method)) {
+            ctx.discoveredForms.push(form);
+          }
+          if (!discoveredEndpoints.includes(action)) discoveredEndpoints.push(action);
+        }
+      } catch { /* skip */ }
+    }
+
     const allLinks = [...hrefMatches, ...srcMatches, ...actionMatches].map(m => m[1]).filter(Boolean);
 
     for (const link of allLinks) {
@@ -162,6 +186,9 @@ export async function runCrawl(ctx: ScanContext): Promise<void> {
     }
     if (routesFromBundles > 0) {
       emit({ type: "log", message: `JS bundles: ${routesFromBundles} API routes extracted` });
+    }
+    if (ctx.discoveredForms.length > 0) {
+      emit({ type: "log", message: `Forms: ${ctx.discoveredForms.length} discovered (${ctx.discoveredForms.map(f => `${f.method} ${f.action}`).join(", ").slice(0, 120)})` });
     }
   } else {
     emit({ type: "log", message: "Could not fetch homepage (unreachable or requires auth)" });

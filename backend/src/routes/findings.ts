@@ -719,6 +719,45 @@ router.post("/findings/:id/retest", requireAuth, async (req, res) => {
   } catch(err) { logger.error({err},"retest error"); res.status(500).json({ error: "Internal server error" }); }
 });
 
+// ── Raw evidence (full untruncated evidence for critical/high findings) ───────
+router.get("/findings/:id/raw-evidence", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+
+    // Verify the caller owns (or is admin for) the parent finding
+    const finding = (await col("findings").findOne({ _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>)) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    if (!finding["has_raw_evidence"]) {
+      return res.json({ available: false, message: "Full evidence not stored for this finding (medium/low/info severity)" });
+    }
+
+    const rawEvidence = (await col("raw_evidence").findOne({ finding_id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
+    if (!rawEvidence) {
+      return res.json({ available: false, message: "Raw evidence record not found or has expired (30-day TTL)" });
+    }
+
+    res.json({
+      available: true,
+      finding_id: id,
+      title: rawEvidence["title"],
+      endpoint: rawEvidence["endpoint"],
+      severity: rawEvidence["severity"],
+      scanner_name: rawEvidence["scanner_name"],
+      evidence_full: rawEvidence["evidence_full"],
+      created_at: rawEvidence["created_at"],
+      expires_at: rawEvidence["expires_at"],
+    });
+  } catch (err) {
+    logger.error({ err }, "Raw evidence fetch error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── Finding status history ────────────────────────────────────────────────────
 router.get("/findings/:id/history", requireAuth, async (req, res) => {
   try {

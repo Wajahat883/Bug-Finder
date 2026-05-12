@@ -1,4 +1,5 @@
-import { ScanContext, ScanFinding, ctxFetch, isInScope } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock } from "./types";
+import { runOpenApiDiscovery } from "./openapi";
 
 const SQL_ERROR_PATTERNS = [
   "sql syntax",
@@ -50,7 +51,9 @@ const TEST_PARAMS = ["id", "user_id", "product_id", "search", "q", "query", "ord
 const TIME_THRESHOLD_MS = 2800; // 2.8s — fires below the 3s delay to account for network jitter
 
 export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
-  const { targetUrl, emit, discoveredEndpoints, profile } = ctx;
+  const { targetUrl, emit, discoveredEndpoints, discoveredForms, discoveredParams, profile } = ctx;
+
+  if (discoveredParams.length === 0) await runOpenApiDiscovery(ctx);
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
@@ -77,6 +80,10 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         if (!res) continue;
 
         const body = (await res.text().catch(() => "")).toLowerCase();
+
+        // WAF block — back off and skip this endpoint to avoid getting IP-banned
+        if (isWafBlock(res, body)) { handleWafBlock(ctx, endpoint); break; }
+
         const matchedPattern = SQL_ERROR_PATTERNS.find(p => body.includes(p));
 
         if (matchedPattern) {
@@ -287,6 +294,86 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               });
             }
           }
+        }
+      }
+    }
+  }
+
+  // ── Form-based SQLi injection ────────────────────────────────────────────────
+  if (discoveredForms.length > 0) {
+    emit({ type: "log", message: `Testing ${discoveredForms.length} discovered form(s) for SQLi...` });
+    for (const form of discoveredForms.slice(0, profile === "quick" ? 2 : 5)) {
+      for (const field of form.fields.slice(0, 4)) {
+        const formKey = `form-sqli:${form.action}:${field}`;
+        if (seen.has(formKey)) continue;
+        for (const probe of SQL_ERROR_PROBES.slice(0, 3)) {
+          const body = new URLSearchParams();
+          for (const f of form.fields) body.set(f, f === field ? probe : "test");
+          const res = await ctxFetch(ctx, form.action, {
+            method: form.method,
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          });
+          if (!res) continue;
+          const respBody = (await res.text().catch(() => "")).toLowerCase();
+          const matchedPattern = SQL_ERROR_PATTERNS.find(p => respBody.includes(p));
+          if (matchedPattern) {
+            seen.add(formKey);
+            findings.push({
+              title: `SQL Injection (Error-Based) in Form Field: ${field}`,
+              category: "Injection",
+              severity: "critical",
+              endpoint: form.action,
+              description: `Form field "${field}" at ${form.action} is vulnerable to SQL injection. The server returned a SQL error when the field was injected with "${probe}" via form submission.`,
+              evidence: [`${form.method} ${form.action}`, `Content-Type: application/x-www-form-urlencoded`, `Field: ${field}=${probe}`, `SQL error: "${matchedPattern}"`].join("\n"),
+              recommended_fix: "Use parameterized queries for all database operations. Form parameters are equally injectable.",
+              cvss_score: 9.8,
+              cwe_id: "CWE-89",
+              scanner_name: "Bug-Finder/SQLi",
+              scanner_family: "web",
+              confidence: 0.95,
+            });
+            emit({ type: "log", message: `  [SQLi FORM] ${form.action} field=${field} error="${matchedPattern}"` });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // ── OpenAPI param-driven SQLi ────────────────────────────────────────────────
+  if (discoveredParams.length > 0 && profile !== "quick") {
+    const queryParams = discoveredParams.filter(p => p.location === "query").slice(0, 10);
+    emit({ type: "log", message: `Testing ${queryParams.length} OpenAPI query params for SQLi...` });
+    for (const dp of queryParams) {
+      const [, url] = dp.endpoint.split(" ") as [string, string];
+      if (!url) continue;
+      const paramKey = `openapi-sqli:${url}:${dp.name}`;
+      if (seen.has(paramKey)) continue;
+      for (const probe of SQL_ERROR_PROBES.slice(0, 3)) {
+        const testUrl = `${url}${url.includes("?") ? "&" : "?"}${dp.name}=${encodeURIComponent(probe)}`;
+        const res = await ctxFetch(ctx, testUrl);
+        if (!res) continue;
+        const body = (await res.text().catch(() => "")).toLowerCase();
+        const matchedPattern = SQL_ERROR_PATTERNS.find(p => body.includes(p));
+        if (matchedPattern) {
+          seen.add(paramKey);
+          findings.push({
+            title: `SQL Injection in OpenAPI Parameter: ${dp.name}`,
+            category: "Injection",
+            severity: "critical",
+            endpoint: url,
+            description: `OpenAPI-documented parameter "${dp.name}" is vulnerable to SQL injection. Server returned SQL error with probe "${probe}".`,
+            evidence: [`GET ${testUrl}`, `SQL error: "${matchedPattern}"`, `Response snippet: ${body.slice(Math.max(0, body.indexOf(matchedPattern) - 50), body.indexOf(matchedPattern) + 150)}`].join("\n"),
+            recommended_fix: "Use parameterized queries. All API parameters, including those in OpenAPI spec, must be sanitized.",
+            cvss_score: 9.8,
+            cwe_id: "CWE-89",
+            scanner_name: "Bug-Finder/SQLi",
+            scanner_family: "web",
+            confidence: 0.95,
+          });
+          emit({ type: "log", message: `  [SQLi OpenAPI-param] ${url} param=${dp.name} error="${matchedPattern}"` });
+          break;
         }
       }
     }

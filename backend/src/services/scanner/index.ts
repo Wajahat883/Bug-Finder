@@ -45,6 +45,8 @@ import { runPlaywrightScan } from "./playwright";
 import { runOsintEnrichment } from "./osint";
 import { runCustomRules } from "./custom-rules";
 import { runSsrfCheck } from "./ssrf";
+import { runOpenApiDiscovery } from "./openapi";
+import { runRawSmugglingCheck } from "./smuggling-raw";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -84,11 +86,12 @@ const PIPELINE_QUICK = [
   { name: "CORS",                    fn: (ctx: ScanContext) => runCorsCheck(ctx) },
   { name: "Port Scanner",            fn: (ctx: ScanContext) => runPortScan(ctx) },
   { name: "OSINT Enrichment",        fn: (ctx: ScanContext) => runOsintEnrichment(ctx) },
-  { name: "Custom Scanner Rules",    fn: (ctx: ScanContext) => runCustomRules(ctx.targetUrl) },
+  { name: "Custom Scanner Rules",    fn: (ctx: ScanContext) => runCustomRules(ctx.targetUrl, ctx) },
 ];
 
 const PIPELINE_STANDARD = [
   ...PIPELINE_QUICK.filter(p => p.name !== "OSINT Enrichment"),
+  { name: "OpenAPI Discovery",        fn: (ctx: ScanContext) => { runOpenApiDiscovery(ctx); return Promise.resolve([] as ScanFinding[]); }, isDiscovery: true },
   { name: "XSS Probe",               fn: (ctx: ScanContext) => runXssCheck(ctx) },
   { name: "SQLi Probe",              fn: (ctx: ScanContext) => runSqliCheck(ctx) },
   { name: "Open Redirect",           fn: (ctx: ScanContext) => runRedirectCheck(ctx) },
@@ -123,6 +126,7 @@ const PIPELINE_DEEP = [
   { name: "XXE Injection",           fn: (ctx: ScanContext) => runXxeCheck(ctx) },
   { name: "File Upload",             fn: (ctx: ScanContext) => runFileUploadCheck(ctx) },
   { name: "Request Smuggling",       fn: (ctx: ScanContext) => runRequestSmugglingCheck(ctx) },
+  { name: "Smuggling (Raw TCP)",     fn: (ctx: ScanContext) => runRawSmugglingCheck(ctx) },
   { name: "Business Logic",          fn: (ctx: ScanContext) => runBusinessLogicCheck(ctx) },
   { name: "SSRF",                    fn: (ctx: ScanContext) => runSsrfCheck(ctx) },
 ];
@@ -153,7 +157,54 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     : sev === "medium" ? 40 + Math.floor(Math.random() * 20)
     : sev === "low" ? 15 + Math.floor(Math.random() * 15) : 5;
 
-  const insertResult = await col("findings").insertOne({
+  // Truncated evidence for the main findings collection (UI display)
+  const evidenceTruncated = typeof finding.evidence === "string" && finding.evidence.length > 800
+    ? finding.evidence.slice(0, 800) + "\n\n[truncated — see raw_evidence collection for full details]"
+    : finding.evidence;
+
+  // ── Deduplication: check if this finding already exists for this target ─────
+  // Key = title + normalized endpoint (strip query string for stability)
+  let normalizedEndpoint = finding.endpoint;
+  try { normalizedEndpoint = new URL(finding.endpoint).origin + new URL(finding.endpoint).pathname; } catch { /* use as-is */ }
+  const dedupKey = `${finding.title}||${normalizedEndpoint}`;
+
+  const existing = await col("findings").findOne({
+    dedup_key: dedupKey,
+    target_url: targetUrl,
+  } as Record<string, unknown>) as Record<string, unknown> | null;
+
+  let insertResult: { insertedId: ObjectId };
+
+  if (existing) {
+    // Finding already exists — update last_seen, increment occurrence count,
+    // and mark as regression if it was previously resolved.
+    const wasResolved = existing["validation_status"] === "resolved";
+    await col("findings").updateOne(
+      { _id: existing["_id"] } as Record<string, unknown>,
+      {
+        $set: {
+          last_seen_at: new Date(),
+          scan_job_id: new ObjectId(jobId),  // point to most recent scan
+          evidence: evidenceTruncated,
+          confidence: finding.confidence,
+          has_raw_evidence: (sev === "critical" || sev === "high") && finding.evidence.length > 200,
+          ...(wasResolved ? { validation_status: "regression", regression_detected_at: new Date() } : {}),
+          updated_at: new Date(),
+        },
+        $inc: { occurrence_count: 1 } as Record<string, unknown>,
+      } as Record<string, unknown>
+    );
+    insertResult = { insertedId: existing["_id"] as ObjectId };
+
+    if (wasResolved) {
+      logger.warn({ title: finding.title, endpoint: finding.endpoint }, "Finding regression detected");
+    }
+    // Skip activity_event and remediation creation for duplicate findings
+    return riskScore;
+  }
+
+  // New finding — insert with dedup_key and initial state fields
+  insertResult = await col("findings").insertOne({
     scan_job_id: new ObjectId(jobId),
     user_id: userId ?? null,
     title: finding.title,
@@ -163,7 +214,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     confidence: finding.confidence,
     endpoint: finding.endpoint,
     description: finding.description,
-    evidence: finding.evidence,
+    evidence: evidenceTruncated,
     recommended_fix: finding.recommended_fix,
     cvss_score: finding.cvss_score,
     cwe_id: finding.cwe_id,
@@ -171,8 +222,28 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     scanner_name: finding.scanner_name,
     scanner_family: finding.scanner_family,
     created_at: new Date(),
+    last_seen_at: new Date(),
+    occurrence_count: 1,
     target_url: targetUrl,
+    dedup_key: dedupKey,
+    has_raw_evidence: (sev === "critical" || sev === "high") && finding.evidence.length > 200,
   });
+
+  // For critical/high findings, store the complete untruncated evidence in a
+  // dedicated collection with a 30-day TTL so analysts can fully reproduce issues.
+  if (sev === "critical" || sev === "high") {
+    await col("raw_evidence").insertOne({
+      finding_id: insertResult.insertedId,
+      scan_job_id: new ObjectId(jobId),
+      title: finding.title,
+      endpoint: finding.endpoint,
+      evidence_full: finding.evidence,        // complete, untruncated
+      scanner_name: finding.scanner_name,
+      severity: finding.severity,
+      created_at: new Date(),
+      expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30-day TTL
+    });
+  }
 
   await col("activity_events").insertOne({
     type: "finding_created",
@@ -219,11 +290,51 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     bugBountyMode,
     emit,
     discoveredEndpoints,
+    discoveredForms: [],
+    discoveredParams: [],
     sessionCookie,
     authToken,
     customHeaders,
     authHeaders,
     scopeHosts: scopeHosts ?? [],
+    // Re-authentication: if login credentials were provided, re-run the login
+    // flow when a module gets a 401 mid-scan (expired JWT / session rotation).
+    reauthenticate: (authToken || sessionCookie)
+      ? async (): Promise<boolean> => {
+          // Try re-posting the login endpoint with whatever credentials we have
+          const loginUrl = `${new URL(targetUrl).origin}/api/auth/login`;
+          try {
+            const body = authToken
+              ? JSON.stringify({ token: authToken })
+              : JSON.stringify({ cookie: sessionCookie });
+            const res = await fetch(loginUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+              signal: AbortSignal.timeout(8000),
+            });
+            if (res.ok) {
+              // Extract new token from response body
+              const data = await res.json().catch(() => null) as Record<string, unknown> | null;
+              const newToken = (data?.["token"] ?? data?.["access_token"] ?? data?.["accessToken"]) as string | undefined;
+              if (newToken) {
+                ctx.authHeaders["Authorization"] = `Bearer ${newToken}`;
+                emit({ type: "log", message: "Session refreshed — re-authenticated successfully" });
+                return true;
+              }
+              // Extract from Set-Cookie
+              const setCookie = res.headers.get("set-cookie");
+              if (setCookie) {
+                ctx.authHeaders["Cookie"] = setCookie.split(";")[0] ?? "";
+                emit({ type: "log", message: "Session refreshed via cookie" });
+                return true;
+              }
+            }
+          } catch { /* network error — cannot refresh */ }
+          emit({ type: "log", message: "Session refresh failed — continuing with stale credentials" });
+          return false;
+        }
+      : undefined,
   };
 
   const pipeline = getPipeline(profile, validationEnabled, fuzzingEnabled, bugBountyMode);
