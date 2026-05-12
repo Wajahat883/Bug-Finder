@@ -1,20 +1,30 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
+import crypto from "crypto";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
+function signWebhookPayload(secret: string, body: string): string {
+  return "sha256=" + crypto.createHmac("sha256", secret).update(body).digest("hex");
+}
+
 export async function triggerWebhooks(event: string, payload: Record<string,unknown>) {
   try {
     const hooks = await col("webhooks").find({ events: event, enabled: true }).toArray() as Array<Record<string,unknown>>;
     for (const hook of hooks) {
-      fetch(String(hook["url"]), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(hook["secret"] ? { "X-Webhook-Secret": String(hook["secret"]) } : {}) },
-        body: JSON.stringify({ event, timestamp: new Date().toISOString(), ...payload }),
-      }).catch(err => logger.warn({ err, url: hook["url"] }, "Webhook delivery failed"));
+      const body = JSON.stringify({ event, timestamp: new Date().toISOString(), ...payload });
+      const secret = hook["secret"] ? String(hook["secret"]) : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (secret) {
+        // HMAC-SHA256 signature — receivers can verify: X-Hub-Signature-256 header
+        headers["X-Hub-Signature-256"] = signWebhookPayload(secret, body);
+        headers["X-Webhook-ID"] = String(hook["_id"]);
+      }
+      fetch(String(hook["url"]), { method: "POST", headers, body })
+        .catch(err => logger.warn({ err, url: hook["url"] }, "Webhook delivery failed"));
     }
   } catch(err) { logger.error({err}, "triggerWebhooks error"); }
 }

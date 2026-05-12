@@ -46,7 +46,9 @@ type Collection = {
   find: (query?: Record<string, unknown>) => { toArray: () => Doc[]; sort: (s: unknown) => { toArray: () => Doc[] } };
   insertOne: (doc: Record<string, unknown>) => Promise<{ insertedId: ObjectId }>;
   updateOne: (q: Record<string, unknown>, upd: Record<string, unknown>) => Promise<void>;
+  updateMany: (q: Record<string, unknown>, upd: Record<string, unknown>) => Promise<void>;
   deleteOne: (q: Record<string, unknown>) => Promise<void>;
+  deleteMany: (q: Record<string, unknown>) => Promise<{ deletedCount: number }>;
   countDocuments: (q?: Record<string, unknown>) => Promise<number>;
 };
 
@@ -108,9 +110,21 @@ function makeCollection(name: string): Collection {
       const set = (update["$set"] ?? {}) as Record<string, unknown>;
       Object.assign(doc, set);
     },
+    async updateMany(query, update) {
+      const matches = docs.filter((d) => matchesQuery(d, query));
+      const set = (update["$set"] ?? {}) as Record<string, unknown>;
+      for (const doc of matches) Object.assign(doc, set);
+    },
     async deleteOne(query) {
       const idx = docs.findIndex((d) => matchesQuery(d, query));
       if (idx !== -1) docs.splice(idx, 1);
+    },
+    async deleteMany(query) {
+      const before = docs.length;
+      const toKeep = docs.filter((d) => !matchesQuery(d, query));
+      docs.length = 0;
+      docs.push(...toKeep);
+      return { deletedCount: before - docs.length };
     },
     async countDocuments(query = {}) {
       return docs.filter((d) => matchesQuery(d, query)).length;

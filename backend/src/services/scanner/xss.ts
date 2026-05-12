@@ -1,10 +1,12 @@
 import { ScanContext, ScanFinding, safeFetch } from "./types";
 
-// Harmless XSS markers - these don't execute but detect reflection
+// Harmless XSS markers — detect reflection without executing code
 const XSS_PROBES = [
-  { payload: "<xssprobe1337>", marker: "xssprobe1337" },
-  { payload: `"><xsstest9871>`, marker: "xsstest9871" },
-  { payload: `javascript:xssprobe8421`, marker: "xssprobe8421" },
+  { payload: "<xssprobe1337>", marker: "xssprobe1337", context: "html-tag" },
+  { payload: `"><xsstest9871>`, marker: "xsstest9871", context: "attr-breakout" },
+  { payload: `javascript:xssprobe8421`, marker: "xssprobe8421", context: "href-proto" },
+  { payload: `'><xssattr8712 x='`, marker: "xssattr8712", context: "single-quote-attr" },
+  { payload: `</script><xssscript1234>`, marker: "xssscript1234", context: "script-breakout" },
 ];
 
 const PARAM_NAMES = ["q", "search", "query", "id", "s", "input", "term", "name", "value", "redirect", "url"];
