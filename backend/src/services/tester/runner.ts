@@ -69,6 +69,7 @@ export async function runTestSuites(
     baseUrl: options?.baseUrl ?? "http://localhost:5000",
     apiBase: `${options?.baseUrl ?? "http://localhost:5000"}/api`,
     session: options?.session,
+    cookieStore: new Map(),
     runtime: { startTime: Date.now(), collectedData: new Map(), warnings: [] },
   };
 

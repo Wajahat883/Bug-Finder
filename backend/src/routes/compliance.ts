@@ -68,6 +68,40 @@ function getCategoryMappings(category: string) {
   return { owasp, pci_dss: pci, soc2 };
 }
 
+// CWE → framework mapping table
+const CWE_MAP: Record<string, { owasp?: string; pci?: string; soc2?: string; iso27001?: string; description: string }> = {
+  "CWE-79":  { owasp: "A03:2021 — Injection (XSS)", pci: "PCI-DSS 4.0 Req 6.2.4", soc2: "CC6.1", iso27001: "A.14.2.5", description: "Cross-site Scripting" },
+  "CWE-89":  { owasp: "A03:2021 — Injection (SQLi)", pci: "PCI-DSS 4.0 Req 6.2.4", soc2: "CC6.1", iso27001: "A.14.2.5", description: "SQL Injection" },
+  "CWE-200": { owasp: "A05:2021 — Security Misconfiguration", pci: "PCI-DSS 4.0 Req 3.4", soc2: "CC6.6", iso27001: "A.18.1.3", description: "Information Exposure" },
+  "CWE-284": { owasp: "A01:2021 — Broken Access Control", pci: "PCI-DSS 4.0 Req 7", soc2: "CC6.1", iso27001: "A.9.4.1", description: "Improper Access Control" },
+  "CWE-285": { owasp: "A01:2021 — Broken Access Control", pci: "PCI-DSS 4.0 Req 7", soc2: "CC6.1", iso27001: "A.9.4.1", description: "Improper Authorization" },
+  "CWE-295": { owasp: "A02:2021 — Cryptographic Failures", pci: "PCI-DSS 4.0 Req 4.2.1", soc2: "CC6.7", iso27001: "A.10.1.1", description: "Improper Certificate Validation" },
+  "CWE-298": { owasp: "A02:2021 — Cryptographic Failures", pci: "PCI-DSS 4.0 Req 4.2.1", soc2: "CC6.7", iso27001: "A.10.1.1", description: "Certificate Expiry Not Checked" },
+  "CWE-319": { owasp: "A02:2021 — Cryptographic Failures", pci: "PCI-DSS 4.0 Req 4.2.1", soc2: "CC6.7", iso27001: "A.10.1.1", description: "Cleartext Transmission of Sensitive Info" },
+  "CWE-326": { owasp: "A02:2021 — Cryptographic Failures", pci: "PCI-DSS 4.0 Req 4.2.1", soc2: "CC6.7", iso27001: "A.10.1.1", description: "Inadequate Encryption Strength" },
+  "CWE-327": { owasp: "A02:2021 — Cryptographic Failures", pci: "PCI-DSS 4.0 Req 4.2.1", soc2: "CC6.7", iso27001: "A.10.1.1", description: "Use of Broken/Risky Cryptographic Algorithm" },
+  "CWE-330": { owasp: "A02:2021 — Cryptographic Failures", pci: "PCI-DSS 4.0 Req 6.2.4", soc2: "CC6.7", iso27001: "A.10.1.1", description: "Use of Insufficiently Random Values" },
+  "CWE-352": { owasp: "A01:2021 — Broken Access Control", pci: "PCI-DSS 4.0 Req 6.2.4", soc2: "CC6.1", iso27001: "A.14.2.5", description: "Cross-Site Request Forgery (CSRF)" },
+  "CWE-434": { owasp: "A04:2021 — Insecure Design", pci: "PCI-DSS 4.0 Req 6.2.4", soc2: "CC6.1", iso27001: "A.14.2.5", description: "Unrestricted File Upload" },
+  "CWE-538": { owasp: "A05:2021 — Security Misconfiguration", pci: "PCI-DSS 4.0 Req 3", soc2: "CC6.6", iso27001: "A.18.1.3", description: "File and Directory Information Exposure" },
+  "CWE-601": { owasp: "A01:2021 — Broken Access Control", pci: "PCI-DSS 4.0 Req 6.2.4", soc2: "CC6.1", iso27001: "A.14.2.5", description: "Open Redirect" },
+  "CWE-693": { owasp: "A05:2021 — Security Misconfiguration", soc2: "CC6.6", iso27001: "A.14.1.2", description: "Protection Mechanism Failure (missing CSP)" },
+  "CWE-798": { owasp: "A07:2021 — Auth Failures", pci: "PCI-DSS 4.0 Req 8.3.6", soc2: "CC6.1", iso27001: "A.9.2.3", description: "Hardcoded Credentials" },
+  "CWE-862": { owasp: "A01:2021 — Broken Access Control", pci: "PCI-DSS 4.0 Req 7", soc2: "CC6.1", iso27001: "A.9.4.1", description: "Missing Authorization" },
+  "CWE-942": { owasp: "A05:2021 — Security Misconfiguration", soc2: "CC6.6", iso27001: "A.14.1.2", description: "Permissive CORS Policy" },
+  "CWE-943": { owasp: "A03:2021 — Injection (NoSQLi)", pci: "PCI-DSS 4.0 Req 6.2.4", soc2: "CC6.1", iso27001: "A.14.2.5", description: "NoSQL Injection" },
+};
+
+// GET /compliance/cwe/:cweId — Dynamic CWE to framework mapping
+router.get("/compliance/cwe/:cweId", (req, res) => {
+  const cweId = req.params.cweId.toUpperCase().startsWith("CWE-") ? req.params.cweId.toUpperCase() : `CWE-${req.params.cweId}`;
+  const mapping = CWE_MAP[cweId];
+  if (!mapping) {
+    return res.status(404).json({ error: `No compliance mapping found for ${cweId}`, cwe_id: cweId });
+  }
+  res.json({ cwe_id: cweId, ...mapping });
+});
+
 // GET /compliance/report — Generate compliance report for all findings or a specific scan
 router.get("/compliance/report", async (req, res) => {
   try {

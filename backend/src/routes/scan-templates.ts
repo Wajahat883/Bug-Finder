@@ -15,6 +15,8 @@ function formatTemplate(t: Record<string, unknown>) {
     fuzzing_enabled: t["fuzzing_enabled"] ?? false,
     bug_bounty_mode: t["bug_bounty_mode"] ?? false,
     custom_headers: t["custom_headers"] ?? {},
+    auth_headers: t["auth_headers"] ?? {},
+    scope_hosts: t["scope_hosts"] ?? [],
     tags: t["tags"] ?? [],
     is_builtin: t["is_builtin"] ?? false,
     created_at: t["created_at"],
@@ -62,6 +64,8 @@ router.post("/scan-templates", async (req, res) => {
       fuzzing_enabled?: boolean;
       bug_bounty_mode?: boolean;
       custom_headers?: Record<string, string>;
+      auth_headers?: Record<string, string>;
+      scope_hosts?: string[];
       tags?: string[];
     };
 
@@ -78,6 +82,8 @@ router.post("/scan-templates", async (req, res) => {
       fuzzing_enabled: body.fuzzing_enabled ?? false,
       bug_bounty_mode: body.bug_bounty_mode ?? false,
       custom_headers: body.custom_headers ?? {},
+      auth_headers: body.auth_headers ?? {},
+      scope_hosts: body.scope_hosts ?? [],
       tags: body.tags ?? [],
       is_builtin: false,
       created_at: now,
@@ -104,7 +110,7 @@ router.put("/scan-templates/:id", async (req, res) => {
     if (existing["is_builtin"]) return res.status(403).json({ error: "Cannot edit built-in templates" });
 
     const updates: Record<string, unknown> = { updated_at: new Date() };
-    const allowed = ["name", "description", "scan_profile", "validation_enabled", "fuzzing_enabled", "bug_bounty_mode", "custom_headers", "tags"];
+    const allowed = ["name", "description", "scan_profile", "validation_enabled", "fuzzing_enabled", "bug_bounty_mode", "custom_headers", "auth_headers", "scope_hosts", "tags"];
     for (const key of allowed) {
       if (key in body) updates[key] = body[key];
     }

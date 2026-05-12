@@ -1020,4 +1020,23 @@ router.post("/ai/reasoning-chain/:findingId", async (req, res) => {
   }
 });
 
+// POST /ai/code-fix/:findingId — REST (non-streaming) code patch via ai-remediation service
+router.post("/ai/code-fix/:findingId", requireAuth, async (req, res) => {
+  const { findingId } = req.params;
+  if (!ObjectId.isValid(findingId)) return res.status(404).json({ error: "Not found" });
+  try {
+    const finding = await col("findings").findOne({ _id: new ObjectId(findingId) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    const { generateCodePatch } = await import("../services/ai-remediation");
+    const patch = await generateCodePatch(finding as never);
+    if (!patch) return res.status(503).json({ error: "AI remediation unavailable — configure OPENCODE_API_KEY or OPENAI_API_KEY" });
+
+    res.json(patch);
+  } catch (err) {
+    logger.error({ err }, "Code fix error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

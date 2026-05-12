@@ -32,6 +32,8 @@ function formatJob(j: Record<string, unknown>) {
     authorization_acknowledged: j["authorization_acknowledged"] ?? false,
     scanner_engines: j["scanner_engines"] ?? [],
     error_message: j["error_message"] ?? null,
+    scope_hosts: j["scope_hosts"] ?? [],
+    diff_stats: j["diff_stats"] ?? null,
   };
 }
 
@@ -73,6 +75,11 @@ router.post("/scan-jobs", async (req, res) => {
       authorization_acknowledged: boolean;
       authorization_note?: string;
       scanner_engines?: string[];
+      template_id?: string;
+      session_cookie?: string;
+      auth_token?: string;
+      custom_headers?: Record<string, string>;
+      scope_hosts?: string[];
     };
 
     if (!body.target_url || !body.scan_profile) {
@@ -90,7 +97,17 @@ router.post("/scan-jobs", async (req, res) => {
       return res.status(400).json({ error: "Authorization must be acknowledged before scanning" });
     }
 
-    const engines = body.scanner_engines ?? ["tls_check", "header_scan", "cors_check", "cookie_checker"];
+    // If template_id supplied, load and merge template settings
+    let templateSettings: Record<string, unknown> = {};
+    if (body.template_id) {
+      const { ObjectId: OId } = await import("mongodb");
+      if (OId.isValid(body.template_id)) {
+        const tmpl = await col("scan_templates").findOne({ _id: new OId(body.template_id) } as Record<string, unknown>) as Record<string, unknown> | null;
+        if (tmpl) templateSettings = tmpl;
+      }
+    }
+
+    const engines = body.scanner_engines ?? (templateSettings["scanner_engines"] as string[] | undefined) ?? ["tls_check", "header_scan", "cors_check", "cookie_checker"];
     if (body.validation_enabled) engines.push("xss_validator", "sqli_scanner");
     if (body.fuzzing_enabled) engines.push("fuzzer");
     if (body.bug_bounty_mode) engines.push("idor_checker", "auth_tester");
@@ -114,12 +131,16 @@ router.post("/scan-jobs", async (req, res) => {
       info_count: 0,
       risk_score: 0,
       ai_summary: null,
-      validation_enabled: body.validation_enabled ?? false,
-      fuzzing_enabled: body.fuzzing_enabled ?? false,
-      bug_bounty_mode: body.bug_bounty_mode ?? false,
+      validation_enabled: body.validation_enabled ?? (templateSettings["validation_enabled"] as boolean | undefined) ?? false,
+      fuzzing_enabled: body.fuzzing_enabled ?? (templateSettings["fuzzing_enabled"] as boolean | undefined) ?? false,
+      bug_bounty_mode: body.bug_bounty_mode ?? (templateSettings["bug_bounty_mode"] as boolean | undefined) ?? false,
       authorization_acknowledged: body.authorization_acknowledged,
       authorization_note: body.authorization_note ?? null,
       scanner_engines: engines,
+      session_cookie: body.session_cookie ?? null,
+      auth_token: body.auth_token ?? null,
+      custom_headers: body.custom_headers ?? (templateSettings["auth_headers"] as Record<string, string> | undefined) ?? {},
+      scope_hosts: body.scope_hosts ?? (templateSettings["scope_hosts"] as string[] | undefined) ?? [],
       error_message: null,
     });
 
@@ -137,10 +158,14 @@ router.post("/scan-jobs", async (req, res) => {
     const enqueueResult = await enqueueScan({
       jobId: String(insert.insertedId),
       targetUrl: body.target_url,
-      profile: body.scan_profile as "quick" | "standard" | "deep",
-      validationEnabled: body.validation_enabled ?? false,
-      fuzzingEnabled: body.fuzzing_enabled ?? false,
-      bugBountyMode: body.bug_bounty_mode ?? false,
+      profile: (body.scan_profile ?? templateSettings["scan_profile"] ?? "standard") as "quick" | "standard" | "deep",
+      validationEnabled: body.validation_enabled ?? (templateSettings["validation_enabled"] as boolean | undefined) ?? false,
+      fuzzingEnabled: body.fuzzing_enabled ?? (templateSettings["fuzzing_enabled"] as boolean | undefined) ?? false,
+      bugBountyMode: body.bug_bounty_mode ?? (templateSettings["bug_bounty_mode"] as boolean | undefined) ?? false,
+      sessionCookie: body.session_cookie,
+      authToken: body.auth_token,
+      customHeaders: body.custom_headers ?? (templateSettings["auth_headers"] as Record<string, string> | undefined),
+      scopeHosts: body.scope_hosts ?? (templateSettings["scope_hosts"] as string[] | undefined),
     });
     if (!enqueueResult.ok) {
       // Remove the scan job we just created since it can't be queued

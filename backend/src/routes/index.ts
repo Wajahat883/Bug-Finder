@@ -32,6 +32,7 @@ import scheduledScansRouter from "./scheduled-scans";
 import analyticsMetricsRouter from "./analytics-metrics";
 import engagementsRouter from "./engagements";
 import testsRouter from "./tests";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
@@ -68,5 +69,6 @@ router.use(scheduledScansRouter);
 router.use(analyticsMetricsRouter);
 router.use(engagementsRouter);
 router.use(testsRouter);
+router.use(adminRouter);
 
 export default router;

@@ -25,6 +25,10 @@ interface ScanJob {
   validationEnabled: boolean;
   fuzzingEnabled: boolean;
   bugBountyMode: boolean;
+  sessionCookie?: string;
+  authToken?: string;
+  customHeaders?: Record<string, string>;
+  scopeHosts?: string[];
   retryCount?: number;
   enqueuedAt?: number;
 }
@@ -176,6 +180,10 @@ async function runOneScan(job: ScanJob): Promise<void> {
       validationEnabled: job.validationEnabled,
       fuzzingEnabled: job.fuzzingEnabled,
       bugBountyMode: job.bugBountyMode,
+      sessionCookie: job.sessionCookie,
+      authToken: job.authToken,
+      customHeaders: job.customHeaders,
+      scopeHosts: job.scopeHosts,
     });
 
     logger.info({ jobId: job.jobId }, "Scan completed");

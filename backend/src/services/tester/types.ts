@@ -66,6 +66,7 @@ export interface TestContext {
   session?: { userId: string; username: string; role: string };
   cookies?: string;
   headers?: Record<string, string>;
+  cookieStore: Map<string, string>;
   runtime: {
     startTime: number;
     collectedData: Map<string, unknown>;

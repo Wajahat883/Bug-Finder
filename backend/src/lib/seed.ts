@@ -50,15 +50,10 @@ export async function seedData() {
 
   logger.info("Settings seeded successfully");
 
-  // Seed demo data if no targets exist
-  const targetCount = await col("targets").countDocuments();
-  if (targetCount === 0) {
-    logger.info("Seeding demo targets, findings, and remediations...");
-    await seedDemoData();
-  }
+  // Demo data is NOT auto-seeded — use POST /admin/demo-seed to seed it manually
 }
 
-async function seedDemoData() {
+export async function seedDemoData() {
   const now = new Date();
   const pastDate = (days: number) => new Date(now.getTime() - days * 86400000);
 
