@@ -7,11 +7,15 @@
  * POST   /credentials/:id/test     — load and test the credential against the target
  */
 
-import { Router } from "express";
-import { requireAuth, type AuthenticatedRequest } from "../middleware/auth";
+import { Router, type Request } from "express";
+import { requireAuth } from "../middlewares/rbac";
 import { storeCredential, loadCredential, listCredentialMeta, deleteCredential } from "../lib/credential-vault";
 import { col } from "../lib/db";
 import { ObjectId } from "mongodb";
+
+interface SessionData { userId?: string; }
+type AuthReq = Request & { session: SessionData };
+type AuthenticatedRequest = AuthReq;
 
 const router = Router();
 
@@ -40,7 +44,7 @@ router.post("/credentials", requireAuth, async (req: AuthenticatedRequest, res) 
     // Verify target belongs to this user
     const target = await col("targets").findOne({
       _id: new ObjectId(target_id),
-      ...(req.userId ? { user_id: req.userId } : {}),
+      ...(req.session.userId ? { user_id: req.session.userId } : {}),
     } as Record<string, unknown>);
     if (!target) {
       res.status(404).json({ error: "Target not found" });
@@ -50,7 +54,7 @@ router.post("/credentials", requireAuth, async (req: AuthenticatedRequest, res) 
     const id = await storeCredential(
       target_id,
       { type: type as "bearer" | "cookie" | "basic" | "apikey", value, username, label },
-      req.userId,
+      req.session.userId,
     );
 
     res.status(201).json({ id, message: "Credential stored securely (AES-256-GCM encrypted)" });
@@ -67,7 +71,7 @@ router.get("/credentials/:targetId", requireAuth, async (req: AuthenticatedReque
     // Verify target ownership
     const target = await col("targets").findOne({
       _id: new ObjectId(targetId),
-      ...(req.userId ? { user_id: req.userId } : {}),
+      ...(req.session.userId ? { user_id: req.session.userId } : {}),
     } as Record<string, unknown>);
     if (!target) {
       res.status(404).json({ error: "Target not found" });
