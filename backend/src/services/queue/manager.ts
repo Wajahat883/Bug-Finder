@@ -85,16 +85,18 @@ async function processScanQueue(): Promise<void> {
       queueEvents.emit("scan:completed", { jobId: job.jobId, activeScans: activeScans - 1 });
     } catch (err) {
       logger.error({ err, jobId: job.jobId }, "Scan failed in queue");
-      await col("scan_jobs").updateOne(
-        { _id: job.jobId } as never,
-        { $set: { status: "failed", error_message: err instanceof Error ? err.message : "Worker failure" } }
-      );
-      queueEvents.emit("scan:failed", { jobId: job.jobId, error: err instanceof Error ? err.message : "Unknown" });
-
-      if (scanQueue.length >= 1) {
-        const failed = job;
-        scanQueue.push(failed);
-        logger.warn({ jobId: job.jobId }, "Re-queued failed scan for retry");
+      const retries = (job.retryCount ?? 0) + 1;
+      if (retries <= MAX_SCAN_RETRIES) {
+        job.retryCount = retries;
+        scanQueue.push(job);
+        logger.warn({ jobId: job.jobId, retries, maxRetries: MAX_SCAN_RETRIES }, "Re-queued failed scan for retry");
+      } else {
+        await col("scan_jobs").updateOne(
+          { _id: job.jobId } as never,
+          { $set: { status: "failed", error_message: err instanceof Error ? err.message : `Worker failure after ${MAX_SCAN_RETRIES} retries` } }
+        );
+        queueEvents.emit("scan:failed", { jobId: job.jobId, error: err instanceof Error ? err.message : "Max retries exceeded" });
+        logger.error({ jobId: job.jobId }, "Scan permanently failed after max retries");
       }
     } finally {
       activeScans--;
