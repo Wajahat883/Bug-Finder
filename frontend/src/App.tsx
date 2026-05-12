@@ -38,6 +38,8 @@ import ResetPassword from "@/pages/reset-password";
 import AdminUsers from "@/pages/admin-users";
 import AdminPanel from "@/pages/admin-panel";
 import Notifications from "@/pages/notifications";
+import TwoFactor from "@/pages/two-factor";
+import ScheduledScans from "@/pages/scheduled-scans";
 import AdminLogin from "@/pages/admin-login";
 
 const queryClient = new QueryClient({
@@ -97,6 +99,8 @@ function Router() {
             <Route path="/sla" component={SlaDashboard} />
             <Route path="/ai-triage" component={AiTriage} />
             <Route path="/notifications" component={Notifications} />
+            <Route path="/security" component={TwoFactor} />
+            <Route path="/scheduled-scans" component={ScheduledScans} />
 
             {/* ── Admin-only routes ── */}
             <Route path="/adminW">

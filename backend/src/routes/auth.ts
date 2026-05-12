@@ -6,7 +6,7 @@ import { col, ObjectId } from "../lib/db";
 import { logger } from "../lib/logger";
 import { auditFromReq } from "../lib/audit";
 import { requireAdmin } from "../middlewares/rbac";
-import { sendPasswordResetEmail } from "../services/email";
+import { sendPasswordResetEmail, sendEmail } from "../services/email";
 
 const router = Router();
 
@@ -207,6 +207,71 @@ router.post("/auth/demo", async (req, res) => {
     logger.error({ err }, "Demo login error");
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// ── Password Change ────────────────────────────────────────────────────────
+
+router.post("/auth/change-password", async (req, res) => {
+  try {
+    const session = (req as unknown as { session: SessionData }).session;
+    if (!session.userId) return res.status(401).json({ error: "Not authenticated" });
+
+    const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: "currentPassword and newPassword are required" });
+    if (newPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+
+    const user = await col("users").findOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    const valid = await bcrypt.compare(currentPassword, String(user["password"] ?? ""));
+    if (!valid) return res.status(400).json({ error: "Current password is incorrect" });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await col("users").updateOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>, { $set: { password: hashed, updated_at: new Date() } });
+    await auditFromReq(req, "user.password_change", "users", session.userId);
+    res.json({ ok: true, message: "Password changed successfully" });
+  } catch (err) {
+    logger.error({ err }, "Change password error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Email Verification ──────────────────────────────────────────────────────
+
+router.post("/auth/send-verification", async (req, res) => {
+  try {
+    const session = (req as unknown as { session: SessionData }).session;
+    if (!session.userId) return res.status(401).json({ error: "Not authenticated" });
+    const user = await col("users").findOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (user["email_verified"]) return res.json({ message: "Already verified" });
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    await col("users").updateOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>, { $set: { verification_code: code, verification_expires: new Date(Date.now() + 3600000) } });
+    sendEmail({ to: String(user["email"] ?? ""), subject: "Bug Finder Pro — Verify Your Email", html: `<h2>Email Verification</h2><p>Your code: <strong style="font-size:24px;letter-spacing:4px;">${code}</strong></p><p>Expires in 1 hour.</p>` }).catch(() => {});
+    res.json({ message: "Verification code sent to your email" });
+  } catch (err) { logger.error({ err }, "Send verification error"); res.status(500).json({ error: "Failed" }); }
+});
+
+router.post("/auth/verify-email", async (req, res) => {
+  try {
+    const session = (req as unknown as { session: SessionData }).session;
+    if (!session.userId) return res.status(401).json({ error: "Not authenticated" });
+    const { code } = req.body as { code?: string };
+    if (!code) return res.status(400).json({ error: "code is required" });
+    const user = await col("users").findOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!user) return res.status(404).json({ error: "User not found" });
+    if (String(user["verification_code"] ?? "") !== code) return res.status(400).json({ error: "Invalid code" });
+    if (new Date(String(user["verification_expires"] ?? 0)) < new Date()) return res.status(400).json({ error: "Code expired" });
+    await col("users").updateOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>, { $set: { email_verified: true, verification_code: null, verification_expires: null } });
+    res.json({ ok: true, message: "Email verified successfully" });
+  } catch (err) { logger.error({ err }, "Verify email error"); res.status(500).json({ error: "Verification failed" }); }
+});
+
+router.get("/auth/verification-status", async (req, res) => {
+  const session = (req as unknown as { session: SessionData }).session;
+  if (!session.userId) return res.status(401).json({ error: "Not authenticated" });
+  const user = await col("users").findOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>);
+  res.json({ verified: !!(user?.["email_verified"]) });
 });
 
 // ── Password Reset ──────────────────────────────────────────────────────────

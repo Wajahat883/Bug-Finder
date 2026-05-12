@@ -2,7 +2,7 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
-import { requireAuth, requireAdmin } from "../middlewares/rbac";
+import { requireAdmin } from "../middlewares/rbac";
 
 const router = Router();
 
@@ -192,60 +192,6 @@ router.post("/integrations/jira/create-issue", requireAdmin, async (req, res) =>
     res.json({ key: issue["key"], url: issueUrl });
   } catch (err) {
     logger.error({ err }, "Jira create issue error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-// ── Scheduled Scans ────────────────────────────────────────────────────────
-
-router.get("/scheduled-scans", requireAuth, async (_req, res) => {
-  try {
-    const scans = await col("scheduled_scans").find({}).sort({ created_at: -1 }).toArray() as Array<Record<string, unknown>>;
-    res.json(scans.map((s) => ({ ...s, id: String(s["_id"]) })));
-  } catch (err) {
-    logger.error({ err }, "List scheduled scans error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.post("/scheduled-scans", requireAuth, async (req, res) => {
-  try {
-    const { target_url, scan_profile, cron_expression, validation_enabled, fuzzing_enabled, bug_bounty_mode } = req.body as {
-      target_url?: string; scan_profile?: string; cron_expression?: string;
-      validation_enabled?: boolean; fuzzing_enabled?: boolean; bug_bounty_mode?: boolean;
-    };
-
-    if (!target_url || !scan_profile || !cron_expression) {
-      return res.status(400).json({ error: "target_url, scan_profile, and cron_expression are required" });
-    }
-
-    const { scheduleJob } = await import("../services/scheduler");
-    const insert = await col("scheduled_scans").insertOne({
-      target_url, scan_profile, cron_expression, enabled: true,
-      validation_enabled: validation_enabled ?? false,
-      fuzzing_enabled: fuzzing_enabled ?? false,
-      bug_bounty_mode: bug_bounty_mode ?? false,
-      created_at: new Date(), updated_at: new Date(),
-    });
-
-    const saved = await col("scheduled_scans").findOne({ _id: insert.insertedId }) as Record<string, unknown>;
-    scheduleJob(saved as Parameters<typeof scheduleJob>[0]);
-    res.status(201).json({ ...saved, id: String(saved["_id"]) });
-  } catch (err) {
-    logger.error({ err }, "Create scheduled scan error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
-router.delete("/scheduled-scans/:id", requireAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { unscheduleJob } = await import("../services/scheduler");
-    unscheduleJob(id);
-    await col("scheduled_scans").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
-    res.json({ ok: true });
-  } catch (err) {
-    logger.error({ err }, "Delete scheduled scan error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

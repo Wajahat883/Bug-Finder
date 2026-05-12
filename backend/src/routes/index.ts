@@ -24,6 +24,11 @@ import searchRouter from "./search";
 import reportsRouter from "./reports";
 import notificationsRouter from "./notifications";
 import apiKeysRouter from "./api-keys";
+import scannerRulesRouter from "./scanner-rules";
+import certsRouter from "./certs";
+import webhookLogRouter from "./webhook-log";
+import dashboardLayoutRouter from "./dashboard-layout";
+import scheduledScansRouter from "./scheduled-scans";
 
 const router: IRouter = Router();
 
@@ -52,5 +57,10 @@ router.use(searchRouter);
 router.use(reportsRouter);
 router.use(notificationsRouter);
 router.use(apiKeysRouter);
+router.use(scannerRulesRouter);
+router.use(certsRouter);
+router.use(webhookLogRouter);
+router.use(dashboardLayoutRouter);
+router.use(scheduledScansRouter);
 
 export default router;

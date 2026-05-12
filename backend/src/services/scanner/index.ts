@@ -43,6 +43,7 @@ import { runZapScan } from "./zap";
 import { runNucleiScan } from "./nuclei";
 import { runPlaywrightScan } from "./playwright";
 import { runOsintEnrichment } from "./osint";
+import { runCustomRules } from "../../routes/scanner-rules";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -81,6 +82,7 @@ const PIPELINE_QUICK = [
   { name: "CORS",                    fn: (ctx: ScanContext) => runCorsCheck(ctx) },
   { name: "Port Scanner",            fn: (ctx: ScanContext) => runPortScan(ctx) },
   { name: "OSINT Enrichment",        fn: (ctx: ScanContext) => runOsintEnrichment(ctx) },
+  { name: "Custom Scanner Rules",    fn: (ctx: ScanContext) => runCustomRules(ctx.targetUrl) },
 ];
 
 const PIPELINE_STANDARD = [
