@@ -138,12 +138,12 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Wappalyzer/Fingerprint", message: "Fingerprinting technologies, frameworks, and CMS" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Fingerprint", message: "Fingerprinting technologies, frameworks, and CMS" });
 
   const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
     emit({ type: "log", message: "Target unreachable for fingerprinting" });
-    emit({ type: "engine_done", engine: "Wappalyzer/Fingerprint", message: "Skipped (unreachable)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Fingerprint", message: "Skipped (unreachable)" });
     return findings;
   }
 
@@ -202,6 +202,6 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
     emit({ type: "log", message: `Technologies identified: ${detected.join(", ")}` });
   }
 
-  emit({ type: "engine_done", engine: "Wappalyzer/Fingerprint", message: `Fingerprinting complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/Fingerprint", message: `Fingerprinting complete — ${findings.length} finding(s)` });
   return findings;
 }

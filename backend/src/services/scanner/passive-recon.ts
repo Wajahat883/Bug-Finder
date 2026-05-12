@@ -5,7 +5,7 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "WHOIS/ASN/IPRep", message: "Running passive reconnaissance — WHOIS, ASN, IP reputation" });
+  emit({ type: "engine_start", engine: "Bug-Finder/PassiveRecon", message: "Running passive reconnaissance — WHOIS, ASN, IP reputation" });
 
   let hostname: string;
   let origin: string;
@@ -14,13 +14,13 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
     hostname = parsed.hostname;
     origin = parsed.origin;
   } catch {
-    emit({ type: "engine_done", engine: "WHOIS/ASN/IPRep", message: "Skipped — invalid URL" });
+    emit({ type: "engine_done", engine: "Bug-Finder/PassiveRecon", message: "Skipped — invalid URL" });
     return findings;
   }
 
   if (hostname === "localhost" || hostname.startsWith("127.") || hostname.endsWith(".replit.dev")) {
     emit({ type: "log", message: "Skipping passive recon for localhost/dev host" });
-    emit({ type: "engine_done", engine: "WHOIS/ASN/IPRep", message: "Skipped (local)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/PassiveRecon", message: "Skipped (local)" });
     return findings;
   }
 
@@ -62,7 +62,7 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
             recommended_fix: "Verify this is your domain. If testing an external target, note that recently registered domains may be malicious. Perform additional due diligence.",
             cvss_score: 4.3,
             cwe_id: "CWE-200",
-            scanner_name: "WHOIS",
+            scanner_name: "Bug-Finder/PassiveRecon",
             scanner_family: "recon",
             confidence: 0.85,
           });
@@ -97,7 +97,7 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
             recommended_fix: "Ensure proper network isolation. Use private networking for internal services. Monitor for neighbor attacks on shared infrastructure.",
             cvss_score: 2.5,
             cwe_id: "CWE-200",
-            scanner_name: "IPRep",
+            scanner_name: "Bug-Finder/PassiveRecon",
             scanner_family: "recon",
             confidence: 0.8,
           });
@@ -159,6 +159,6 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
     }
   }
 
-  emit({ type: "engine_done", engine: "WHOIS/ASN/IPRep", message: `Passive recon complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/PassiveRecon", message: `Passive recon complete — ${findings.length} finding(s)` });
   return findings;
 }

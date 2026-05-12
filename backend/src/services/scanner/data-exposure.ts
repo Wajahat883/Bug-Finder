@@ -23,7 +23,7 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
   const { targetUrl, emit, discoveredEndpoints, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Data Exposure Scanner", message: "Scanning for sensitive data leakage and verbose error messages" });
+  emit({ type: "engine_start", engine: "Bug-Finder/DataExposure", message: "Scanning for sensitive data leakage and verbose error messages" });
 
   const base = new URL(targetUrl).origin;
   const budget = profile === "quick" ? 3 : profile === "standard" ? 6 : 12;
@@ -199,6 +199,6 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
     emit({ type: "log", message: "No sensitive data exposure detected" });
   }
 
-  emit({ type: "engine_done", engine: "Data Exposure Scanner", message: `Data exposure check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/DataExposure", message: `Data exposure check complete — ${findings.length} finding(s)` });
   return findings;
 }

@@ -10,7 +10,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "OAuth/SSO Scanner", message: "Checking OAuth/SSO misconfiguration" });
+  emit({ type: "engine_start", engine: "Bug-Finder/OAuth", message: "Checking OAuth/SSO misconfiguration" });
 
   const base = new URL(targetUrl).origin;
   const budget = profile === "quick" ? 3 : profile === "standard" ? 6 : OAUTH_PATHS.length;
@@ -81,7 +81,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             recommended_fix: "Use RSA keys of at least 2048 bits. Prefer EC keys (P-256) for better performance and security.",
             cvss_score: 7.5,
             cwe_id: "CWE-326",
-            scanner_name: "OAuth Scanner",
+            scanner_name: "Bug-Finder/OAuth",
             scanner_family: "auth",
             confidence: 0.7,
           });
@@ -152,6 +152,6 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     emit({ type: "log", message: "No OAuth/SSO endpoints or misconfigurations detected" });
   }
 
-  emit({ type: "engine_done", engine: "OAuth/SSO Scanner", message: `OAuth check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/OAuth", message: `OAuth check complete — ${findings.length} finding(s)` });
   return findings;
 }

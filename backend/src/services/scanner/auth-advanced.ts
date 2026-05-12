@@ -25,7 +25,7 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
   const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Hydra/AuthTester", message: "Testing default credentials, password policy, and 2FA" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Auth-Advanced", message: "Testing default credentials, password policy, and 2FA" });
 
   const base = new URL(targetUrl).origin;
   const budget = profile === "quick" ? 3 : profile === "standard" ? 5 : LOGIN_PATHS.length;
@@ -101,8 +101,11 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
         if (!regR) continue;
         if (regR.status === 200 || regR.status === 201) {
           const regBody = await regR.text().catch(() => "");
-          const accepted = !regBody.toLowerCase().includes("password") || regBody.toLowerCase().includes("token") || regBody.toLowerCase().includes("created");
-          if (accepted && !seen.has(`${regEndpoint}:policy`)) {
+          // Reject if any password-strength error keyword appears — avoids false positives
+          // from apps that return 200 with an error body
+          const rejectionKeywords = ["too short", "too weak", "must be", "minimum", "at least", "password requirements", "invalid password", "password strength"];
+          const wasRejected = rejectionKeywords.some(kw => regBody.toLowerCase().includes(kw));
+          if (!wasRejected && !seen.has(`${regEndpoint}:policy`)) {
             seen.add(`${regEndpoint}:policy`);
             findings.push({
               title: `Weak Password Policy — "${weakPass}" Accepted`,
@@ -158,6 +161,6 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
     emit({ type: "log", message: "No default credential or auth policy issues detected" });
   }
 
-  emit({ type: "engine_done", engine: "Hydra/AuthTester", message: `Advanced auth check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/Auth-Advanced", message: `Advanced auth check complete — ${findings.length} finding(s)` });
   return findings;
 }

@@ -8,7 +8,7 @@ export async function runRedirectCheck(ctx: ScanContext): Promise<ScanFinding[]>
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "Acunetix/Redirect", message: "Testing for open redirect vulnerabilities" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Redirect", message: "Testing for open redirect vulnerabilities" });
 
   const budget = profile === "quick" ? 3 : profile === "standard" ? 6 : 12;
   const base = new URL(targetUrl);
@@ -46,7 +46,7 @@ export async function runRedirectCheck(ctx: ScanContext): Promise<ScanFinding[]>
           recommended_fix: "Validate redirect destinations against a whitelist of allowed URLs. Never use user-supplied input directly as a redirect destination.",
           cvss_score: 6.1,
           cwe_id: "CWE-601",
-          scanner_name: "Bug-Finder",
+          scanner_name: "Bug-Finder/Redirect",
           scanner_family: "web",
           confidence: 0.95,
         });
@@ -64,7 +64,7 @@ export async function runRedirectCheck(ctx: ScanContext): Promise<ScanFinding[]>
 
   emit({
     type: "engine_done",
-    engine: "Acunetix/Redirect",
+    engine: "Bug-Finder/Redirect",
     message: `Redirect check complete — ${findings.length} issue(s) found`,
   });
 

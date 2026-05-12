@@ -32,6 +32,9 @@ async function queryCrtSh(domain: string): Promise<Array<{ name_value: string }>
 export async function runOsintEnrichment(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const domain = getDomain(ctx.targetUrl);
+  const { emit } = ctx;
+
+  emit({ type: "engine_start", engine: "Bug-Finder/OSINT", message: "Running OSINT enrichment — CT logs, Shodan, ASN" });
 
   try {
     logger.info({ domain }, "Running OSINT enrichment");
@@ -63,7 +66,7 @@ export async function runOsintEnrichment(ctx: ScanContext): Promise<ScanFinding[
           evidence: `CT Logs at crt.sh for *.${domain}`,
           recommended_fix: "Audit all subdomains. Remove or secure forgotten subdomains. Implement certificate lifecycle management.",
           cvss_score: 0,
-          scanner_name: "osint-crtsh",
+          scanner_name: "Bug-Finder/OSINT",
           scanner_family: "osint",
           confidence: 0.9,
         });
@@ -87,7 +90,7 @@ export async function runOsintEnrichment(ctx: ScanContext): Promise<ScanFinding[
           evidence: `Shodan domain search for ${domain}`,
           recommended_fix: "Review Shodan results for exposed services. Remove unnecessary internet-facing services. Implement proper firewall rules.",
           cvss_score: 5.0,
-          scanner_name: "osint-shodan",
+          scanner_name: "Bug-Finder/OSINT",
           scanner_family: "osint",
           confidence: 0.85,
         });
@@ -114,7 +117,7 @@ export async function runOsintEnrichment(ctx: ScanContext): Promise<ScanFinding[
             evidence: `Shodan port scan for ${domain}`,
             recommended_fix: "Close unused ports. Implement firewall rules. Use VPN/SSH tunneling instead of direct exposure.",
             cvss_score: 7.5,
-            scanner_name: "osint-shodan-ports",
+            scanner_name: "Bug-Finder/OSINT",
             scanner_family: "osint",
             confidence: 0.9,
           });
@@ -134,7 +137,7 @@ export async function runOsintEnrichment(ctx: ScanContext): Promise<ScanFinding[
         evidence: "Environment variables not set",
         recommended_fix: "Get free API keys from shodan.io and censys.io. Set them in .env file.",
         cvss_score: 0,
-        scanner_name: "osint-config",
+        scanner_name: "Bug-Finder/OSINT",
         scanner_family: "osint",
         confidence: 1.0,
       });
@@ -144,5 +147,6 @@ export async function runOsintEnrichment(ctx: ScanContext): Promise<ScanFinding[
     logger.warn({ err, domain }, "OSINT enrichment failed");
   }
 
+  emit({ type: "engine_done", engine: "Bug-Finder/OSINT", message: `OSINT enrichment complete — ${findings.length} finding(s)` });
   return findings;
 }

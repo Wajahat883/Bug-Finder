@@ -15,7 +15,7 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
   const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Cache Poisoning Scanner", message: "Testing web cache poisoning via unkeyed headers" });
+  emit({ type: "engine_start", engine: "Bug-Finder/CachePoisoning", message: "Testing web cache poisoning via unkeyed headers" });
 
   const budget = profile === "quick" ? 2 : profile === "standard" ? 4 : UNKEYED_HEADERS.length;
 
@@ -24,7 +24,7 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
   const baselineUrl = `${targetUrl}${targetUrl.includes("?") ? "&" : "?"}cb=${cb}`;
   const baseline = await ctxFetch(ctx, baselineUrl, { redirect: "follow" });
   if (!baseline) {
-    emit({ type: "engine_done", engine: "Cache Poisoning Scanner", message: "Skipped (unreachable)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/CachePoisoning", message: "Skipped (unreachable)" });
     return findings;
   }
   const baselineBody = await baseline.text().catch(() => "");
@@ -115,6 +115,6 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
     emit({ type: "log", message: "No cache poisoning vulnerabilities detected" });
   }
 
-  emit({ type: "engine_done", engine: "Cache Poisoning Scanner", message: `Cache poisoning check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/CachePoisoning", message: `Cache poisoning check complete — ${findings.length} finding(s)` });
   return findings;
 }

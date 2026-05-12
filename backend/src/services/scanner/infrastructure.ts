@@ -24,12 +24,12 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "WAF/LB Detector", message: "Detecting WAF, CDN, and load balancer infrastructure" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Infrastructure", message: "Detecting WAF, CDN, and load balancer infrastructure" });
 
   const res = await ctxFetch(ctx, targetUrl, { redirect: "follow" });
   if (!res) {
     emit({ type: "log", message: "Target unreachable for infrastructure check" });
-    emit({ type: "engine_done", engine: "WAF/LB Detector", message: "Skipped (unreachable)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Infrastructure", message: "Skipped (unreachable)" });
     return findings;
   }
 
@@ -136,6 +136,6 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
     emit({ type: "log", message: `Origin IP potentially leaked: ${xRealIp}` });
   }
 
-  emit({ type: "engine_done", engine: "WAF/LB Detector", message: `Infrastructure check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/Infrastructure", message: `Infrastructure check complete — ${findings.length} finding(s)` });
   return findings;
 }

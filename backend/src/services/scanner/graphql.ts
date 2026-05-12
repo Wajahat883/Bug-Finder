@@ -18,7 +18,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "GraphQL Scanner", message: "Probing for GraphQL endpoints and misconfigurations" });
+  emit({ type: "engine_start", engine: "Bug-Finder/GraphQL", message: "Probing for GraphQL endpoints and misconfigurations" });
 
   const base = new URL(targetUrl);
 
@@ -113,7 +113,7 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
 
   if (findings.length === 0) emit({ type: "log", message: "No GraphQL endpoints found or introspection disabled" });
 
-  emit({ type: "engine_done", engine: "GraphQL Scanner", message: `GraphQL check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/GraphQL", message: `GraphQL check complete — ${findings.length} issue(s)` });
   return findings;
 }
 
@@ -121,7 +121,7 @@ export async function runWebSocketCheck(ctx: ScanContext): Promise<ScanFinding[]
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "WebSocket Scanner", message: "Detecting WebSocket endpoints" });
+  emit({ type: "engine_start", engine: "Bug-Finder/WebSocket", message: "Detecting WebSocket endpoints" });
 
   // Detect WebSocket by checking upgrade headers and known paths
   const wsRes = await ctxFetch(ctx, targetUrl, {
@@ -148,6 +148,6 @@ export async function runWebSocketCheck(ctx: ScanContext): Promise<ScanFinding[]
     emit({ type: "log", message: "No WebSocket endpoint found at root" });
   }
 
-  emit({ type: "engine_done", engine: "WebSocket Scanner", message: `WebSocket check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/WebSocket", message: `WebSocket check complete — ${findings.length} issue(s)` });
   return findings;
 }

@@ -4,7 +4,7 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Cloud/Container Scanner", message: "Checking cloud storage, Docker, and Kubernetes exposure" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Cloud", message: "Checking cloud storage, Docker, and Kubernetes exposure" });
 
   const base = new URL(targetUrl).origin;
   const hostname = new URL(targetUrl).hostname;
@@ -155,6 +155,6 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     emit({ type: "log", message: "No cloud storage or container exposure found" });
   }
 
-  emit({ type: "engine_done", engine: "Cloud/Container Scanner", message: `Cloud check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/Cloud", message: `Cloud check complete — ${findings.length} finding(s)` });
   return findings;
 }

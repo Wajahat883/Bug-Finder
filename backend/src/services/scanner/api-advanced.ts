@@ -20,7 +20,7 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
   const { targetUrl, emit, profile, discoveredEndpoints } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "API Advanced Scanner", message: "Testing API versioning, mass assignment, and method tampering" });
+  emit({ type: "engine_start", engine: "Bug-Finder/API-Advanced", message: "Testing API versioning, mass assignment, and method tampering" });
 
   const base = new URL(targetUrl).origin;
   const budget = profile === "quick" ? 3 : profile === "standard" ? 6 : 12;
@@ -83,9 +83,13 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
       if (!r) continue;
 
       const respBody = await r.text().catch(() => "");
-      // Check if the privileged field appears in the response (was accepted)
       const fieldStr = String(field.value);
-      if ((r.status === 200 || r.status === 201) && respBody.includes(field.field) && !seen.has(`mass:${endpoint}:${field.field}`)) {
+      // Both field name AND injected value must appear in response — prevents false positives
+      // from error messages that mention the field name but reject the value
+      const fieldReflected = respBody.includes(`"${field.field}"`) || respBody.includes(`'${field.field}'`);
+      const valueReflected = respBody.includes(`"${fieldStr}"`) || respBody.includes(`:${fieldStr}`) || respBody.includes(`:${fieldStr},`) || respBody === fieldStr || respBody.includes(`"${fieldStr}"`);
+      const noRejectionKeyword = !respBody.toLowerCase().includes("cannot") && !respBody.toLowerCase().includes("not allowed") && !respBody.toLowerCase().includes("forbidden") && !respBody.toLowerCase().includes("invalid");
+      if ((r.status === 200 || r.status === 201) && fieldReflected && valueReflected && noRejectionKeyword && !seen.has(`mass:${endpoint}:${field.field}`)) {
         seen.add(`mass:${endpoint}:${field.field}`);
         findings.push({
           title: `Mass Assignment — Privileged Field "${field.field}" Accepted`,
@@ -169,6 +173,6 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
     emit({ type: "log", message: "No API version abuse, mass assignment, or method tampering issues found" });
   }
 
-  emit({ type: "engine_done", engine: "API Advanced Scanner", message: `API advanced check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/API-Advanced", message: `API advanced check complete — ${findings.length} finding(s)` });
   return findings;
 }

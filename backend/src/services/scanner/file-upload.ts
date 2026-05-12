@@ -26,7 +26,7 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "Upload Scanner", message: "Probing file upload endpoints for abuse vectors" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Upload", message: "Probing file upload endpoints for abuse vectors" });
 
   const base = new URL(targetUrl);
 
@@ -53,23 +53,80 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
       seen.add(key);
 
       if (uploadRes.status === 200 || uploadRes.status === 201) {
-        // Check if file was actually stored / accessible
         if (probe.filename.includes(".php")) {
+          // ── Execution verification: probe the URL where the file was stored ──
+          // Accepting an upload is NOT sufficient to confirm RCE — the file must
+          // also be accessible and executed by the server. Extract the stored URL
+          // from the response body (common patterns: "url", "path", "location"),
+          // then probe it with a GET and check for the output of `echo 'rce'`.
+          let executedUrl: string | null = null;
+          let executionConfirmed = false;
+
+          const urlPatterns = [
+            /"url"\s*:\s*"([^"]+)"/i,
+            /"path"\s*:\s*"([^"]+)"/i,
+            /"file"\s*:\s*"([^"]+)"/i,
+            /"location"\s*:\s*"([^"]+)"/i,
+            /"src"\s*:\s*"([^"]+)"/i,
+          ];
+          for (const pat of urlPatterns) {
+            const m = respBody.match(pat);
+            if (m?.[1]) {
+              try {
+                executedUrl = new URL(m[1], url).toString();
+                break;
+              } catch { /* skip */ }
+            }
+          }
+          // Also check Location header
+          if (!executedUrl) {
+            const loc = uploadRes.headers.get("location");
+            if (loc) {
+              try { executedUrl = new URL(loc, url).toString(); } catch { /* skip */ }
+            }
+          }
+
+          if (executedUrl) {
+            const execRes = await ctxFetch(ctx, executedUrl);
+            if (execRes) {
+              const execBody = await execRes.text().catch(() => "");
+              // Our uploaded content was: GIF89a\n<?php echo 'rce'; ?>\nGIF
+              // If the server executes it, the output will contain 'rce' without the PHP tags
+              executionConfirmed = execBody.includes("rce") && !execBody.includes("<?php");
+              emit({ type: "log", message: `  Upload exec probe: GET ${executedUrl} → HTTP ${execRes.status}, executed=${executionConfirmed}` });
+            }
+          }
+
+          const severity = executionConfirmed ? "critical" : "high";
+          const confidence = executionConfirmed ? 0.97 : 0.65;
           findings.push({
-            title: "File Upload: Server-Side Script Execution Risk",
+            title: executionConfirmed
+              ? "File Upload RCE Confirmed — PHP Execution Verified"
+              : "File Upload: PHP Extension Accepted (Execution Unverified)",
             category: "File Upload",
-            severity: "critical",
+            severity,
             endpoint: url,
-            description: `The upload endpoint accepted a file with a PHP extension disguised as an image. If the server executes uploaded files, this allows Remote Code Execution.`,
-            evidence: `POST ${url}\nFilename: ${probe.filename}\nContent: ${probe.content.slice(0, 60)}\nHTTP ${uploadRes.status}\nResponse: ${respBody.slice(0, 200)}`,
-            recommended_fix: "Validate file type by magic bytes (not extension or MIME type). Store uploads outside the web root or in a CDN with execution disabled. Use an allowlist of permitted file types.",
-            cvss_score: 9.8,
+            description: executionConfirmed
+              ? `A PHP file disguised as a GIF image was uploaded and then executed by the server. The PHP code ran and returned output, confirming Remote Code Execution. An attacker can upload a web shell to take full control of the server.`
+              : `The upload endpoint accepted a file with a PHP extension disguised as an image (${probe.filename}). Execution could not be verified because the file URL was not returned in the response. Manual verification required: if uploaded files are served from the web root without extension restrictions, RCE is possible.`,
+            evidence: [
+              `POST ${url}`,
+              `Filename: ${probe.filename}`,
+              `Content-Type: ${probe.contentType}`,
+              `File content: ${probe.content.slice(0, 60)}`,
+              `HTTP ${uploadRes.status}`,
+              `Upload response: ${respBody.slice(0, 200)}`,
+              executedUrl ? `\nExecution probe: GET ${executedUrl}` : "\nExecution probe: URL not found in response — unverified",
+              executionConfirmed ? "PHP output detected — EXECUTION CONFIRMED" : "",
+            ].filter(Boolean).join("\n"),
+            recommended_fix: "Validate file type by magic bytes, not extension or MIME type. Store uploads outside the web root or in a CDN with script execution disabled. Use an explicit allowlist of permitted file types. Rename uploaded files server-side.",
+            cvss_score: executionConfirmed ? 9.8 : 7.5,
             cwe_id: "CWE-434",
             scanner_name: "Bug-Finder/Upload",
             scanner_family: "web",
-            confidence: 0.8,
+            confidence,
           });
-          emit({ type: "log", message: `  [UPLOAD] Server accepted PHP disguised as image at ${path}` });
+          emit({ type: "log", message: `  [UPLOAD ${executionConfirmed ? "RCE CONFIRMED" : "UNVERIFIED"}] ${probe.filename} at ${path}` });
         } else if (probe.filename.includes(".svg")) {
           findings.push({
             title: "File Upload: SVG XSS / Content-Type Confusion",
@@ -106,7 +163,7 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
   }
 
   if (findings.length === 0) emit({ type: "log", message: "No file upload vulnerabilities detected (or no upload endpoints found)" });
-  emit({ type: "engine_done", engine: "Upload Scanner", message: `File upload check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/Upload", message: `File upload check complete — ${findings.length} issue(s)` });
   return findings;
 }
 
@@ -114,7 +171,7 @@ export async function runDependencyConfusionCheck(ctx: ScanContext): Promise<Sca
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Dep-Confusion", message: "Checking for dependency confusion attack vectors" });
+  emit({ type: "engine_start", engine: "Bug-Finder/DepConfusion", message: "Checking for dependency confusion attack vectors" });
 
   // Check for exposed package.json or requirements.txt
   const base = new URL(targetUrl);
@@ -203,6 +260,6 @@ export async function runDependencyConfusionCheck(ctx: ScanContext): Promise<Sca
   }
 
   if (findings.length === 0) emit({ type: "log", message: "No exposed dependency manifests found" });
-  emit({ type: "engine_done", engine: "Dep-Confusion", message: `Dependency confusion check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/DepConfusion", message: `Dependency confusion check complete — ${findings.length} issue(s)` });
   return findings;
 }

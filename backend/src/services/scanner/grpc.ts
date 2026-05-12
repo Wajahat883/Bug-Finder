@@ -7,14 +7,14 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "gRPC Scanner", message: "Detecting gRPC endpoints and reflection services" });
+  emit({ type: "engine_start", engine: "Bug-Finder/gRPC", message: "Detecting gRPC endpoints and reflection services" });
 
   const base = new URL(targetUrl).origin;
   const hostname = new URL(targetUrl).hostname;
 
   if (hostname === "localhost" || hostname.startsWith("127.") || hostname.endsWith(".replit.dev")) {
     emit({ type: "log", message: "Skipping gRPC port scan for local/dev host" });
-    emit({ type: "engine_done", engine: "gRPC Scanner", message: "Skipped (local host)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/gRPC", message: "Skipped (local host)" });
     return findings;
   }
 
@@ -142,6 +142,6 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     emit({ type: "log", message: "No gRPC services detected" });
   }
 
-  emit({ type: "engine_done", engine: "gRPC Scanner", message: `gRPC check complete — ${findings.length} finding(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/gRPC", message: `gRPC check complete — ${findings.length} finding(s)` });
   return findings;
 }

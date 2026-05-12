@@ -41,13 +41,13 @@ function extractRoutesFromJs(js: string, base: URL): string[] {
 export async function runCrawl(ctx: ScanContext): Promise<void> {
   const { targetUrl, emit, discoveredEndpoints, profile } = ctx;
 
-  emit({ type: "engine_start", engine: "Crawler", message: `Crawling ${targetUrl}` });
+  emit({ type: "engine_start", engine: "Bug-Finder/Crawler", message: `Crawling ${targetUrl}` });
 
   discoveredEndpoints.push(targetUrl);
 
   let base: URL;
   try { base = new URL(targetUrl); } catch {
-    emit({ type: "engine_done", engine: "Crawler", message: "Invalid target URL" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Crawler", message: "Invalid target URL" });
     return;
   }
 
@@ -211,7 +211,7 @@ export async function runCrawl(ctx: ScanContext): Promise<void> {
 
   emit({
     type: "engine_done",
-    engine: "Crawler",
+    engine: "Bug-Finder/Crawler",
     message: `Crawl complete — ${discoveredEndpoints.length} unique endpoints discovered`,
   });
 }
