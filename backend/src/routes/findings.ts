@@ -167,6 +167,69 @@ router.delete("/fp-suppressions/:id", requireAuth, async (req, res) => {
   }
 });
 
+// ── Bulk actions ──────────────────────────────────────────────────────────────
+
+router.post("/findings/bulk", requireAuth, async (req, res) => {
+  try {
+    const { ids, action, value } = req.body as {
+      ids?: string[];
+      action?: "mark_fp" | "mark_real" | "mark_informational" | "delete" | "assign";
+      value?: string;
+    };
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "ids array is required and must not be empty" });
+    }
+    if (!action) {
+      return res.status(400).json({ error: "action is required" });
+    }
+    if (ids.length > 200) {
+      return res.status(400).json({ error: "Maximum 200 findings per bulk operation" });
+    }
+
+    const validIds = ids.filter(id => ObjectId.isValid(id)).map(id => new ObjectId(id));
+    if (validIds.length === 0) {
+      return res.status(400).json({ error: "No valid finding IDs provided" });
+    }
+
+    let updated = 0;
+
+    if (action === "delete") {
+      const result = await col("findings").deleteMany({ _id: { $in: validIds } } as Record<string, unknown>);
+      updated = (result as unknown as { deletedCount: number }).deletedCount ?? validIds.length;
+      res.json({ ok: true, action, affected: updated });
+      return;
+    }
+
+    const statusMap: Record<string, string> = {
+      mark_fp: "false_positive",
+      mark_real: "real",
+      mark_informational: "informational",
+    };
+
+    if (action in statusMap) {
+      await col("findings").updateMany(
+        { _id: { $in: validIds } } as Record<string, unknown>,
+        { $set: { validation_status: statusMap[action], updated_at: new Date() } }
+      );
+      updated = validIds.length;
+    } else if (action === "assign" && value) {
+      await col("findings").updateMany(
+        { _id: { $in: validIds } } as Record<string, unknown>,
+        { $set: { assigned_to: value, updated_at: new Date() } }
+      );
+      updated = validIds.length;
+    } else {
+      return res.status(400).json({ error: `Unknown action: ${action}` });
+    }
+
+    res.json({ ok: true, action, affected: updated });
+  } catch (err) {
+    logger.error({ err }, "Bulk findings action error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── Scan diff ─────────────────────────────────────────────────────────────────
 
 router.get("/scan-jobs/:id/diff", requireAuth, async (req, res) => {

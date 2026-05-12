@@ -5,15 +5,21 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Search, Filter, Download, ChevronLeft, ChevronRight, XCircle, AlertTriangle } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Search, Filter, Download, ChevronLeft, ChevronRight,
+  XCircle, AlertTriangle, CheckCircle, Trash2, ChevronDown, Users,
+} from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -26,7 +32,7 @@ function SeverityBadge({ severity }: { severity: string }) {
     info: "bg-[hsl(var(--info))] text-white",
   };
   return (
-    <Badge className={`${colors[severity.toLowerCase()]} border-none uppercase text-[10px]`}>
+    <Badge className={`${colors[severity.toLowerCase()] ?? "bg-muted"} border-none uppercase text-[10px]`}>
       {severity}
     </Badge>
   );
@@ -77,6 +83,9 @@ export default function Findings() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 25;
 
+  // Bulk selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -103,6 +112,7 @@ export default function Findings() {
   const findings: Finding[] = data?.items ?? [];
   const totalPages = Math.ceil((data?.total ?? 0) / PAGE_SIZE);
 
+  // Mark single as FP
   const markFP = useMutation({
     mutationFn: (vars: { id: string; reason: string; suppress: boolean }) =>
       fetch(`/api/findings/${vars.id}`, {
@@ -124,16 +134,60 @@ export default function Findings() {
     },
   });
 
-  function exportCSV() {
-    window.open(`/api/findings/export/csv?${params}`, "_blank");
+  // Bulk action mutation
+  const bulkAction = useMutation({
+    mutationFn: (vars: { action: string; value?: string }) =>
+      fetch("/api/findings/bulk", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected), action: vars.action, value: vars.value }),
+      }).then(r => r.json()),
+    onSuccess: (data, vars) => {
+      qc.invalidateQueries({ queryKey: ["/api/findings"] });
+      setSelected(new Set());
+      const labels: Record<string, string> = {
+        mark_fp: "Marked as false positive",
+        mark_real: "Marked as real",
+        mark_informational: "Marked as informational",
+        delete: "Deleted",
+      };
+      toast({
+        title: labels[vars.action] ?? "Bulk action complete",
+        description: `${data?.affected ?? selected.size} finding(s) updated.`,
+      });
+    },
+    onError: () => {
+      toast({ title: "Bulk action failed", description: "Please try again.", variant: "destructive" });
+    },
+  });
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
-  function exportJSON() {
-    window.open(`/api/findings/export/json?${params}`, "_blank");
+
+  function toggleSelectAll() {
+    if (selected.size === findings.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(findings.map(f => f.id)));
+    }
   }
+
+  function exportCSV() { window.open(`/api/findings/export/csv?${params}`, "_blank"); }
+  function exportJSON() { window.open(`/api/findings/export/json?${params}`, "_blank"); }
 
   function handleSearch(v: string) { setSearch(v); setPage(1); }
   function handleSeverity(v: string) { setSeverityFilter(v); setPage(1); }
   function handleStatus(v: string) { setStatusFilter(v); setPage(1); }
+
+  const allSelected = findings.length > 0 && selected.size === findings.length;
+  const someSelected = selected.size > 0;
 
   return (
     <div className="space-y-6">
@@ -193,12 +247,79 @@ export default function Findings() {
               </Select>
             </div>
           </div>
+
+          {/* Bulk action toolbar — only visible when items are selected */}
+          {someSelected && (
+            <div className="flex items-center gap-3 p-3 rounded-md bg-primary/10 border border-primary/20 mt-2">
+              <span className="text-sm font-medium text-primary">
+                {selected.size} finding{selected.size !== 1 ? "s" : ""} selected
+              </span>
+              <div className="flex gap-2 ml-auto">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-green-400 border-green-400/30 hover:bg-green-400/10 h-7 text-xs"
+                  disabled={bulkAction.isPending}
+                  onClick={() => bulkAction.mutate({ action: "mark_fp" })}
+                >
+                  <XCircle className="w-3.5 h-3.5 mr-1" />Mark FP
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-400 border-red-400/30 hover:bg-red-400/10 h-7 text-xs"
+                  disabled={bulkAction.isPending}
+                  onClick={() => bulkAction.mutate({ action: "mark_real" })}
+                >
+                  <CheckCircle className="w-3.5 h-3.5 mr-1" />Mark Real
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-blue-400 border-blue-400/30 hover:bg-blue-400/10 h-7 text-xs"
+                  disabled={bulkAction.isPending}
+                  onClick={() => bulkAction.mutate({ action: "mark_informational" })}
+                >
+                  <Users className="w-3.5 h-3.5 mr-1" />Informational
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive border-destructive/30 hover:bg-destructive/10 h-7 text-xs"
+                  disabled={bulkAction.isPending}
+                  onClick={() => {
+                    if (window.confirm(`Delete ${selected.size} finding(s)? This cannot be undone.`)) {
+                      bulkAction.mutate({ action: "delete" });
+                    }
+                  }}
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" />Delete
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-muted-foreground"
+                  onClick={() => setSelected(new Set())}
+                >
+                  Clear
+                </Button>
+              </div>
+            </div>
+          )}
         </CardHeader>
+
         <CardContent>
-          <div className="rounded-md border border-border overflow-auto max-h-[600px]"> 
+          <div className="rounded-md border border-border overflow-auto max-h-[600px]">
             <table className="w-full text-sm text-left">
-              <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b border-border">
+              <thead className="text-xs text-muted-foreground uppercase bg-muted/50 border-b border-border sticky top-0 z-10">
                 <tr>
+                  <th className="px-4 py-3 w-10">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Select all"
+                    />
+                  </th>
                   <th className="px-4 py-3">Severity</th>
                   <th className="px-4 py-3">Title</th>
                   <th className="px-4 py-3">Target / Endpoint</th>
@@ -210,16 +331,23 @@ export default function Findings() {
               </thead>
               <tbody className="divide-y divide-border">
                 {isLoading ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">Loading findings...</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">Loading findings...</td></tr>
                 ) : findings.length === 0 ? (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">No findings matching your criteria.</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">No findings matching your criteria.</td></tr>
                 ) : (
                   findings.map((finding) => (
                     <tr
                       key={finding.id}
-                      className="hover:bg-muted/20 cursor-pointer"
+                      className={`hover:bg-muted/20 cursor-pointer ${selected.has(finding.id) ? "bg-primary/5" : ""}`}
                       onClick={() => setLocation(`/findings/${finding.id}`)}
                     >
+                      <td className="px-4 py-3 w-10" onClick={(e) => { e.stopPropagation(); toggleSelect(finding.id); }}>
+                        <Checkbox
+                          checked={selected.has(finding.id)}
+                          onCheckedChange={() => toggleSelect(finding.id)}
+                          aria-label={`Select ${finding.title}`}
+                        />
+                      </td>
                       <td className="px-4 py-3 w-24"><SeverityBadge severity={finding.severity} /></td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground">{finding.title}</div>
@@ -229,15 +357,15 @@ export default function Findings() {
                         <div className="font-mono text-xs max-w-[300px] truncate">{finding.target_url}</div>
                         <div className="font-mono text-[10px] text-muted-foreground max-w-[300px] truncate" title={finding.endpoint}>{finding.endpoint}</div>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs">{finding.cvss_score ? finding.cvss_score.toFixed(1) : '-'}</td>
+                      <td className="px-4 py-3 font-mono text-xs">{finding.cvss_score ? finding.cvss_score.toFixed(1) : "-"}</td>
                       <td className="px-4 py-3">
                         <Badge variant="outline" className={`text-[10px] capitalize ${
-                          finding.validation_status === 'real' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                          finding.validation_status === 'false_positive' ? 'bg-green-500/10 text-green-500 border-green-500/20' :
-                          finding.validation_status === 'informational' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
-                          'bg-muted text-muted-foreground'
+                          finding.validation_status === "real" ? "bg-red-500/10 text-red-500 border-red-500/20" :
+                          finding.validation_status === "false_positive" ? "bg-green-500/10 text-green-500 border-green-500/20" :
+                          finding.validation_status === "informational" ? "bg-blue-500/10 text-blue-500 border-blue-500/20" :
+                          "bg-muted text-muted-foreground"
                         }`}>
-                          {finding.validation_status.replace('_', ' ')}
+                          {finding.validation_status.replace("_", " ")}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">

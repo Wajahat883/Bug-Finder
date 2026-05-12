@@ -1,9 +1,33 @@
 import { Router } from "express";
+import OpenAI from "openai";
 import { col } from "../lib/db";
 import { getQueueStats } from "../services/queue/manager";
 
 const router = Router();
 const startTime = Date.now();
+
+async function checkAiHealth(): Promise<{ status: string; latency_ms: number; model: string }> {
+  const model = process.env["OPENCODE_MODEL"] ?? "nemotron-3-super-free";
+  const apiKey = process.env["OPENCODE_API_KEY"] ?? "";
+  if (!apiKey) return { status: "not_configured", latency_ms: 0, model };
+  const t0 = Date.now();
+  try {
+    const client = new OpenAI({
+      apiKey,
+      baseURL: process.env["OPENCODE_API_BASE"] ?? "https://opencode.ai/zen/v1",
+      timeout: 8000,
+    });
+    await client.chat.completions.create({
+      model,
+      max_tokens: 5,
+      messages: [{ role: "user", content: "ping" }],
+      stream: false,
+    });
+    return { status: "healthy", latency_ms: Date.now() - t0, model };
+  } catch {
+    return { status: "unhealthy", latency_ms: Date.now() - t0, model };
+  }
+}
 
 router.get("/healthz", async (_req, res) => {
   const uptimeMs = Date.now() - startTime;
@@ -45,6 +69,13 @@ router.get("/healthz", async (_req, res) => {
     queue: queueStats,
     stats: { active_scans: activeScans, total_scans: totalScans, total_findings: totalFindings, total_targets: totalTargets },
   });
+});
+
+// Dedicated AI health check — tests actual API connectivity and latency
+router.get("/healthz/ai", async (_req, res) => {
+  const result = await checkAiHealth();
+  const statusCode = result.status === "healthy" ? 200 : result.status === "not_configured" ? 200 : 503;
+  res.status(statusCode).json({ ...result, timestamp: new Date().toISOString() });
 });
 
 export default router;
