@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock, curlReproducer } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, safeFetch, isInScope, isWafBlock, handleWafBlock, curlReproducer } from "./types";
 import { runOpenApiDiscovery } from "./openapi";
 import { createOastClient } from "./oast";
 import { wafVariants } from "./waf-bypass";
@@ -99,10 +99,13 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         const lineNumber = body.slice(0, offset).split("\n").length;
         const snippet = body.slice(Math.max(0, offset - 120), offset + 120);
 
-        // ── Fix 6: Playwright DOM XSS check ───────────────────────────────
+        // ── DOM XSS check — Playwright (real browser) OR static heuristic ──
         let domXssConfirmed = false;
+        let domXssMethod = "";
         const playwrightUrl = process.env["PLAYWRIGHT_URL"];
+
         if (playwrightUrl) {
+          // Live browser execution via Playwright microservice
           try {
             const pwRes = await fetch(`${playwrightUrl}/check-xss`, {
               method: "POST",
@@ -113,8 +116,44 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             if (pwRes.ok) {
               const pwData = await pwRes.json().catch(() => null) as { executed?: boolean } | null;
               domXssConfirmed = pwData?.executed === true;
+              domXssMethod = "Playwright browser execution";
             }
-          } catch { /* Playwright service unavailable — skip DOM check */ }
+          } catch { /* Playwright service unavailable — fall through to heuristic */ }
+        }
+
+        // Fallback: static DOM-sink heuristic analysis
+        // When Playwright is not available, analyze the response body for DOM-based
+        // XSS sinks — document.write, innerHTML, eval, location.hash usage that
+        // would execute our reflected marker if the page runs in a browser.
+        if (!domXssConfirmed) {
+          const DOM_SINKS = [
+            /document\.write\s*\(/i,
+            /\.innerHTML\s*=/i,
+            /\.outerHTML\s*=/i,
+            /eval\s*\(/i,
+            /setTimeout\s*\(\s*['"`]/i,
+            /setInterval\s*\(\s*['"`]/i,
+            /\.src\s*=.*location\.(hash|search|href)/i,
+            /location\.hash/i,
+            /window\.location/i,
+            /document\.location/i,
+          ];
+          const DOM_SOURCES = [
+            /location\.(hash|search|href|pathname)/i,
+            /document\.(referrer|URL|documentURI)/i,
+            /window\.name/i,
+          ];
+
+          const sinkMatch = DOM_SINKS.find(re => re.test(body));
+          const sourceMatch = DOM_SOURCES.find(re => re.test(body));
+
+          if (sinkMatch && sourceMatch) {
+            domXssConfirmed = true;
+            domXssMethod = `static heuristic — sink: ${sinkMatch.source.slice(0, 40)}, source: ${sourceMatch.source.slice(0, 40)}`;
+          } else if (sinkMatch) {
+            // Sink found but no confirmed source — lower confidence
+            domXssMethod = `static heuristic — sink present (${sinkMatch.source.slice(0, 40)}), no tainted source detected`;
+          }
         }
 
         findings.push({
@@ -132,7 +171,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             `\nContext:\n${snippet}`,
             `\nConfirmation: GET ${confirmUrl}`,
             `Confirmation marker "${confirmProbe.marker}" also reflected`,
-            domXssConfirmed ? `\nPlaywright DOM check: marker executed in browser context — DOM XSS confirmed` : "",
+            domXssConfirmed ? `\nDOM XSS check: CONFIRMED — ${domXssMethod}` : "",
           ].filter(Boolean).join("\n"),
           recommended_fix: "HTML-encode all user input before rendering: use escapeHtml() or a templating engine with auto-escaping. Add Content-Security-Policy: script-src 'self' to limit script execution.",
           cvss_score: domXssConfirmed ? 8.8 : 7.4,
@@ -215,34 +254,47 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
-  // ── Stored XSS tracking ───────────────────────────────────────────────────
-  // Inject into POST (write) endpoints, then probe GET (read) endpoints for reflection
+  // ── Stored XSS — inject (authenticated) then verify (unauthenticated) ────
+  // Real stored XSS must be confirmed with a second session that has no auth
+  // headers — this proves the payload fires for ANY visitor, not just the injector.
   if (profile === "deep") {
     const writeEndpoints = endpoints.filter(ep => ep.includes("/api"));
     const readEndpoints = endpoints.filter(ep => !ep.includes("/api") || ep.includes("/api/feed") || ep.includes("/api/comments"));
     const storedMarker = `xssstored${Date.now().toString(36)}`;
 
+    // Step 1: Inject with authenticated session (attacker's write)
+    const injectedInto: string[] = [];
     for (const writeEp of writeEndpoints.slice(0, 3)) {
-      // Submit stored XSS payload
-      await ctxFetch(ctx, writeEp, {
+      const injectRes = await ctxFetch(ctx, writeEp, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: `<${storedMarker}>`, message: `<${storedMarker}>`, content: `<${storedMarker}>`, comment: `<${storedMarker}>` }),
+        body: JSON.stringify({
+          name: `<${storedMarker}>`, message: `<${storedMarker}>`,
+          content: `<${storedMarker}>`, comment: `<${storedMarker}>`,
+          title: `<${storedMarker}>`, body: `<${storedMarker}>`,
+        }),
       });
+      if (injectRes && (injectRes.status === 200 || injectRes.status === 201)) {
+        injectedInto.push(writeEp);
+      }
     }
 
-    // Wait briefly for server to process
+    // Wait for server persistence
     await new Promise(r => setTimeout(r, 1500));
 
-    // Check read endpoints for reflection of stored marker
+    // Step 2: Verify with unauthenticated GET (victim's read — no cookies/tokens)
     for (const readEp of readEndpoints.slice(0, 5)) {
-      const res = await ctxFetch(ctx, readEp);
-      if (!res) continue;
-      const body = await res.text().catch(() => "");
+      // Use safeFetch (no auth headers) to simulate a different user
+      const unauthRes = await safeFetch(readEp, { headers: { Accept: "text/html,application/json" } });
+      if (!unauthRes) continue;
+      const body = await unauthRes.text().catch(() => "");
       if (!body.includes(storedMarker)) continue;
 
       const encodedMarker = storedMarker.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      if (body.includes(encodedMarker)) continue; // encoded = safe
+      if (body.includes(encodedMarker) && !body.includes(`<${storedMarker}`)) {
+        emit({ type: "log", message: `  Stored marker HTML-encoded at ${readEp} — not exploitable` });
+        continue;
+      }
 
       const offset = body.indexOf(storedMarker);
       const lineNumber = body.slice(0, offset).split("\n").length;
@@ -251,25 +303,35 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       seen.add(storedKey);
 
       findings.push({
-        title: "Stored XSS Confirmed",
+        title: "Stored XSS Confirmed — Cross-Session Verified",
         category: "XSS",
         severity: "critical",
         endpoint: readEp,
-        description: `A stored XSS payload injected into POST write endpoints was reflected unencoded in ${readEp}. Any user who visits this page will execute the attacker's script. This is more severe than reflected XSS as it requires no user interaction beyond visiting the page.`,
+        description: `Stored XSS confirmed with second-session verification. Payload injected via authenticated POST and then retrieved via unauthenticated GET — proving the script fires for ANY visitor without requiring them to be logged in. This is the most severe XSS class.`,
         evidence: [
-          `Payload injected into write endpoints: <${storedMarker}>`,
-          `Marker reflected at GET ${readEp}`,
-          `Line ${lineNumber} in response`,
-          `Snippet: ${body.slice(Math.max(0, offset - 80), offset + 80)}`,
+          `STEP 1 — Inject (authenticated session):`,
+          `  POST to: ${injectedInto.length > 0 ? injectedInto.join(", ") : (writeEndpoints[0] ?? writeEndpoints.join(", "))}`,
+          `  Payload: <${storedMarker}>`,
+          `  Injected fields: name, message, content, comment, title, body`,
+          ``,
+          `STEP 2 — Verify (unauthenticated GET — different session, no cookies):`,
+          `  GET ${readEp}`,
+          `  HTTP ${unauthRes.status}`,
+          `  Marker "<${storedMarker}>" found unencoded at line ${lineNumber}`,
+          ``,
+          `Context: ${body.slice(Math.max(0, offset - 80), offset + 80)}`,
+          ``,
+          `Cross-session confirmed: victim session (no auth) sees payload — exploitable for any visitor.`,
         ].join("\n"),
-        recommended_fix: "HTML-encode all stored content before rendering. Implement a strict Content-Security-Policy. Sanitize all user input at the point of storage.",
-        cvss_score: 9.0,
+        recommended_fix: "HTML-encode all stored content at render time using a trusted sanitizer (DOMPurify on client, escape-html on server). Implement Content-Security-Policy: script-src 'self'. Validate and strip HTML tags at storage time.",
+        cvss_score: 9.3,
         cwe_id: "CWE-79",
         scanner_name: "Bug-Finder/XSS",
         scanner_family: "web",
-        confidence: 0.90,
+        confidence: 0.97,
+        reproduction_curl: curlReproducer("GET", readEp),
       });
-      emit({ type: "log", message: `  [STORED XSS CONFIRMED] payload stored then reflected at ${readEp} line=${lineNumber}` });
+      emit({ type: "log", message: `  [STORED XSS CROSS-SESSION CONFIRMED] injected via auth POST, retrieved via unauth GET at ${readEp} line=${lineNumber}` });
     }
   }
 

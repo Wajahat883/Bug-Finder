@@ -2,7 +2,7 @@ import { EventEmitter } from "events";
 import { ObjectId } from "mongodb";
 import { col } from "../../lib/db";
 import { logger } from "../../lib/logger";
-import { ScanFinding, ScanContext, ScannerEvent } from "./types";
+import { ScanFinding, ScanContext, ScannerEvent, createSessionStore } from "./types";
 import { runCrawl } from "./crawl";
 import { runTlsCheck } from "./tls";
 import { runHeaderCheck } from "./headers";
@@ -349,6 +349,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     customHeaders,
     authHeaders,
     scopeHosts: scopeHosts ?? [],
+    sessionStore: createSessionStore(),
     // Re-authentication: if login credentials were provided, re-run the login
     // flow when a module gets a 401 mid-scan (expired JWT / session rotation).
     reauthenticate: (authToken || sessionCookie)

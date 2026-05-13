@@ -153,6 +153,13 @@ export async function runIdorCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       if (collectedIds.length >= 6) break;
     }
 
+    // Share discovered IDs with other modules via session store
+    for (const id of collectedIds) {
+      const idType = id.includes("-") ? "uuid" : id.length === 24 ? "objectid" : "integer";
+      if (!ctx.sessionStore.discoveredObjectIds.some(e => e.id === id)) {
+        ctx.sessionStore.discoveredObjectIds.push({ id, type: idType, endpoint: apiEndpoints[0] ?? base.origin });
+      }
+    }
     emit({ type: "log", message: `UUID/ObjectID extraction: ${collectedIds.length} IDs found across API responses` });
 
     // Second pass: for each pattern, replace {id} with extracted IDs and probe without auth

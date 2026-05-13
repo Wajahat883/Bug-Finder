@@ -186,6 +186,15 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
           }
         }
 
+        // Share with session store for use by downstream modules
+        if (credPart.length > 12 && confidence >= 0.8) {
+          ctx.sessionStore.discoveredCredentials.push({
+            key: pattern.name,
+            value: credPart.slice(0, 8) + "****", // partial — not fully stored
+            source: jsUrl,
+          });
+        }
+
         findings.push({
           title: `Hardcoded Secret in JavaScript: ${pattern.name}`,
           category: "Secrets Exposure",

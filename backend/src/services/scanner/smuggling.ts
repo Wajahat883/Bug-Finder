@@ -84,59 +84,90 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
     `${base.origin}/api/login`,
   ];
 
+  // Profile-aware burst sizes: enterprise apps often allow 20-50 before blocking.
+  // Quick = 10 (safe), Standard = 25, Deep = 50 to catch permissive limits.
+  const burstSize = ctx.profile === "quick" ? 10 : ctx.profile === "standard" ? 25 : 50;
+
   for (const endpoint of authEndpoints) {
-    // Send 6 rapid requests and check for rate limit response
     const results: number[] = [];
     let rateLimited = false;
+    let rateLimitAt = -1;
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < burstSize; i++) {
       const res = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: `test${i}@test.com`, password: "wrongpassword" }),
+        body: JSON.stringify({ email: `ratetest${i}@scanner.local`, password: "WrongPass123!" }),
       });
       if (res) {
         results.push(res.status);
-        if (res.status === 429) { rateLimited = true; break; }
+        if (res.status === 429 || res.status === 503) {
+          rateLimited = true;
+          rateLimitAt = i + 1;
+          break;
+        }
       }
     }
 
     if (results.length === 0) continue;
 
-    emit({ type: "log", message: `Rate limit test on ${endpoint}: responses ${results.join(", ")}` });
+    emit({ type: "log", message: `Rate limit test on ${endpoint}: ${results.length} requests, responses ${results.slice(0, 10).join(", ")}${results.length > 10 ? "..." : ""}` });
 
     if (!rateLimited && results.some(s => s === 200 || s === 401 || s === 403)) {
+      const severity = burstSize >= 25 && !rateLimited ? "critical" : "high";
       findings.push({
         title: `No Rate Limiting on Authentication Endpoint`,
         category: "Authentication",
-        severity: "high",
+        severity,
         endpoint,
-        description: `The endpoint ${endpoint} does not enforce rate limiting. An attacker can make unlimited login attempts, enabling brute-force password attacks, credential stuffing, and account enumeration.`,
-        evidence: `6 rapid POST requests to ${endpoint}\nResponses: ${results.join(", ")}\nNo 429 (Too Many Requests) returned`,
-        recommended_fix: "Implement rate limiting (max 5 attempts per minute per IP). Add account lockout after repeated failures. Consider CAPTCHA after N failures. Use exponential backoff.",
-        cvss_score: 7.5,
+        description: `The endpoint ${endpoint} accepted ${results.length} consecutive authentication attempts without enforcing rate limiting (no HTTP 429 received). Enterprise-level applications typically enforce a limit of 5-10 attempts per minute per IP. An attacker can automate credential stuffing or brute-force attacks without restriction.`,
+        evidence: [
+          `Burst test: ${results.length} POST requests sent to ${endpoint}`,
+          `Burst size tested: ${burstSize} (profile: ${ctx.profile})`,
+          `Rate limit triggered: NO`,
+          `Response codes: ${results.join(", ")}`,
+          `No 429/503 received in ${results.length} attempts`,
+        ].join("\n"),
+        recommended_fix: "Implement rate limiting (max 5 attempts per minute per IP). Add account lockout after repeated failures. Consider CAPTCHA after N failures. Use exponential backoff. Key rate limits by IP AND by username to prevent distributed attacks.",
+        cvss_score: severity === "critical" ? 8.1 : 7.5,
         cwe_id: "CWE-307",
         scanner_name: "Bug-Finder/Rate-Limit",
         scanner_family: "web",
-        confidence: 0.85,
+        confidence: results.length >= 20 ? 0.95 : 0.85,
       });
-      emit({ type: "log", message: `  [RATE-LIMIT] No rate limiting on ${endpoint}` });
-      break; // Report once
+      emit({ type: "log", message: `  [RATE-LIMIT] No rate limiting on ${endpoint} after ${results.length} attempts` });
+      break;
     } else if (rateLimited) {
-      emit({ type: "log", message: `  Rate limiting properly enforced on ${endpoint}` });
+      emit({ type: "log", message: `  Rate limiting enforced on ${endpoint} after ${rateLimitAt} request(s)` });
+      // Report if limit is too permissive (fires only after >20 requests)
+      if (rateLimitAt > 20) {
+        findings.push({
+          title: "Permissive Rate Limit — Triggered Only After Many Attempts",
+          category: "Authentication",
+          severity: "medium",
+          endpoint,
+          description: `Rate limiting is enforced on ${endpoint}, but it only triggered after ${rateLimitAt} attempts. Enterprise security standards recommend a limit of 5-10 attempts. An attacker using a large password list can make ${rateLimitAt - 1} attempts before being blocked.`,
+          evidence: `${rateLimitAt - 1} requests succeeded before HTTP 429 was returned`,
+          recommended_fix: "Tighten rate limit threshold to 5-10 attempts per minute per IP.",
+          cvss_score: 5.3,
+          cwe_id: "CWE-307",
+          scanner_name: "Bug-Finder/Rate-Limit",
+          scanner_family: "web",
+          confidence: 0.90,
+        });
+      }
     }
   }
 
   // Test header-based rate limit bypass ONLY on endpoints that DO enforce rate limiting.
-  // If the endpoint never rate-limited (rateLimited was false), there is nothing to bypass.
   for (const endpoint of authEndpoints) {
     // Re-probe to trigger rate limiting, then test bypass headers
     let confirmedRateLimit = false;
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 15; i++) {
       const r = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: `bypasstest${i}@test.com`, password: "wrong" }),
+        body: JSON.stringify({ email: `bypasstest${i}@scanner.local`, password: "wrong" }),
       });
       if (r?.status === 429) { confirmedRateLimit = true; break; }
     }

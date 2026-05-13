@@ -174,6 +174,87 @@ export async function runCsrfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
+  // ── JSON API CSRF: custom header bypass test ─────────────────────────────
+  // Some APIs rely on a custom header (X-Requested-With: XMLHttpRequest) as
+  // their only CSRF defense. A browser-based form can't set custom headers,
+  // but an attacker with CORS access or a fetch() request CAN.
+  // We test: can we POST JSON WITHOUT the custom header and get the same result?
+  emit({ type: "log", message: "Testing JSON API CSRF (custom-header bypass)..." });
+
+  const jsonApiEndpoints = [
+    ...STATE_CHANGING_PATHS.slice(0, 4).map(p => `${base}${p}`),
+    ...discoveredEndpoints.filter(ep => ep.includes("/api")).slice(0, 4),
+  ];
+
+  for (const endpoint of jsonApiEndpoints.slice(0, 5)) {
+    if (seen.has(`xrw:${endpoint}`)) continue;
+
+    // Baseline with the custom header (simulates legitimate AJAX)
+    const withHeaderRes = await ctxFetch(ctx, endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": base,
+      },
+      body: JSON.stringify({ csrf_test: "baseline" }),
+    });
+    if (!withHeaderRes) continue;
+    if (withHeaderRes.status === 404 || withHeaderRes.status === 405) continue;
+    const withHeaderBody = await withHeaderRes.text().catch(() => "");
+
+    // Attack: same POST WITHOUT X-Requested-With (browser cross-origin fetch can't set it
+    // by default, but this tests whether the server actually enforces it)
+    const withoutHeaderRes = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Origin": "https://evil-csrf-xrw.example.com",
+      },
+      body: JSON.stringify({ csrf_test: "attack" }),
+      signal: AbortSignal.timeout(8000),
+    }).catch(() => null);
+    if (!withoutHeaderRes) continue;
+    const withoutHeaderBody = await withoutHeaderRes.text().catch(() => "");
+
+    const setCookieH = withHeaderRes.headers.get("set-cookie") ?? "";
+    const hasSameSite = /samesite=(strict|lax)/i.test(setCookieH);
+    const corsAcao = withoutHeaderRes.headers.get("access-control-allow-origin") ?? "";
+    const corsPermissive = corsAcao === "*" || corsAcao.includes("evil-csrf-xrw");
+
+    // Server accepted without custom header AND lacks SameSite = CSRF vector
+    const accepted = [200, 201, 202, 400].includes(withoutHeaderRes.status);
+    const sameResponse = Math.abs(withoutHeaderBody.length - withHeaderBody.length) < 150;
+
+    if (accepted && !hasSameSite && (sameResponse || corsPermissive) && !seen.has(`xrw:${endpoint}`)) {
+      seen.add(`xrw:${endpoint}`);
+      findings.push({
+        title: `JSON API CSRF — Missing Custom Header Enforcement at ${endpoint}`,
+        category: "CSRF",
+        severity: "high",
+        endpoint,
+        description: `The JSON API endpoint at ${endpoint} does not enforce X-Requested-With: XMLHttpRequest or equivalent custom header validation. Session cookies lack SameSite protection. An attacker page can use fetch() to send credentialed cross-origin POST requests and trigger state changes on behalf of logged-in users.`,
+        evidence: [
+          `With X-Requested-With header: POST ${endpoint} → HTTP ${withHeaderRes.status} (${withHeaderBody.length}b)`,
+          `Without X-Requested-With (attack): POST ${endpoint}`,
+          `  Origin: https://evil-csrf-xrw.example.com`,
+          `  → HTTP ${withoutHeaderRes.status} (${withoutHeaderBody.length}b)`,
+          `  Response size diff: ${Math.abs(withoutHeaderBody.length - withHeaderBody.length)}b`,
+          `SameSite cookie: ${hasSameSite ? "PRESENT" : "MISSING — browser sends session cookies on cross-origin requests"}`,
+          `CORS Access-Control-Allow-Origin: ${corsAcao || "[not set]"}`,
+          corsPermissive ? `EXPLOIT: fetch("${endpoint}",{method:"POST",credentials:"include",body:JSON.stringify({...})})` : "",
+        ].filter(Boolean).join("\n"),
+        recommended_fix: "Set SameSite=Strict on all session cookies. Add CSRF tokens to all state-changing API endpoints. If using custom header enforcement (X-Requested-With), ensure the check is actually applied server-side and not just documented.",
+        cvss_score: 7.5,
+        cwe_id: "CWE-352",
+        scanner_name: "Bug-Finder/CSRF",
+        scanner_family: "web",
+        confidence: corsPermissive ? 0.87 : 0.70,
+      });
+      emit({ type: "log", message: `  [CSRF] JSON API accepts requests without X-Requested-With at ${endpoint}` });
+    }
+  }
+
   if (findings.length === 0) {
     emit({ type: "log", message: "No CSRF vulnerabilities confirmed" });
   }

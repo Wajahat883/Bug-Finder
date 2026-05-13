@@ -8,21 +8,32 @@ interface TlsSocketInfo {
   error?: string;
 }
 
-function checkTlsSocket(hostname: string, port: number): Promise<TlsSocketInfo> {
+function checkTlsSocket(hostname: string, port: number, maxVersion?: tls.SecureVersion, minVersion?: tls.SecureVersion): Promise<TlsSocketInfo> {
   return new Promise((resolve) => {
-    const socket = tls.connect(
-      { host: hostname, port, rejectUnauthorized: false, timeout: 8000, servername: hostname },
-      () => {
-        const protocol = socket.getProtocol?.() ?? null;
-        const cipher = socket.getCipher();
-        const cert = socket.getPeerCertificate();
-        socket.destroy();
-        resolve({ protocol, cipher, cert });
-      }
-    );
+    const opts: tls.ConnectionOptions = {
+      host: hostname, port, rejectUnauthorized: false, timeout: 8000, servername: hostname,
+    };
+    if (maxVersion) opts.maxVersion = maxVersion;
+    if (minVersion) opts.minVersion = minVersion;
+
+    const socket = tls.connect(opts, () => {
+      const protocol = socket.getProtocol?.() ?? null;
+      const cipher = socket.getCipher();
+      const cert = socket.getPeerCertificate();
+      socket.destroy();
+      resolve({ protocol, cipher, cert });
+    });
     socket.on("error", (err) => resolve({ protocol: null, cipher: null, cert: null, error: err.message }));
     socket.on("timeout", () => { socket.destroy(); resolve({ protocol: null, cipher: null, cert: null, error: "timeout" }); });
   });
+}
+
+// Attempt forced TLS downgrade — connect with maxVersion set to an old protocol.
+// Returns the protocol that was actually negotiated (or null if rejected).
+async function checkTlsDowngrade(hostname: string, port: number, maxVersion: tls.SecureVersion): Promise<string | null> {
+  const result = await checkTlsSocket(hostname, port, maxVersion, maxVersion);
+  if (result.error) return null; // Connection refused = downgrade blocked
+  return result.protocol;
 }
 
 // Known weak ciphers
@@ -32,7 +43,7 @@ const WEAK_CIPHERS = [
 ];
 
 export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
-  const { targetUrl, emit } = ctx;
+  const { targetUrl, emit, profile } = ctx;
   const findings: ScanFinding[] = [];
 
   emit({ type: "engine_start", engine: "Bug-Finder/TLS", message: "Checking TLS configuration (socket-level)" });
@@ -148,6 +159,43 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           scanner_family: "network",
           confidence: 0.95,
         });
+      }
+
+      // ── TLS downgrade attack tests — force old protocol negotiation ──────
+      // Even if the server negotiated TLS 1.2+, it may still ACCEPT connections
+      // that force TLS 1.0 or 1.1. We test by connecting with maxVersion set.
+      if (profile !== "quick") {
+        const downgradeTests: Array<{ version: tls.SecureVersion; label: string; cve: string; cvss: number }> = [
+          { version: "TLSv1", label: "TLS 1.0", cve: "CVE-2011-3389 (BEAST)", cvss: 6.8 },
+          { version: "TLSv1.1", label: "TLS 1.1", cve: "RFC 8996 deprecation", cvss: 5.3 },
+        ];
+        for (const dt of downgradeTests) {
+          const negotiated = await checkTlsDowngrade(hostname, tlsPort, dt.version);
+          if (negotiated && (negotiated === "TLSv1" || negotiated === "TLSv1.1")) {
+            findings.push({
+              title: `TLS Downgrade Attack Possible — Server Accepts Forced ${dt.label}`,
+              category: "TLS/Transport",
+              severity: dt.cvss >= 7 ? "high" : "medium",
+              endpoint: targetUrl,
+              description: `The server accepted a forced ${dt.label} connection even though it may normally negotiate higher versions. An active network attacker (MITM) can force clients to downgrade to ${dt.label} and exploit known weaknesses (${dt.cve}).`,
+              evidence: [
+                `Downgrade test: connected to ${hostname}:${tlsPort} with maxVersion=${dt.version}`,
+                `Negotiated protocol: ${negotiated}`,
+                `Result: Server ACCEPTED ${dt.label} — downgrade is possible`,
+                `Normal negotiated: ${proto}`,
+              ].join("\n"),
+              recommended_fix: `Configure the server to reject connections requesting ${dt.label} or older:\n  ssl_protocols TLSv1.2 TLSv1.3;\nDisabling older protocols server-side prevents forced downgrade even when the client requests it.`,
+              cvss_score: dt.cvss,
+              cwe_id: "CWE-326",
+              scanner_name: "Bug-Finder/TLS",
+              scanner_family: "network",
+              confidence: 0.97,
+            });
+            emit({ type: "log", message: `  [TLS DOWNGRADE] Server accepted forced ${dt.label} on ${hostname}:${tlsPort}` });
+          } else {
+            emit({ type: "log", message: `  TLS downgrade to ${dt.label}: rejected (good)` });
+          }
+        }
       }
 
       // Check certificate expiry

@@ -1,4 +1,5 @@
-import { ScanContext, ScanFinding, ctxFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, safeFetch } from "./types";
+import { wafVariants } from "./waf-bypass";
 
 const WAF_SIGNATURES: Array<{ name: string; header?: string; pattern?: RegExp; cookieName?: string }> = [
   { name: "Cloudflare", header: "cf-ray" },
@@ -69,6 +70,89 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
       scanner_family: "infrastructure",
       confidence: 0.85,
     });
+
+    // ── WAF bypass probe: verify the WAF actually enforces rules ─────────────
+    // After detecting a WAF, try EVERY encoding variant from waf-bypass.ts.
+    // A WAF blocking the raw payload may still pass encoded variants — which
+    // is the real bypass attackers use in practice.
+    emit({ type: "log", message: `WAF bypass verification — testing raw + encoded variants against ${wafList}` });
+
+    interface BypassProbeConfig {
+      label: string;
+      rawPayload: string;
+      param: string;
+      type: Parameters<typeof wafVariants>[1];
+    }
+
+    const bypassProbeConfigs: BypassProbeConfig[] = [
+      { label: "XSS", rawPayload: "<script>alert(1)</script>", param: "q", type: "xss" },
+      { label: "SQLi", rawPayload: "' OR '1'='1", param: "id", type: "sqli" },
+      { label: "Path traversal", rawPayload: "../../../etc/passwd", param: "file", type: "path" },
+    ];
+
+    for (const probeConfig of bypassProbeConfigs) {
+      const variants = wafVariants(probeConfig.rawPayload, probeConfig.type, 12);
+      let bypassedWith: string | null = null;
+      let bypassStatus = 0;
+      let bypassBody = "";
+
+      for (const variant of variants) {
+        const probeUrl = `${targetUrl}${targetUrl.includes("?") ? "&" : "?"}${probeConfig.param}=${encodeURIComponent(variant)}`;
+        // Use safeFetch (no auth) to simulate an unauthenticated attacker
+        const probeRes = await safeFetch(probeUrl, { redirect: "follow" });
+        if (!probeRes) continue;
+
+        const wafBlocked = [403, 406, 429, 503].includes(probeRes.status);
+        const body = await probeRes.text().catch(() => "");
+        const bodyHasBlock = /blocked|forbidden|access denied|security check|ddos protection|ray id/i.test(body.slice(0, 600));
+
+        if (!wafBlocked && !bodyHasBlock && probeRes.status === 200) {
+          bypassedWith = variant;
+          bypassStatus = probeRes.status;
+          bypassBody = body;
+          break;
+        }
+      }
+
+      if (bypassedWith !== null) {
+        const isRaw = bypassedWith === probeConfig.rawPayload;
+        findings.push({
+          title: isRaw
+            ? `WAF Not Enforcing Rules — ${probeConfig.label} Passed Unmodified`
+            : `WAF Bypass Confirmed — ${probeConfig.label} (Encoded Variant Passed)`,
+          category: "Infrastructure",
+          severity: "high",
+          endpoint: targetUrl,
+          description: isRaw
+            ? `${wafList} was detected but an obvious unencoded ${probeConfig.label} payload passed through without being blocked. The WAF is in detection-only mode or severely misconfigured.`
+            : `${wafList} was detected and blocked the raw ${probeConfig.label} payload, but an encoded variant was NOT blocked. This confirms a real WAF bypass that attackers can use to circumvent the WAF's rules.`,
+          evidence: [
+            `WAF detected: ${wafList}`,
+            `Attack type: ${probeConfig.label}`,
+            ``,
+            `Variants tested: ${variants.length}`,
+            isRaw ? `Raw payload passed through (no encoding needed)` : `Raw payload BLOCKED — encoded variant bypassed:`,
+            `Bypassing payload: ${bypassedWith.slice(0, 120)}`,
+            `WAF response: HTTP ${bypassStatus}`,
+            `Body contains block message: NO`,
+            ``,
+            `Response preview: ${bypassBody.slice(0, 200)}`,
+            ``,
+            isRaw ? "" : `Bypass technique: URL/Unicode/comment encoding variant of "${probeConfig.rawPayload}"`,
+          ].filter(Boolean).join("\n"),
+          recommended_fix: `Update ${wafList} rule sets to cover encoded attack variants. Enable paranoia level 2+ in ModSecurity. Test WAF bypass resistance using all encoding variants before production deployment. Switch from detection-only to blocking mode.`,
+          cvss_score: 7.5,
+          cwe_id: "CWE-693",
+          scanner_name: "Bug-Finder/WAF",
+          scanner_family: "infrastructure",
+          confidence: isRaw ? 0.92 : 0.85,
+        });
+        emit({ type: "log", message: `  [WAF BYPASS] ${probeConfig.label} bypassed ${wafList} — variant: "${bypassedWith.slice(0, 60)}"` });
+        break; // One confirmed bypass per WAF is the key signal
+      } else {
+        emit({ type: "log", message: `  WAF ${wafList} blocked all ${variants.length} ${probeConfig.label} variants — rules enforced` });
+      }
+    }
   } else {
     emit({ type: "log", message: "No WAF/CDN detected — target may be unprotected" });
     findings.push({

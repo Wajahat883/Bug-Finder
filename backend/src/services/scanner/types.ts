@@ -62,6 +62,33 @@ export interface ScanContext {
   // Re-authentication callback — called when a probe returns 401 mid-scan.
   // Refreshes ctx.authHeaders in-place and returns true if successful.
   reauthenticate?: () => Promise<boolean>;
+  // Cross-module session store — modules write discovered credentials/tokens here
+  // so downstream modules can reuse them without re-discovering.
+  sessionStore: SessionStore;
+}
+
+// Cross-module session store for sharing discovered tokens across scanner modules
+export interface SessionStore {
+  // Auth tokens discovered by auth/JWT scanners
+  discoveredTokens: Array<{ token: string; type: "bearer" | "cookie" | "api-key"; endpoint: string }>;
+  // Object IDs discovered by IDOR scanner for use in other modules
+  discoveredObjectIds: Array<{ id: string; type: "uuid" | "objectid" | "integer"; endpoint: string }>;
+  // API endpoints confirmed to return data (for chaining)
+  confirmedDataEndpoints: string[];
+  // Credentials found in JS secrets / passive recon
+  discoveredCredentials: Array<{ key: string; value: string; source: string }>;
+  // Generic key-value store for module coordination
+  shared: Map<string, unknown>;
+}
+
+export function createSessionStore(): SessionStore {
+  return {
+    discoveredTokens: [],
+    discoveredObjectIds: [],
+    confirmedDataEndpoints: [],
+    discoveredCredentials: [],
+    shared: new Map(),
+  };
 }
 
 // Build raw HTTP reproduction strings from a fetch Response for use in findings evidence.

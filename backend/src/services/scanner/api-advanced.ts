@@ -92,22 +92,62 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
       const valueReflected = respBody.includes(`"${fieldStr}"`) || respBody.includes(`:${fieldStr}`) || respBody.includes(`:${fieldStr},`) || respBody === fieldStr || respBody.includes(`"${fieldStr}"`);
       const noRejectionKeyword = !respBody.toLowerCase().includes("cannot") && !respBody.toLowerCase().includes("not allowed") && !respBody.toLowerCase().includes("forbidden") && !respBody.toLowerCase().includes("invalid");
       if ((r.status === 200 || r.status === 201) && fieldReflected && valueReflected && noRejectionKeyword && !seen.has(`mass:${endpoint}:${field.field}`)) {
+        // ── Persistence verification: GET the created resource and confirm field is stored ──
+        // Reflection in the POST response alone is weak — the server may just echo
+        // back what we sent without storing it. We extract the ID from the POST
+        // response and GET the resource to see if the privileged field persists.
+        let persisted = false;
+        let persistEvidence = "GET verification: resource ID not extractable from POST response";
+        let confidence = 0.72;
+
+        const idMatch = respBody.match(/"id"\s*:\s*"?([A-Za-z0-9_-]{1,40})"?/);
+        if (idMatch?.[1]) {
+          const resourceId = idMatch[1];
+          const getUrl = `${endpoint}/${resourceId}`;
+          const getRes = await ctxFetch(ctx, getUrl, { headers: { Accept: "application/json" } });
+          if (getRes && getRes.status === 200) {
+            const getBody = await getRes.text().catch(() => "");
+            const fieldInGet = getBody.includes(`"${field.field}"`) || getBody.includes(`'${field.field}'`);
+            const valueInGet = getBody.includes(`"${fieldStr}"`) || getBody.includes(`:${fieldStr}`) || getBody.includes(`:${fieldStr},`);
+            persisted = fieldInGet && valueInGet;
+            persistEvidence = [
+              `GET ${getUrl} → HTTP ${getRes.status}`,
+              `Field "${field.field}" in GET response: ${fieldInGet}`,
+              `Value "${fieldStr}" in GET response: ${valueInGet}`,
+              `PERSISTED: ${persisted}`,
+              `GET body: ${getBody.slice(0, 300)}`,
+            ].join("\n");
+            confidence = persisted ? 0.95 : 0.65;
+          }
+        }
+
         seen.add(`mass:${endpoint}:${field.field}`);
         findings.push({
-          title: `Mass Assignment — Privileged Field "${field.field}" Accepted`,
+          title: `Mass Assignment — Privileged Field "${field.field}" ${persisted ? "PERSISTED" : "Accepted (persistence unconfirmed)"}`,
           category: "API Security",
-          severity: "critical",
+          severity: persisted ? "critical" : "high",
           endpoint,
-          description: `The API endpoint accepted a POST request containing the privileged field "${field.field}=${fieldStr}". If this field is persisted, an attacker can escalate privileges or manipulate business-critical data (e.g., setting role=admin, price=0).`,
-          evidence: `POST ${endpoint}\nPayload: ${JSON.stringify(body)}\nHTTP ${r.status}\nField "${field.field}" present in response: true\nResponse: ${respBody.slice(0, 300)}`,
+          description: persisted
+            ? `The API endpoint accepted a POST request containing the privileged field "${field.field}=${fieldStr}" AND the value persisted in the database — confirmed via a subsequent GET request. An attacker can escalate privileges or manipulate business-critical data.`
+            : `The API endpoint accepted a POST request containing the privileged field "${field.field}=${fieldStr}" and reflected it in the response. Persistence was not confirmed (resource ID not extractable). Manual verification is recommended.`,
+          evidence: [
+            `POST ${endpoint}`,
+            `Payload: ${JSON.stringify(body)}`,
+            `HTTP ${r.status}`,
+            `Field "${field.field}" in POST response: ${fieldReflected}`,
+            `Value "${fieldStr}" in POST response: ${valueReflected}`,
+            `POST response: ${respBody.slice(0, 300)}`,
+            ``,
+            persistEvidence,
+          ].join("\n"),
           recommended_fix: "Use an allowlist (whitelist) of permitted fields. Never blindly bind all request body fields to your data model. Use DTOs/schemas to explicitly permit only safe fields.",
-          cvss_score: 9.1,
+          cvss_score: persisted ? 9.1 : 7.5,
           cwe_id: "CWE-915",
           scanner_name: "Bug-Finder/API",
           scanner_family: "api",
-          confidence: 0.75,
+          confidence,
         });
-        emit({ type: "log", message: `  [Mass Assign] ${field.field}=${fieldStr} accepted at ${endpoint}` });
+        emit({ type: "log", message: `  [Mass Assign] ${field.field}=${fieldStr} at ${endpoint} — persisted=${persisted}` });
         break;
       }
     }

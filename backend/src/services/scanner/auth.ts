@@ -398,57 +398,130 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
-  // ── 7. Password reset token entropy (deep only) ─────────────────────────────
+  // ── 7. Password reset token entropy and predictability (deep only) ──────────
   if (profile === "deep") {
-    emit({ type: "log", message: "Testing password reset flow…" });
-    const resetPaths = ["/api/auth/forgot-password", "/api/forgot-password", "/api/password/reset"];
+    emit({ type: "log", message: "Testing password reset flow (entropy + user enumeration)…" });
+    const resetPaths = ["/api/auth/forgot-password", "/api/forgot-password", "/api/password/reset", "/api/auth/reset-password"];
     for (const resetPath of resetPaths) {
       const url = `${base}${resetPath}`;
-      const r1 = await ctxFetch(ctx, url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: "admin@example.com" }),
-      });
-      const r2 = await ctxFetch(ctx, url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: "admin@example.com" }),
-      });
-      if (!r1 || !r2) continue;
-      if (r1.status === 200 || r1.status === 204) {
-        // Flow exists — check if it leaks user existence
-        const b1 = await r1.text().catch(() => "");
-        const nonExistR = await ctxFetch(ctx, url, {
+
+      // Collect 3 reset tokens to test predictability
+      const tokens: string[] = [];
+      let foundResetEndpoint = false;
+
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const r = await ctxFetch(ctx, url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: `nonexistent_probe_${Date.now()}@bugfinder.invalid` }),
+          body: JSON.stringify({ email: "admin@example.com" }),
         });
-        const bNon = nonExistR ? await nonExistR.text().catch(() => "") : "";
-        if (nonExistR && r1.status !== nonExistR.status) {
-          findings.push({
-            title: "Password Reset Endpoint Leaks User Existence",
-            category: "Authentication",
-            severity: "low",
-            endpoint: url,
-            description:
-              "The password reset endpoint returns different HTTP status codes for existing vs. non-existing email addresses, " +
-              "allowing attackers to enumerate registered users.",
-            evidence:
-              `POST ${url} — existing email: HTTP ${r1.status}\n` +
-              `POST ${url} — nonexistent email: HTTP ${nonExistR.status}`,
-            recommended_fix:
-              "Always return HTTP 200 and the same generic message regardless of whether the email exists. " +
-              "\"If an account with this email exists, a reset link has been sent.\"",
-            cvss_score: 3.7,
-            cwe_id: "CWE-204",
-            scanner_name: "Bug-Finder/Auth",
-            scanner_family: "web",
-            confidence: 0.8,
-          });
-          emit({ type: "log", message: "  [LOW] Password reset leaks user existence" });
+        if (!r) continue;
+        if (r.status === 200 || r.status === 201 || r.status === 204) {
+          foundResetEndpoint = true;
+          const body = await r.text().catch(() => "");
+          // Extract token from response body or Location header
+          const tokenMatch = body.match(/"token"\s*:\s*"([A-Za-z0-9_\-]{16,})"/);
+          const locationToken = r.headers.get("location")?.match(/token=([A-Za-z0-9_\-]{16,})/)?.[1];
+          const token = tokenMatch?.[1] ?? locationToken;
+          if (token) tokens.push(token);
         }
-        break;
       }
+
+      if (!foundResetEndpoint) continue;
+
+      // Token entropy analysis: short or low-entropy tokens are predictable
+      if (tokens.length >= 2) {
+        for (const token of tokens) {
+          // Shannon entropy
+          const freq: Record<string, number> = {};
+          for (const ch of token) freq[ch] = (freq[ch] ?? 0) + 1;
+          const entropy = -Object.values(freq).reduce((s, n) => s + (n / token.length) * Math.log2(n / token.length), 0);
+
+          if (token.length < 20 || entropy < 3.5) {
+            findings.push({
+              title: "Password Reset Token — Low Entropy (Predictable)",
+              category: "Authentication",
+              severity: "high",
+              endpoint: url,
+              description: `The password reset token is ${token.length < 20 ? "too short (" + token.length + " chars)" : "low entropy (" + entropy.toFixed(1) + " bits/char)"}. Attackers may brute-force or predict tokens, allowing account takeover without email access.`,
+              evidence: [
+                `Endpoint: ${url}`,
+                `Token length: ${token.length} characters`,
+                `Shannon entropy: ${entropy.toFixed(2)} bits/char (minimum recommended: 4.0)`,
+                `Sample token (redacted): ${token.slice(0, 4)}${"*".repeat(Math.min(token.length - 4, 16))}`,
+                `Tokens collected: ${tokens.length} (for sequential analysis)`,
+              ].join("\n"),
+              recommended_fix: "Use cryptographically random tokens of at least 32 characters (256 bits of entropy). Use crypto.randomBytes(32).toString('hex') in Node.js. Tokens must be single-use and expire within 15 minutes.",
+              cvss_score: 7.5,
+              cwe_id: "CWE-640",
+              scanner_name: "Bug-Finder/Auth",
+              scanner_family: "web",
+              confidence: 0.85,
+            });
+            emit({ type: "log", message: `  [HIGH] Reset token low entropy: len=${token.length}, entropy=${entropy.toFixed(1)}` });
+            break;
+          }
+        }
+
+        // Sequential token check: if tokens differ only in last N chars, they may be sequential
+        if (tokens.length >= 2) {
+          const t1 = tokens[0]!, t2 = tokens[1]!;
+          const commonPrefix = [...t1].findIndex((c, i) => c !== t2[i]);
+          const prefixLen = commonPrefix === -1 ? Math.min(t1.length, t2.length) : commonPrefix;
+          if (prefixLen > t1.length * 0.7) {
+            findings.push({
+              title: "Password Reset Tokens Appear Sequential",
+              category: "Authentication",
+              severity: "high",
+              endpoint: url,
+              description: `Two consecutive reset tokens share ${prefixLen} of ${t1.length} characters as a common prefix. This suggests tokens are generated sequentially or predictably, not cryptographically random. An attacker could predict future tokens.`,
+              evidence: [
+                `Token 1: ${t1.slice(0, 4)}...[${t1.length} chars]`,
+                `Token 2: ${t2.slice(0, 4)}...[${t2.length} chars]`,
+                `Common prefix length: ${prefixLen} chars (${Math.round(prefixLen / t1.length * 100)}% of token)`,
+              ].join("\n"),
+              recommended_fix: "Use crypto.randomBytes(32) to generate tokens. Never use predictable sources (timestamps, sequential IDs, Math.random()).",
+              cvss_score: 7.5,
+              cwe_id: "CWE-330",
+              scanner_name: "Bug-Finder/Auth",
+              scanner_family: "web",
+              confidence: 0.78,
+            });
+            emit({ type: "log", message: `  [HIGH] Reset tokens appear sequential (${prefixLen}/${t1.length} chars match)` });
+          }
+        }
+      }
+
+      // User enumeration via status code difference
+      const existR = await ctxFetch(ctx, url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: "admin@example.com" }),
+      });
+      const nonExistR = await ctxFetch(ctx, url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: `nonexistent_probe_${Date.now()}@bugfinder.invalid` }),
+      });
+
+      if (existR && nonExistR && existR.status !== nonExistR.status) {
+        findings.push({
+          title: "Password Reset Endpoint Leaks User Existence",
+          category: "Authentication",
+          severity: "low",
+          endpoint: url,
+          description: "The password reset endpoint returns different HTTP status codes for existing vs. non-existing email addresses, allowing attackers to enumerate registered users.",
+          evidence: `POST ${url} — existing email: HTTP ${existR.status}\nPOST ${url} — nonexistent email: HTTP ${nonExistR.status}`,
+          recommended_fix: "Always return HTTP 200 and the same generic message regardless of whether the email exists.",
+          cvss_score: 3.7,
+          cwe_id: "CWE-204",
+          scanner_name: "Bug-Finder/Auth",
+          scanner_family: "web",
+          confidence: 0.8,
+        });
+        emit({ type: "log", message: "  [LOW] Password reset leaks user existence" });
+      }
+      break;
     }
   }
 
