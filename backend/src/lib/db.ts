@@ -213,6 +213,13 @@ async function ensureIndexes(database: Db): Promise<void> {
     await database.collection("raw_evidence").createIndex({ scan_job_id: 1 });
     await database.collection("scan_credentials").createIndex({ target_id: 1 });
     await database.collection("scan_credentials").createIndex({ target_id: 1, type: 1, label: 1 });
+    // Suppression rules: fast lookup by target+dedup_key during saveFinding()
+    await database.collection("suppression_rules").createIndex({ target_url: 1, dedup_key: 1 });
+    await database.collection("suppression_rules").createIndex({ created_by: 1, created_at: -1 });
+    // OIDC PKCE state: TTL index auto-deletes stale states after expires_at
+    await database.collection("oidc_pkce_state").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+    // Baseline scan lookup
+    await database.collection("scan_jobs").createIndex({ is_baseline: 1 });
     logger.info("Database indexes ensured");
   } catch (err) {
     logger.warn({ err }, "Index creation failed — continuing without indexes");

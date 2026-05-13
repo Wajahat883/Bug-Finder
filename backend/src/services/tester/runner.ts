@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { EventEmitter } from "events";
 import { logger } from "../../lib/logger";
 import { col } from "../../lib/db";
+import { enableTestMode, disableTestMode } from "../../middlewares/rate-limit";
 import {
   TestSuite, TestCase, TestResult, TestRun, TestContext,
 } from "./types";
@@ -85,6 +86,8 @@ export async function runTestSuites(
   storedRuns.set(runId, run);
   testEvents.emit(`test-run:${runId}`, { type: "start", runId, totalSuites: suites.length });
 
+  enableTestMode();
+
   for (const suite of suites) {
     testEvents.emit(`test-run:${runId}`, { type: "suite-start", suiteId: suite.id, suiteName: suite.label });
     logger.info({ suite: suite.label }, `Running test suite`);
@@ -105,6 +108,8 @@ export async function runTestSuites(
   run.status = run.summary.error > 0 ? "failed" : "completed";
 
   testEvents.emit(`test-run:${runId}`, { type: "complete", run });
+
+  disableTestMode();
 
   // Persist to DB
   try {

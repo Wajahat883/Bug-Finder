@@ -1,11 +1,11 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
-import rateLimit from "express-rate-limit";
 import crypto from "crypto";
 import { col, ObjectId } from "../lib/db";
 import { logger } from "../lib/logger";
 import { auditFromReq } from "../lib/audit";
 import { requireAdmin } from "../middlewares/rbac";
+import { authLimiter } from "../middlewares/rate-limit";
 import { sendPasswordResetEmail, sendEmail } from "../services/email";
 
 const router = Router();
@@ -19,15 +19,6 @@ interface SessionData {
   username?: string;
   role?: string;
 }
-
-// Rate limiting: 10 attempts per 15 min on auth endpoints
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { error: "Too many attempts, please try again in 15 minutes" },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
 
 function generateId(): string {
   return new ObjectId().toHexString();

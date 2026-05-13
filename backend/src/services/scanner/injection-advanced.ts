@@ -126,7 +126,7 @@ export async function runCrlfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const seen = new Set<string>();
 
-  emit({ type: "engine_start", engine: "CRLF Scanner", message: "Testing for CRLF/Header injection" });
+  emit({ type: "engine_start", engine: "Bug-Finder/CRLF", message: "Testing for CRLF/Header injection" });
 
   const budget = profile === "quick" ? 2 : 5;
   const params = ["url", "redirect", "next", "return", "location", "path"];
@@ -140,9 +140,10 @@ export async function runCrlfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
         const hasInjectedHeader = res.headers.get("x-injected-header") || res.headers.get("x-injected");
         const body = await res.text().catch(() => "");
-        const hasCrlfInBody = body.toLowerCase().includes("crlf") || body.includes("x-injected");
 
-        if (hasInjectedHeader || hasCrlfInBody) {
+        // Only confirm via injected header — body text check ("crlf", "x-injected") would fire
+        // on documentation pages or error messages that mention CRLF injection.
+        if (hasInjectedHeader) {
           const key = `${endpoint}:crlf`;
           if (seen.has(key)) continue;
           seen.add(key);
@@ -169,7 +170,7 @@ export async function runCrlfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   }
 
   if (findings.length === 0) emit({ type: "log", message: "No CRLF injection detected" });
-  emit({ type: "engine_done", engine: "CRLF Scanner", message: `CRLF check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/CRLF", message: `CRLF check complete — ${findings.length} issue(s)` });
   return findings;
 }
 
@@ -177,11 +178,19 @@ export async function runPrototypePollutionCheck(ctx: ScanContext): Promise<Scan
   const { targetUrl, emit, discoveredEndpoints } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Prototype Pollution", message: "Testing for prototype pollution vectors" });
+  emit({ type: "engine_start", engine: "Bug-Finder/ProtoPollution", message: "Testing for prototype pollution vectors" });
 
   const apiEndpoints = discoveredEndpoints.filter(ep => ep.includes("/api")).slice(0, 5);
 
   for (const endpoint of apiEndpoints) {
+    // Baseline GET before injecting — if isAdmin:true is already present, skip to avoid false positive
+    const baselineRes = await ctxFetch(ctx, endpoint);
+    const baselineBody = baselineRes ? await baselineRes.text().catch(() => "") : "";
+    if (/["']?isAdmin["']?\s*:\s*true/.test(baselineBody)) {
+      emit({ type: "log", message: `  Proto pollution baseline contains isAdmin:true at ${endpoint} — skipping` });
+      continue;
+    }
+
     for (const probe of PROTO_PROBES.slice(0, 2)) {
       const res = await ctxFetch(ctx, endpoint, {
         method: "POST",
@@ -223,6 +232,6 @@ export async function runPrototypePollutionCheck(ctx: ScanContext): Promise<Scan
   }
 
   if (findings.length === 0) emit({ type: "log", message: "No prototype pollution detected" });
-  emit({ type: "engine_done", engine: "Prototype Pollution", message: `Prototype pollution check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/ProtoPollution", message: `Prototype pollution check complete — ${findings.length} issue(s)` });
   return findings;
 }

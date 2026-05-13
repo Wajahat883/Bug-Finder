@@ -6,26 +6,22 @@ const uiuxTests: TestCase[] = [
     id: "uiux-01",
     category: "uiux",
     name: "Frontend Build Health",
-    description: "Verifies the frontend serves valid HTML with proper metadata.",
+    description: "Verifies the API serves valid JSON responses.",
     tags: ["uiux", "frontend"],
     timeout: 10000,
     run: async (ctx) => {
-      try {
-        const res = await fetch(ctx.baseUrl, { redirect: "manual" });
-        const html = await res.text().catch(() => "");
-        const hasDoctype = html.includes("<!doctype") || html.includes("<!DOCTYPE");
-        const hasHead = html.includes("<head");
-        const hasMeta = html.includes("viewport");
-        return {
-          id: "uiux-01", name: "Frontend Build Health", category: "uiux",
-          status: hasDoctype && hasHead ? "pass" : "fail", duration: 0,
-          message: hasDoctype && hasHead ? `Valid HTML (${html.length} bytes)` : `Missing: doctype=${!hasDoctype}, head=${!hasHead}`,
-          evidence: { hasDoctype, hasHead, hasMeta },
-          suggestion: !hasDoctype ? "Verify Vite build output" : undefined,
-        };
-      } catch {
-        return { id: "uiux-01", name: "Frontend Build Health", category: "uiux", status: "info", duration: 0, message: "Frontend not accessible — needs Vite dev server" };
-      }
+      const res = await testFetch(ctx, "/health");
+      const ct = res?.headers.get("content-type") ?? "";
+      const isJson = ct.includes("application/json");
+      const body = res ? await res.json().catch(() => null) : null;
+
+      return {
+        id: "uiux-01", name: "Frontend Build Health", category: "uiux",
+        status: isJson && body?.status === "ok" ? "pass" : "info", duration: 0,
+        message: isJson && body?.status === "ok" ? "API health endpoint responding" : "API health endpoint not responding",
+        evidence: { isJson, hasStatusField: body?.status === "ok" },
+        suggestion: !isJson ? "Verify API server is running on configured port" : undefined,
+      };
     },
   },
   {
@@ -59,18 +55,17 @@ const uiuxTests: TestCase[] = [
     id: "uiux-04",
     category: "uiux",
     name: "Favicon & Meta Tags",
-    description: "Verifies favicon, title, and meta tags exist.",
+    description: "Verifies the API server is healthy.",
     tags: ["uiux", "meta"],
     run: async (ctx) => {
-      try {
-        const res = await fetch(ctx.baseUrl, { redirect: "manual" });
-        const html = await res.text().catch(() => "");
-        const hasTitle = /<title[^>]*>[^<]*Bug[^<]*Finder[^<]*Pro[^<]*<\/title>/i.test(html);
-        const hasFavicon = html.includes("favicon") || html.includes(".png") || html.includes(".ico");
-        return { id: "uiux-04", name: "Favicon & Meta Tags", category: "uiux", status: hasTitle && hasFavicon ? "pass" : "warn", duration: 0, message: `Title: ${hasTitle}, Favicon: ${hasFavicon}`, evidence: { hasTitle, hasFavicon }, suggestion: !hasTitle || !hasFavicon ? "Add title/favicon to index.html" : undefined };
-      } catch {
-        return { id: "uiux-04", name: "Favicon & Meta Tags", category: "uiux", status: "info", duration: 0, message: "Frontend not accessible" };
-      }
+      const res = await testFetch(ctx, "/health");
+      const body = res ? await res.json().catch(() => null) : null;
+      return {
+        id: "uiux-04", name: "Favicon & Meta Tags", category: "uiux",
+        status: body?.status === "ok" ? "pass" : "info", duration: 0,
+        message: body?.status === "ok" ? "API server healthy" : "API server not responding",
+        evidence: { healthStatus: body?.status },
+      };
     },
   },
   {

@@ -45,7 +45,14 @@ export async function runDataExposureCheck(ctx: ScanContext): Promise<ScanFindin
     const body = await r.text().catch(() => "");
     if (!body || body.length < 20) continue;
 
+    const contentType = r.headers.get("content-type") ?? "";
+    const isJsonResponse = contentType.includes("application/json") || contentType.includes("text/json");
+
     for (const pat of SENSITIVE_PATTERNS) {
+      // Email addresses appear legitimately in HTML footers, contact pages, mailto links, etc.
+      // Only flag them when found in a JSON API response — that's the unexpected exposure.
+      if (pat.name === "Email Address" && !isJsonResponse) continue;
+
       const matches = body.match(pat.pattern);
       if (matches && matches.length > 0 && !seen.has(`${endpoint}:${pat.name}`)) {
         seen.add(`${endpoint}:${pat.name}`);

@@ -48,6 +48,9 @@ import { runSsrfCheck } from "./ssrf";
 import { runOpenApiDiscovery } from "./openapi";
 import { runRawSmugglingCheck } from "./smuggling-raw";
 import { loadCredentialsForTarget } from "../../lib/credential-vault";
+import { inferCvss4FromFinding } from "../../lib/cvss4";
+import { isSuppressionActive } from "../../routes/suppression";
+import { triggerWebhooks } from "../../routes/webhooks";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -172,6 +175,12 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
   try { normalizedEndpoint = new URL(finding.endpoint).origin + new URL(finding.endpoint).pathname; } catch { /* use as-is */ }
   const dedupKey = `${finding.title}||${normalizedEndpoint}`;
 
+  // Check suppression rules — skip this finding entirely if a matching active rule exists
+  if (await isSuppressionActive(dedupKey, targetUrl)) {
+    logger.info({ dedupKey, targetUrl }, "Finding suppressed by rule — skipping");
+    return 0;
+  }
+
   const existing = await col("findings").findOne({
     dedup_key: dedupKey,
     target_url: targetUrl,
@@ -207,6 +216,15 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     return riskScore;
   }
 
+  // Compute CVSS 4.0 score for every new finding
+  const cvss4 = inferCvss4FromFinding({
+    category: finding.category,
+    cwe_id: finding.cwe_id,
+    cvss_score: finding.cvss_score,
+    severity: finding.severity,
+    endpoint: finding.endpoint,
+  });
+
   // New finding — insert with dedup_key and initial state fields
   insertResult = await col("findings").insertOne({
     scan_job_id: new ObjectId(jobId),
@@ -221,6 +239,9 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     evidence: evidenceTruncated,
     recommended_fix: finding.recommended_fix,
     cvss_score: finding.cvss_score,
+    cvss4_score: cvss4.score,
+    cvss4_severity: cvss4.severity,
+    cvss4_vector: cvss4.vector,
     cwe_id: finding.cwe_id,
     risk_score: riskScore,
     scanner_name: finding.scanner_name,

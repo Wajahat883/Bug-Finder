@@ -39,37 +39,58 @@ export async function runPathTraversalCheck(ctx: ScanContext): Promise<ScanFindi
         const hit = unixHit ?? winHit;
 
         if (hit) {
+          const isWin = !!winHit;
           const key = `${endpoint}:${param}:traversal`;
-          if (!seen.has(key)) {
-            seen.add(key);
-            const isWin = !!winHit;
-            const leakedFile = isWin ? "windows\\win.ini" : "/etc/passwd";
-            findings.push({
-              title: `Path Traversal — ${isWin ? "win.ini" : "/etc/passwd"} Disclosure`,
-              category: "Path Traversal",
-              severity: "critical",
-              endpoint,
-              description: `Parameter "${param}" is vulnerable to path traversal. The server returned contents of ${leakedFile} when the payload "${probe}" was injected. An attacker can read any file the web process has permission to access, including application config, private keys, and credentials.`,
-              evidence: [
-                `GET ${testUrl}`,
-                `Parameter: ${param}`,
-                `Payload: ${probe}`,
-                `HTTP ${res.status}`,
-                ``,
-                `File content leaked (${leakedFile}):`,
-                body.slice(0, 600),
-                ``,
-                `Detection indicator: "${hit}"`,
-              ].join("\n"),
-              recommended_fix: "Validate and sanitize all file path parameters. Use a whitelist of allowed filenames. Never concatenate user input into filesystem paths. Use `path.resolve()` and confirm the result starts with your expected base directory.",
-              cvss_score: 9.1,
-              cwe_id: "CWE-22",
-              scanner_name: "Bug-Finder/Traversal",
-              scanner_family: "web",
-              confidence: 0.97,
-            });
-            emit({ type: "log", message: `  [PATH TRAVERSAL] ${leakedFile} leaked at ${endpoint} param=${param}` });
+          if (seen.has(key)) { break; }
+
+          // Confirmation probe: target a different file to rule out the indicator appearing in static content.
+          const confirmProbe = isWin
+            ? "%2e%2e%5c%2e%2e%5c%2e%2e%5cwindows%5csystem.ini"
+            : "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fhostname";
+          const confirmUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${confirmProbe}`;
+          const confirmRes = await ctxFetch(ctx, confirmUrl);
+          const confirmBody = (await confirmRes?.text().catch(() => "")) ?? "";
+
+          // For Unix: hostname file returns 1-255 bytes with no HTML markup.
+          // For Windows: system.ini contains "[mci extensions]" or "[drivers]".
+          const confirmHit = isWin
+            ? ["[mci extensions]", "[drivers]", "timer=timer.drv"].some(ci => confirmBody.toLowerCase().includes(ci))
+            : (confirmBody.length > 1 && confirmBody.length < 256 && !confirmBody.includes("<html") && !confirmBody.includes("{"));
+
+          if (!confirmHit) {
+            emit({ type: "log", message: `  Traversal indicator "${hit}" found but confirmation failed at ${endpoint} [${param}] — skipping` });
+            break;
           }
+
+          seen.add(key);
+          const leakedFile = isWin ? "windows\\win.ini" : "/etc/passwd";
+          findings.push({
+            title: `Path Traversal — ${isWin ? "win.ini" : "/etc/passwd"} Disclosure`,
+            category: "Path Traversal",
+            severity: "critical",
+            endpoint,
+            description: `Parameter "${param}" is vulnerable to path traversal. The server returned contents of ${leakedFile} when the payload "${probe}" was injected. Confirmed with a second distinct payload ("${confirmProbe}") that also returned file content. An attacker can read any file the web process has permission to access, including application config, private keys, and credentials.`,
+            evidence: [
+              `Probe 1: GET ${testUrl}`,
+              `  Payload: ${probe}`,
+              `  HTTP ${res.status}`,
+              `  File content leaked (${leakedFile}):`,
+              `  ${body.slice(0, 400)}`,
+              ``,
+              `Confirmation: GET ${confirmUrl}`,
+              `  Payload: ${confirmProbe}`,
+              `  Response (${confirmBody.length} bytes): ${confirmBody.slice(0, 200)}`,
+              ``,
+              `Detection indicator: "${hit}"`,
+            ].join("\n"),
+            recommended_fix: "Validate and sanitize all file path parameters. Use a whitelist of allowed filenames. Never concatenate user input into filesystem paths. Use `path.resolve()` and confirm the result starts with your expected base directory.",
+            cvss_score: 9.1,
+            cwe_id: "CWE-22",
+            scanner_name: "Bug-Finder/Traversal",
+            scanner_family: "web",
+            confidence: 0.97,
+          });
+          emit({ type: "log", message: `  [PATH TRAVERSAL CONFIRMED] ${leakedFile} + ${isWin ? "system.ini" : "hostname"} both leaked at ${endpoint} param=${param}` });
           break;
         }
       }

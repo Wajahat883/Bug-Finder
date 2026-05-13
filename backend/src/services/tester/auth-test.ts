@@ -2,8 +2,6 @@ import { TestSuite, TestCase, TestContext, TestResult } from "./types";
 import { setCollectedData } from "./runner";
 import { testFetch, isRateLimited, rateLimitWarn } from "./fetch-utils";
 
-const DELAY = (ms: number) => new Promise(r => setTimeout(r, ms));
-
 const authTests: TestCase[] = [
   {
     id: "auth-01",
@@ -15,12 +13,8 @@ const authTests: TestCase[] = [
       const testEmail = `test-${Date.now()}@bugfinder.io`;
 
       const weakRes = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({ firstName: "Test", lastName: "User", email: testEmail, password: "12" }) });
-      await DELAY(200);
-
       const goodRes = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({ firstName: "Test", lastName: "User", email: testEmail, password: "SecureP@ss1" }) });
       const goodData = goodRes ? await goodRes.json().catch(() => ({})) : {};
-      await DELAY(200);
-
       const dupRes = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({ firstName: "Test", lastName: "User", email: testEmail, password: "AnotherP@ss1" }) });
 
       if (isRateLimited(goodRes?.status)) return { id: "auth-01", name: "Registration Flow", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Registration") } as TestResult;
@@ -51,17 +45,14 @@ const authTests: TestCase[] = [
         const email = `test-login-${Date.now()}@bugfinder.io`;
         const regRes = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({ firstName: "Login", lastName: "Test", email, password: "TestP@ss1" }) });
         if (!regRes || regRes.status !== 201) return { id: "auth-02", name: "Login / Logout Flow", category: "auth", status: "error", duration: 0, message: "Could not create test user" } as TestResult;
-        await DELAY(200);
         creds = { email, password: "TestP@ss1" };
         setCollectedData(ctx, "testUser", creds);
       }
 
       ctx.cookieStore.delete(ctx.apiBase);
-
       const loginRes = await testFetch(ctx, "/auth/login", { method: "POST", body: JSON.stringify({ email: creds.email, password: creds.password }) });
       if (isRateLimited(loginRes?.status)) return { id: "auth-02", name: "Login / Logout Flow", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Login") } as TestResult;
 
-      await DELAY(200);
       const badRes = await testFetch(ctx, "/auth/login", { method: "POST", body: JSON.stringify({ email: creds.email, password: "wrongpassword" }) });
 
       const cookie = ctx.cookieStore.get(ctx.apiBase) ?? "";
@@ -79,9 +70,7 @@ const authTests: TestCase[] = [
     description: "Validates minimum length enforcement and missing field rejection.",
     tags: ["auth", "password"],
     run: async (ctx) => {
-      await DELAY(300);
       const short = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({ firstName: "A", lastName: "B", email: `shortpw-${Date.now()}@test.com`, password: "a" }) });
-      await DELAY(200);
       const noFields = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({}) });
 
       if (isRateLimited(short?.status)) return { id: "auth-03", name: "Password Policy Enforcement", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Password Policy") } as TestResult;
@@ -116,9 +105,7 @@ const authTests: TestCase[] = [
     description: "Tests password reset endpoint behavior.",
     tags: ["auth", "security"],
     run: async (ctx) => {
-      await DELAY(500);
       const existRes = await testFetch(ctx, "/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: `fpw-${Date.now()}@test.com` }) });
-      await DELAY(200);
       const invalidEmail = await testFetch(ctx, "/auth/forgot-password", { method: "POST", body: JSON.stringify({}) });
 
       if (isRateLimited(existRes?.status)) return { id: "auth-05", name: "Forgot Password Flow", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Forgot Password") } as TestResult;
@@ -137,7 +124,6 @@ const authTests: TestCase[] = [
       const user = ctx.runtime.collectedData.get("testUser") as { email: string; password: string } | undefined;
       if (!user) return { id: "auth-06", name: "Session Persistence & Remember Me", category: "auth", status: "skipped", duration: 0, message: "No test user — requires auth-01 first" } as TestResult;
 
-      await DELAY(300);
       ctx.cookieStore.delete(ctx.apiBase);
       const loginRes = await testFetch(ctx, "/auth/login", { method: "POST", body: JSON.stringify({ email: user.email, password: user.password, remember_me: true }) });
       const cookie = ctx.cookieStore.get(ctx.apiBase) ?? "";
