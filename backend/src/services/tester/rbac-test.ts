@@ -12,7 +12,7 @@ const rbacTests: TestCase[] = [
       const savedCookie = ctx.cookieStore.get(ctx.apiBase) ?? "";
       ctx.cookieStore.delete(ctx.apiBase);
 
-      const endpoints = ["/auth/me", "/scans?page_size=1", "/findings?page_size=1", "/targets", "/system", "/settings"];
+      const endpoints = ["/auth/me", "/scan-jobs?page_size=1", "/findings?page_size=1", "/targets", "/system", "/settings"];
       const results: Record<string, number> = {};
       for (const ep of endpoints) {
         const res = await testFetch(ctx, ep);
@@ -43,7 +43,7 @@ const rbacTests: TestCase[] = [
       const authed = await ensureAuthenticated(ctx);
       if (!authed) return { id: "rbac-02", name: "Normal User Cannot Access Admin Routes", category: "rbac", status: "warn", duration: 0, message: "No authenticated session available — run auth suite first" };
 
-      const adminEndpoints = ["/admin/stats", "/api/api-keys", "/api/scanner/rules"];
+      const adminEndpoints = ["/admin/stats", "/api-keys", "/scanner/rules"];
       const results: Record<string, number> = {};
       for (const ep of adminEndpoints) {
         const res = await testFetch(ctx, ep);
@@ -73,7 +73,7 @@ const rbacTests: TestCase[] = [
       if (!authed) return { id: "rbac-03", name: "Role Separation — Core Access", category: "rbac", status: "warn", duration: 0, message: "No authenticated session" };
 
       const results: Record<string, number> = {};
-      const eps = ["/scans?page_size=1", "/findings?page_size=1", "/remediations", "/targets"];
+      const eps = ["/scan-jobs?page_size=1", "/findings?page_size=1", "/remediations", "/targets"];
       for (const ep of eps) {
         const res = await testFetch(ctx, ep);
         results[ep] = res?.status ?? 0;
@@ -119,7 +119,7 @@ const rbacTests: TestCase[] = [
     tags: ["rbac", "apikeys"],
     run: async (ctx) => {
       const results: Record<string, number> = {};
-      const eps = ["/scans?page_size=1", "/findings?page_size=1"];
+      const eps = ["/scan-jobs?page_size=1", "/findings?page_size=1"];
       for (const ep of eps) {
         const res = await testFetch(ctx, ep, { headers: { "X-API-Key": "invalid-test-key-0000" } });
         results[ep] = res?.status ?? 0;

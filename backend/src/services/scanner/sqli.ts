@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock, buildRawCapture } from "./types";
 import { runOpenApiDiscovery } from "./openapi";
 
 const SQL_ERROR_PATTERNS = [
@@ -90,6 +90,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           const key = `${endpoint}:${param}:error`;
           if (!seen.has(key)) {
             seen.add(key);
+            const rawCapture = buildRawCapture("GET", testUrl, ctx.authHeaders, undefined, res, body);
             findings.push({
               title: `SQL Injection (Error-Based) in Parameter: ${param}`,
               category: "Injection",
@@ -103,6 +104,7 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               scanner_name: "Bug-Finder/SQLi",
               scanner_family: "web",
               confidence: 0.95,
+              ...rawCapture,
             });
             emit({ type: "log", message: `  [SQLi-Error] Pattern "${matchedPattern}" at ${endpoint} param=${param}` });
           }

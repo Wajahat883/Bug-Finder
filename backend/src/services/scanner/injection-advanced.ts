@@ -18,11 +18,11 @@ const CRLF_PROBES = [
   "%E5%98%8A%E5%98%8DX-Injected: crlf",
 ];
 
-// Prototype pollution probes
+// Prototype pollution probes — use JSON.parse to avoid TypeScript rejecting __proto__ object literals
 const PROTO_PROBES = [
-  { payload: { "__proto__": { "isAdmin": true } }, check: "isAdmin" },
-  { payload: { "constructor": { "prototype": { "isAdmin": true } } }, check: "isAdmin" },
-  { payload: { "__proto__[isAdmin]": "true" }, check: "isAdmin" },
+  { payload: JSON.parse('{"__proto__":{"isAdmin":true}}') as Record<string, unknown>, check: "isAdmin" },
+  { payload: { "constructor": { "prototype": { "isAdmin": true } } } as Record<string, unknown>, check: "isAdmin" },
+  { payload: JSON.parse('{"__proto__":{"isAdmin":"true"}}') as Record<string, unknown>, check: "isAdmin" },
 ];
 
 const TEST_PARAMS = ["q", "search", "template", "view", "name", "input", "data", "message", "text"];
@@ -177,55 +177,104 @@ export async function runCrlfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 export async function runPrototypePollutionCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, discoveredEndpoints } = ctx;
   const findings: ScanFinding[] = [];
+  const seen = new Set<string>();
 
   emit({ type: "engine_start", engine: "Bug-Finder/ProtoPollution", message: "Testing for prototype pollution vectors" });
 
   const apiEndpoints = discoveredEndpoints.filter(ep => ep.includes("/api")).slice(0, 5);
 
+  // Use a unique random sentinel per scan — rules out coincidental matches across runs
+  const sentinel = `pptest_${Math.random().toString(36).slice(2, 10)}`;
+
+  // Three probe strategies; each uses the unique sentinel as the value so we can
+  // distinguish real prototype mutation from the server echoing our payload back.
+  const probes: Array<{ label: string; payloads: Record<string, unknown>[] }> = [
+    {
+      label: "__proto__ key",
+      payloads: [
+        JSON.parse(`{"__proto__":{"${sentinel}":"confirmed"}}`) as Record<string, unknown>,
+        { [`__proto__[${sentinel}]`]: "confirmed" } as Record<string, unknown>,
+      ],
+    },
+    {
+      label: "constructor.prototype",
+      payloads: [
+        { "constructor": { "prototype": { [sentinel]: "confirmed" } } } as Record<string, unknown>,
+      ],
+    },
+  ];
+
   for (const endpoint of apiEndpoints) {
-    // Baseline GET before injecting — if isAdmin:true is already present, skip to avoid false positive
+    // Step 1: Baseline GET — record existing fields so we can detect new ones appearing
     const baselineRes = await ctxFetch(ctx, endpoint);
     const baselineBody = baselineRes ? await baselineRes.text().catch(() => "") : "";
-    if (/["']?isAdmin["']?\s*:\s*true/.test(baselineBody)) {
-      emit({ type: "log", message: `  Proto pollution baseline contains isAdmin:true at ${endpoint} — skipping` });
-      continue;
-    }
+    // Skip if sentinel already appears in baseline (should never happen, but defensive)
+    if (baselineBody.includes(sentinel)) continue;
 
-    for (const probe of PROTO_PROBES.slice(0, 2)) {
-      const res = await ctxFetch(ctx, endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(probe.payload),
-      });
+    for (const strategy of probes) {
+      if (seen.has(endpoint)) break;
+      for (const payload of strategy.payloads) {
+        if (seen.has(endpoint)) break;
 
-      if (!res) continue;
-      const body = await res.text().catch(() => "");
+        // Step 2: POST the pollution payload
+        const injectRes = await ctxFetch(ctx, endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (!injectRes) continue;
 
-      if (res.status === 200) {
-        // Follow up with a GET to check if the prototype was polluted
-        const checkRes = await ctxFetch(ctx, endpoint);
-        if (checkRes) {
-          const checkBody = await checkRes.text().catch(() => "");
-          // Must see isAdmin:true — not just the string "isAdmin" (would fire on isAdmin:false)
-          const polluted = /["']?isAdmin["']?\s*:\s*true/.test(checkBody);
-          if (polluted) {
-            findings.push({
-              title: "Prototype Pollution in API Endpoint",
-              category: "Injection",
-              severity: "high",
-              endpoint,
-              description: "The API endpoint accepts JSON payloads containing __proto__ or constructor.prototype keys, which can pollute the JavaScript prototype chain and affect all objects in the application.",
-              evidence: `POST ${endpoint}\nPayload: ${JSON.stringify(probe.payload)}\nCheck field "${probe.check}" found in subsequent response`,
-              recommended_fix: "Sanitize JSON input to reject __proto__, constructor, and prototype keys. Use Object.create(null) for objects used as maps. Apply a JSON schema validator that explicitly forbids prototype pollution payloads.",
-              cvss_score: 7.5,
-              cwe_id: "CWE-1321",
-              scanner_name: "Bug-Finder/ProtoPollution",
-              scanner_family: "web",
-              confidence: 0.75,
-            });
-            emit({ type: "log", message: `  [PROTO] Prototype pollution at ${endpoint}` });
-            break;
-          }
+        // Step 3: Verify — make a DIFFERENT GET request to an unrelated endpoint.
+        // If prototype was polluted globally, the sentinel key will appear on ANY
+        // subsequent object serialization — not just an echo of our POST response.
+        const verifyEndpoint = apiEndpoints.find(ep => ep !== endpoint) ?? endpoint;
+        const verifyRes = await ctxFetch(ctx, verifyEndpoint);
+        const verifyBody = verifyRes ? await verifyRes.text().catch(() => "") : "";
+
+        // Confirmed only if sentinel appears in a response to a DIFFERENT endpoint
+        // AND was not present in the baseline — this rules out simple payload echoing.
+        const confirmed = verifyBody.includes(sentinel) && !baselineBody.includes(sentinel);
+
+        // Step 4: Also check the direct POST response for reflected acceptance
+        // (weaker signal — counts as info, not confirmed)
+        const injectBody = await injectRes.text().catch(() => "");
+        const reflected = injectBody.includes(sentinel) && verifyEndpoint !== endpoint;
+
+        if (confirmed) {
+          seen.add(endpoint);
+          findings.push({
+            title: "Server-Side Prototype Pollution",
+            category: "Injection",
+            severity: "high",
+            endpoint,
+            description: `The API endpoint accepted a JSON payload containing ${strategy.label} keys and the injected property "${sentinel}" subsequently appeared in responses from an unrelated endpoint (${verifyEndpoint}). This confirms the Node.js prototype chain was mutated globally — not just payload echoing.`,
+            evidence: [
+              `Strategy: ${strategy.label}`,
+              ``,
+              `Step 1 — Baseline GET ${verifyEndpoint}:`,
+              `  ${baselineBody.slice(0, 200)} [sentinel absent]`,
+              ``,
+              `Step 2 — Inject POST ${endpoint}:`,
+              `  Payload: ${JSON.stringify(payload)}`,
+              `  HTTP ${injectRes.status}`,
+              ``,
+              `Step 3 — Verify GET ${verifyEndpoint} (different endpoint):`,
+              `  HTTP ${verifyRes?.status ?? "N/A"}`,
+              `  Sentinel "${sentinel}" found in response: YES`,
+              `  Context: ...${verifyBody.slice(Math.max(0, verifyBody.indexOf(sentinel) - 60), verifyBody.indexOf(sentinel) + 60)}...`,
+            ].join("\n"),
+            recommended_fix: "Sanitize JSON input to reject __proto__, constructor, and prototype keys before parsing. Use Object.create(null) for objects used as maps. Apply a JSON schema validator. Use flat-merge instead of deep-merge for untrusted objects. Consider using the --frozen-intrinsics Node.js flag.",
+            cvss_score: 7.5,
+            cwe_id: "CWE-1321",
+            scanner_name: "Bug-Finder/ProtoPollution",
+            scanner_family: "web",
+            confidence: 0.92,
+          });
+          emit({ type: "log", message: `  [PROTO CONFIRMED] Global prototype pollution at ${endpoint} — sentinel appeared in ${verifyEndpoint}` });
+        } else if (reflected && !confirmed) {
+          // Payload was echoed back but not globally propagated — server accepts the key
+          // but likely doesn't merge it into Object.prototype. Low-confidence signal.
+          emit({ type: "log", message: `  [PROTO] ${strategy.label} payload accepted but not globally confirmed at ${endpoint} — skipping` });
         }
       }
     }

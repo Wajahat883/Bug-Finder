@@ -55,8 +55,8 @@ const functionalTests: TestCase[] = [
     tags: ["functional", "scans"],
     run: async (ctx) => {
       await ensureAuthenticated(ctx);
-      const allRes = await testFetch(ctx, "/scans?page_size=1");
-      const completedRes = await testFetch(ctx, "/scans?status=completed&page_size=1");
+      const allRes = await testFetch(ctx, "/scan-jobs?page_size=1");
+      const completedRes = await testFetch(ctx, "/scan-jobs?status=completed&page_size=1");
 
       return {
         id: "func-03", name: "Scans Workflow", category: "functional",

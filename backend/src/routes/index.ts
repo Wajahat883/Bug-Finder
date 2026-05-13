@@ -34,6 +34,9 @@ import engagementsRouter from "./engagements";
 import testsRouter from "./tests";
 import adminRouter from "./admin";
 import credentialsRouter from "./credentials";
+import cicdRouter from "./cicd";
+import suppressionRouter from "./suppression";
+import oidcRouter from "./oidc";
 
 const router: IRouter = Router();
 
@@ -72,5 +75,8 @@ router.use(engagementsRouter);
 router.use(testsRouter);
 router.use(adminRouter);
 router.use(credentialsRouter);
+router.use(cicdRouter);
+router.use(suppressionRouter);
+router.use(oidcRouter);
 
 export default router;

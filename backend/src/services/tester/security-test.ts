@@ -81,7 +81,10 @@ const securityTests: TestCase[] = [
     description: "Checks state-changing endpoints require auth.",
     tags: ["security", "csrf"],
     run: async (ctx) => {
+      const saved = ctx.cookieStore.get(ctx.apiBase) ?? "";
+      ctx.cookieStore.delete(ctx.apiBase);
       const res = await testFetch(ctx, "/auth/profile", { method: "PATCH", body: JSON.stringify({ first_name: "csrf-test" }) });
+      if (saved) ctx.cookieStore.set(ctx.apiBase, saved);
       return { id: "sec-05", name: "CSRF Token Validation", category: "security", status: res?.status === 401 ? "pass" : res?.status === 200 ? "warn" : "info", duration: 0, message: res?.status === 401 ? "State-changing endpoint requires auth" : `HTTP ${res?.status}`, evidence: { status: res?.status }, suggestion: res?.status === 200 ? "Add CSRF token to state-changing endpoints" : undefined };
     },
   },

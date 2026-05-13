@@ -150,7 +150,7 @@ async function spawnNuclei(targetUrl: string, binaryPath: string, ctx: ScanConte
             ].filter(Boolean).join("\n"),
             recommended_fix: String((r["info"] as Record<string, unknown>)?.["remediation"] ?? "Apply security patches and follow vendor recommendations."),
             cvss_score: typeof r["cvss-score"] === "number" ? r["cvss-score"] : ({ critical: 9.0, high: 7.5, medium: 5.0, low: 3.0, info: 1.0 }[validSev] ?? 5.0),
-            cwe_id: String((r["info"] as Record<string, unknown>)?.["classification"]?.["cwe-id"] ?? r["cwe-id"] ?? "CWE-200"),
+            cwe_id: String((r["info"] as Record<string, unknown>)?.["classification"] ? ((r["info"] as Record<string, unknown>)["classification"] as Record<string, unknown>)?.["cwe-id"] ?? "CWE-200" : r["cwe-id"] ?? "CWE-200"),
             scanner_name: `Nuclei/${r["template-id"] ?? "template"}`,
             scanner_family: "Nuclei",
             confidence: 0.88,
@@ -177,7 +177,7 @@ async function spawnNuclei(targetUrl: string, binaryPath: string, ctx: ScanConte
 
 export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
-  ctx.emit({ type: "engine_start", engine: "Nuclei", message: "Running Nuclei template scan..." });
+  ctx.emit({ type: "engine_start", engine: "Bug-Finder/Nuclei", message: "Running Nuclei template scan..." });
 
   // ── Tier 1: Real Nuclei binary ───────────────────────────────────────────────
   const nucleiBinary = process.env["NUCLEI_BINARY"];
@@ -234,11 +234,12 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
-  // ── Tier 3: Content-verified template simulations ────────────────────────────
-  // Only runs when neither binary nor API is available.
-  // Each check verifies response body content — not just HTTP 200.
+  // ── Tier 3: Content-verified built-in checks ──────────────────────────────────
+  // Only runs when neither Nuclei binary nor API is available.
+  // These are NOT Nuclei templates — they are Bug-Finder's own verified checks
+  // for common misconfigurations. scanner_name reflects this (Bug-Finder/Nuclei-sim/*).
   if (findings.length === 0) {
-    ctx.emit({ type: "log", message: `Nuclei unavailable — running ${NUCLEI_TEMPLATES.length} verified template checks` });
+    ctx.emit({ type: "log", message: `Nuclei unavailable — running ${NUCLEI_TEMPLATES.length} built-in misconfiguration checks (Bug-Finder/Nuclei-sim)` });
     const base = new URL(ctx.targetUrl);
 
     for (const tpl of NUCLEI_TEMPLATES) {
@@ -266,7 +267,7 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
         // For TRACE method check: 200 = vulnerable, others = not
         if (tpl.checkStatus && !tpl.checkStatus(status)) continue;
         // For all others: must be 200 AND body must verify
-        if (!tpl.checkStatus && (status !== 200 || !tpl.verify(body, status))) continue;
+        if (!tpl.checkStatus && (status !== 200 || !tpl.verify(body))) continue;
 
         findings.push({
           title: tpl.title,
@@ -294,6 +295,7 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
-  ctx.emit({ type: "engine_done", engine: "Nuclei", message: `Nuclei scan complete — ${findings.length} finding(s)` });
+  const tier = process.env["NUCLEI_BINARY"] ? "Tier 1 (binary)" : process.env["NUCLEI_URL"] ? "Tier 2 (API)" : "Tier 3 (built-in)";
+  ctx.emit({ type: "engine_done", engine: "Bug-Finder/Nuclei", message: `Nuclei scan complete [${tier}] — ${findings.length} finding(s)` });
   return findings;
 }

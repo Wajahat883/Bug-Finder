@@ -30,7 +30,7 @@ async function checkAiHealth(): Promise<{ status: string; latency_ms: number; mo
   }
 }
 
-router.get("/healthz", async (_req, res) => {
+router.get(["/health", "/healthz"], async (_req, res) => {
   const uptimeMs = Date.now() - startTime;
   let dbStatus = "healthy";
   let redisStatus: string = "unavailable";

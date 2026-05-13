@@ -244,6 +244,9 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     cvss4_vector: cvss4.vector,
     cwe_id: finding.cwe_id,
     risk_score: riskScore,
+    raw_request: finding.raw_request ?? null,
+    raw_response: finding.raw_response ?? null,
+    reproduction_curl: finding.reproduction_curl ?? null,
     scanner_name: finding.scanner_name,
     scanner_family: finding.scanner_family,
     created_at: new Date(),
@@ -263,6 +266,9 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
       title: finding.title,
       endpoint: finding.endpoint,
       evidence_full: finding.evidence,        // complete, untruncated
+      raw_request: finding.raw_request ?? null,
+      raw_response: finding.raw_response ?? null,
+      reproduction_curl: finding.reproduction_curl ?? null,
       scanner_name: finding.scanner_name,
       severity: finding.severity,
       created_at: new Date(),
@@ -382,6 +388,27 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
         }
       : undefined,
   };
+
+  // ── Auth pre-flight check ─────────────────────────────────────────────────────
+  // If credentials were provided, verify they actually work before starting the scan.
+  // A failed pre-flight means auth-dependent findings would be silent false negatives.
+  if (Object.keys(ctx.authHeaders).length > 0) {
+    const origin = new URL(targetUrl).origin;
+    const authCheckUrls = [`${origin}/api/me`, `${origin}/api/auth/me`, `${origin}/api/user`, `${origin}/api/account`];
+    let authVerified = false;
+    for (const checkUrl of authCheckUrls) {
+      try {
+        const r = await fetch(checkUrl, { headers: ctx.authHeaders, signal: AbortSignal.timeout(5000) });
+        if (r.status === 200) { authVerified = true; break; }
+        if (r.status === 401 || r.status === 403) break;
+      } catch { /* endpoint not found — try next */ }
+    }
+    if (!authVerified) {
+      emit({ type: "log", message: "⚠ Auth pre-flight: could not verify credentials — protected-route findings may be incomplete" });
+    } else {
+      emit({ type: "log", message: "Auth pre-flight: credentials verified — authenticated scan active" });
+    }
+  }
 
   const pipeline = getPipeline(profile, validationEnabled, fuzzingEnabled, bugBountyMode);
   const totalSteps = pipeline.length;
@@ -515,6 +542,19 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     });
 
     logger.info({ jobId, totalFindings, riskScore }, "Scan pipeline completed");
+
+    // Fire scan.completed webhook — non-blocking, errors are suppressed
+    triggerWebhooks("scan.completed", {
+      scan_id: jobId,
+      target_url: targetUrl,
+      findings_count: totalFindings,
+      critical_count: critCount,
+      high_count: highCount,
+      medium_count: medCount,
+      low_count: lowCount,
+      risk_score: riskScore,
+      completed_at: new Date().toISOString(),
+    }).catch((err) => logger.warn({ err }, "Webhook delivery error"));
 
     // Update target document with scan results, tech stack, subdomains, risk history
     updateTargetAfterScan(jobId, targetUrl, riskScore, critCount, highCount, totalFindings, jobUserId).catch((err) =>
@@ -655,7 +695,7 @@ async function updateTargetAfterScan(
     } catch { /* ignore */ }
   }
 
-  const existing = (await col("targets").findOne({ domain, ...(jobUserId ? { user_id: jobUserId } : {}) } as Record<string, unknown>)) as Record<string, unknown> | null;
+  const existing = (await col("targets").findOne({ domain, ...(userId ? { user_id: userId } : {}) } as Record<string, unknown>)) as Record<string, unknown> | null;
 
   const riskHistoryEntry = { score: riskScore, date: new Date().toISOString() };
   let riskHistory = (existing?.["risk_history"] as Array<{ score: number; date: string }>) ?? [];

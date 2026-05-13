@@ -9,7 +9,7 @@ const apiTests: TestCase[] = [
     description: "Verifies all major REST endpoints return valid JSON responses with correct content types.",
     tags: ["api", "rest"],
     run: async (ctx) => {
-      const endpoints = ["/health", "/auth/me", "/scans?page_size=1", "/findings?page_size=1", "/targets", "/system", "/settings"];
+      const endpoints = ["/health", "/auth/me", "/scan-jobs?page_size=1", "/findings?page_size=1", "/targets", "/system", "/settings"];
       const results: Record<string, { status: number; isJson: boolean; ok: boolean }> = {};
 
       for (const ep of endpoints) {

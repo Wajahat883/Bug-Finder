@@ -1,4 +1,48 @@
 import { ScanContext, ScanFinding, safeFetch } from "./types";
+import * as crypto from "crypto";
+
+// Shannon entropy — high-entropy strings are more likely real secrets, not placeholders
+function shannonEntropy(str: string): number {
+  const freq: Record<string, number> = {};
+  for (const ch of str) freq[ch] = (freq[ch] ?? 0) + 1;
+  const len = str.length;
+  return -Object.values(freq).reduce((sum, n) => sum + (n / len) * Math.log2(n / len), 0);
+}
+
+// Validate an AWS access key via STS GetCallerIdentity (no billing impact, works with any valid key)
+async function validateAwsKey(accessKeyId: string, secretKey?: string): Promise<"valid" | "invalid" | "unknown"> {
+  if (!secretKey) return "unknown";
+  try {
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const datetime = new Date().toISOString().replace(/[:-]/g, "").slice(0, 15) + "Z";
+    const region = "us-east-1";
+    const service = "sts";
+    const host = "sts.amazonaws.com";
+    const body = "Action=GetCallerIdentity&Version=2011-06-15";
+    const payloadHash = crypto.createHash("sha256").update(body).digest("hex");
+    const canonicalHeaders = `content-type:application/x-www-form-urlencoded\nhost:${host}\nx-amz-date:${datetime}\n`;
+    const signedHeaders = "content-type;host;x-amz-date";
+    const canonicalRequest = `POST\n/\n\n${canonicalHeaders}\n${signedHeaders}\n${payloadHash}`;
+    const credentialScope = `${date}/${region}/${service}/aws4_request`;
+    const stringToSign = `AWS4-HMAC-SHA256\n${datetime}\n${credentialScope}\n${crypto.createHash("sha256").update(canonicalRequest).digest("hex")}`;
+    const hmac = (key: Buffer | string, data: string) => crypto.createHmac("sha256", key).update(data).digest();
+    const signingKey = hmac(hmac(hmac(hmac(`AWS4${secretKey}`, date), region), service), "aws4_request");
+    const signature = hmac(signingKey, stringToSign).toString("hex");
+    const auth = `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+    const res = await fetch(`https://${host}/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Amz-Date": datetime, "Authorization": auth },
+      body,
+      signal: AbortSignal.timeout(6000),
+    });
+    // 200 = valid; 403 with InvalidClientTokenId = invalid key; 403 with AccessDenied = valid key (no STS permission)
+    if (res.status === 200) return "valid";
+    const text = await res.text().catch(() => "");
+    if (text.includes("InvalidClientTokenId")) return "invalid";
+    if (text.includes("AccessDenied") || text.includes("AuthFailure")) return "valid";
+    return "unknown";
+  } catch { return "unknown"; }
+}
 
 interface SecretPattern {
   name: string;
@@ -96,6 +140,18 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
         const matchLower = match[0].toLowerCase();
         if (PLACEHOLDER_PHRASES.some(p => matchLower.includes(p))) continue;
 
+        // Entropy gate: secret-looking strings should have high randomness.
+        // Extract the credential portion (last token after = : or space).
+        const credPart = match[0].split(/[=:\s"']+/).pop() ?? match[0];
+        if (credPart.length >= 8) {
+          const entropy = shannonEntropy(credPart);
+          // Low entropy strings (<3.0) are likely template names or test fixtures
+          if (entropy < 3.0 && !match[0].includes("-----BEGIN")) {
+            emit({ type: "log", message: `  Skipping low-entropy match (${entropy.toFixed(1)}) for ${pattern.name}` });
+            continue;
+          }
+        }
+
         seen.add(key);
 
         const offset = match.index ?? 0;
@@ -104,21 +160,54 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
         // Redact the actual secret value in evidence
         const redacted = match[0].replace(/[a-zA-Z0-9_/+=]{8,}$/, "****REDACTED****");
 
+        // AWS key validation — attempt live STS call to confirm key is active
+        let validationNote = "";
+        let confidence = 0.88;
+        if (pattern.name === "AWS Access Key") {
+          const awsKeyId = match[0];
+          // Try to find the secret key near the access key in the same file (within 500 chars)
+          const nearby = code.slice(Math.max(0, offset - 250), offset + 250);
+          const secretMatch = nearby.match(/[A-Za-z0-9/+=]{40}/);
+          const awsSecretKey = secretMatch?.[0];
+          const validationResult = await validateAwsKey(awsKeyId, awsSecretKey);
+          if (validationResult === "valid") {
+            validationNote = "\nLIVE VALIDATION: AWS STS confirmed this key is ACTIVE.";
+            confidence = 0.99;
+          } else if (validationResult === "invalid") {
+            validationNote = "\nLIVE VALIDATION: AWS STS rejected this key — likely rotated or test data.";
+            confidence = 0.30;
+            if (confidence < 0.5) {
+              emit({ type: "log", message: `  AWS key validation: invalid/rotated — skipping` });
+              seen.delete(key); // allow re-check from another match
+              continue;
+            }
+          } else {
+            validationNote = "\nLIVE VALIDATION: Could not confirm (network/STS unavailable).";
+          }
+        }
+
         findings.push({
           title: `Hardcoded Secret in JavaScript: ${pattern.name}`,
           category: "Secrets Exposure",
           severity: pattern.severity,
           endpoint: jsUrl,
           description: `A ${pattern.name} was found hardcoded in a client-side JavaScript file. Anyone who visits the site can extract this credential from their browser's developer tools.`,
-          evidence: `File: ${jsUrl}\nLine: ${lineNumber}\nSecret Type: ${pattern.name}\nContext: ...${context.replace(match[0], redacted)}...`,
+          evidence: [
+            `File: ${jsUrl}`,
+            `Line: ${lineNumber}`,
+            `Secret Type: ${pattern.name}`,
+            `Entropy: ${shannonEntropy(credPart).toFixed(2)} bits/char`,
+            `Context: ...${context.replace(match[0], redacted)}...`,
+            validationNote,
+          ].join("\n"),
           recommended_fix: pattern.fix,
           cvss_score: pattern.cvss,
           cwe_id: pattern.cwe,
           scanner_name: "Bug-Finder/Secrets",
           scanner_family: "web",
-          confidence: 0.88,
+          confidence,
         });
-        emit({ type: "log", message: `  [SECRET] ${pattern.name} in ${jsUrl.split("/").pop()}` });
+        emit({ type: "log", message: `  [SECRET] ${pattern.name} in ${jsUrl.split("/").pop()} (entropy: ${shannonEntropy(credPart).toFixed(1)})` });
       }
     }
   }

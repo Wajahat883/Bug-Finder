@@ -93,9 +93,9 @@ describe("GET /api/auth/me", () => {
   });
 });
 
-describe("GET /api/scans", () => {
+describe("GET /api/scan-jobs", () => {
   it("returns 401 without auth", async () => {
-    const res = await request.get("/api/scans");
+    const res = await request.get("/api/scan-jobs");
     expect(res.status).toBe(401);
   });
 });

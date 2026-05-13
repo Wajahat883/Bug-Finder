@@ -46,18 +46,22 @@ const SENSITIVE_PATHS: SensitivePathCheck[] = [
     path: "/admin",
     title: "Admin Panel Publicly Accessible",
     severity: "high",
-    description: "The /admin path is accessible without apparent authentication.",
+    description: "The /admin path is accessible without apparent authentication. The page did not redirect to a login screen.",
     fix: "Restrict admin interfaces to specific IP ranges or require strong multi-factor authentication.",
     cvss: 7.3,
     cwe: "CWE-284",
-    // Body must contain admin-like content — avoids firing on catch-all 200 pages
-    detectFn: (status, body) => status === 200 && (
-      body.toLowerCase().includes("dashboard") ||
-      body.toLowerCase().includes("admin") ||
-      body.toLowerCase().includes("manage") ||
-      body.toLowerCase().includes("user list") ||
-      body.toLowerCase().includes("settings")
-    ),
+    // Must not redirect to a login page AND must contain admin-specific UI keywords.
+    // A catch-all SPA returning 200 with "settings" somewhere is excluded by requiring
+    // at least two of the admin-specific indicators.
+    detectFn: (status, body, headers) => {
+      if (status !== 200) return false;
+      // If redirected to /login, /signin, or /auth — not a real open admin panel
+      const finalUrl = headers.get("x-final-url") ?? "";
+      if (finalUrl.includes("login") || finalUrl.includes("signin") || finalUrl.includes("auth")) return false;
+      const lower = body.toLowerCase();
+      const adminIndicators = ["dashboard", "manage users", "user list", "admin panel", "logout", "sign out", "welcome, admin", "administration"].filter(kw => lower.includes(kw));
+      return adminIndicators.length >= 2;
+    },
   },
   {
     path: "/backup.zip",
@@ -67,7 +71,12 @@ const SENSITIVE_PATHS: SensitivePathCheck[] = [
     fix: "Remove backup files from the web root and store them in a private, access-controlled location.",
     cvss: 9.8,
     cwe: "CWE-538",
-    detectFn: (status, _body, headers) => status === 200 && (headers.get("content-type") ?? "").includes("zip"),
+    // ZIP magic bytes: PK\x03\x04 at start, or Content-Type includes zip
+    detectFn: (status, body, headers) => status === 200 && (
+      (headers.get("content-type") ?? "").includes("zip") ||
+      body.startsWith("PK") ||
+      body.charCodeAt(0) === 0x50 && body.charCodeAt(1) === 0x4B
+    ),
   },
   {
     path: "/robots.txt",
@@ -104,11 +113,23 @@ const SENSITIVE_PATHS: SensitivePathCheck[] = [
     path: "/api/v1/users",
     title: "Unauthenticated API User Listing",
     severity: "high",
-    description: "The /api/v1/users endpoint responds with data without requiring authentication.",
+    description: "The /api/v1/users endpoint responds with structured user data without requiring authentication.",
     fix: "Require authentication tokens on all API endpoints that expose user data.",
     cvss: 7.5,
     cwe: "CWE-306",
-    detectFn: (status, body) => status === 200 && (body.includes("[") || body.includes("email") || body.includes("username")),
+    // Must be JSON and contain structured user fields — not just any page with the word "email"
+    detectFn: (status, body, headers) => {
+      if (status !== 200) return false;
+      const ct = headers.get("content-type") ?? "";
+      if (!ct.includes("json")) return false;
+      try {
+        const parsed = JSON.parse(body);
+        const items = Array.isArray(parsed) ? parsed : (parsed?.items ?? parsed?.data ?? parsed?.users ?? []);
+        if (!Array.isArray(items) || items.length === 0) return false;
+        const first = items[0];
+        return typeof first === "object" && first !== null && ("email" in first || "username" in first || "id" in first);
+      } catch { return false; }
+    },
   },
   {
     path: "/.well-known/security.txt",
@@ -138,7 +159,43 @@ const SENSITIVE_PATHS: SensitivePathCheck[] = [
     fix: "Restrict API documentation access in production environments.",
     cvss: 5.3,
     cwe: "CWE-200",
-    detectFn: (status, body) => status === 200 && (body.includes("swagger") || body.includes("Swagger") || body.includes("API")),
+    // Require structured Swagger UI or ReDoc markers — "API" alone is too broad
+    detectFn: (status, body) => status === 200 && (
+      body.includes("swagger-ui") || body.includes("SwaggerUIBundle") ||
+      body.includes("redoc") || body.includes("\"swagger\"") || body.includes("\"openapi\"")
+    ),
+  },
+  {
+    path: "/.git/HEAD",
+    title: "Git Repository HEAD Reference Exposed",
+    severity: "critical",
+    description: "The .git/HEAD file is publicly accessible. Combined with other .git/ files, the full source code can be reconstructed.",
+    fix: "Block all access to .git/ directories at the web server configuration level.",
+    cvss: 9.1,
+    cwe: "CWE-538",
+    detectFn: (status, body) => status === 200 && (body.startsWith("ref: refs/") || body.trim().match(/^[0-9a-f]{40}$/) !== null),
+  },
+  {
+    path: "/backup.sql",
+    title: "SQL Backup File Exposed",
+    severity: "critical",
+    description: "A SQL dump file is publicly accessible, potentially containing the entire database including user credentials.",
+    fix: "Move backup files outside the web root. Use access controls and encryption for database backups.",
+    cvss: 9.8,
+    cwe: "CWE-538",
+    detectFn: (status, body) => status === 200 && (
+      body.includes("CREATE TABLE") || body.includes("INSERT INTO") || body.includes("-- MySQL dump") || body.includes("-- PostgreSQL")
+    ),
+  },
+  {
+    path: "/wp-login.php",
+    title: "WordPress Login Page Exposed",
+    severity: "medium",
+    description: "The WordPress admin login page is publicly accessible and may be subject to brute-force attacks.",
+    fix: "Restrict access to wp-login.php by IP. Enable CAPTCHA and account lockout.",
+    cvss: 5.3,
+    cwe: "CWE-307",
+    detectFn: (status, body) => status === 200 && body.includes("user_login") && body.includes("user_pass"),
   },
 ];
 
@@ -173,13 +230,21 @@ export async function runReconCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         severity: check.severity,
         endpoint: url,
         description: check.description,
-        evidence: `GET ${url}\nHTTP ${res.status} ${res.statusText}\nContent-Type: ${res.headers.get("content-type") ?? "unknown"}\n\nBody preview:\n${body.slice(0, 300)}`,
+        evidence: [
+          `GET ${url}`,
+          `HTTP ${res.status} ${res.statusText}`,
+          `Content-Type: ${res.headers.get("content-type") ?? "unknown"}`,
+          `Content-Length: ${res.headers.get("content-length") ?? body.length} bytes`,
+          ``,
+          `Body preview (first 400 bytes):`,
+          body.slice(0, 400),
+        ].join("\n"),
         recommended_fix: check.fix,
         cvss_score: check.cvss,
         cwe_id: check.cwe,
         scanner_name: "Bug-Finder/Recon",
         scanner_family: "web",
-        confidence: 0.92,
+        confidence: 0.95,
       });
       emit({ type: "log", message: `  [FOUND] ${check.path} — ${check.title}` });
     } else {

@@ -13,6 +13,10 @@ export interface ScanFinding {
   scanner_name: string;
   scanner_family: string;
   confidence: number;
+  // Optional raw HTTP reproduction data — set when the scanner captures exact request/response
+  raw_request?: string;   // e.g. "GET /api/users HTTP/1.1\nHost: example.com\n..."
+  raw_response?: string;  // e.g. "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{...}"
+  reproduction_curl?: string; // curl command for easy manual reproduction
 }
 
 export interface ScannerEvent {
@@ -60,6 +64,52 @@ export interface ScanContext {
   reauthenticate?: () => Promise<boolean>;
 }
 
+// Build raw HTTP reproduction strings from a fetch Response for use in findings evidence.
+// Call after reading the body; pass the body text since it can only be consumed once.
+export function buildRawCapture(
+  method: string,
+  url: string,
+  requestHeaders: Record<string, string>,
+  requestBody: string | undefined,
+  res: Response,
+  responseBodySlice: string
+): Pick<ScanFinding, "raw_request" | "raw_response" | "reproduction_curl"> {
+  const parsedUrl = (() => { try { return new URL(url); } catch { return null; } })();
+  const host = parsedUrl?.host ?? url;
+  const pathAndQuery = parsedUrl ? `${parsedUrl.pathname}${parsedUrl.search}` : url;
+
+  const reqHeaderLines = Object.entries({ Host: host, ...requestHeaders })
+    .filter(([k]) => !["host"].includes(k.toLowerCase()))
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\r\n");
+
+  const raw_request = [
+    `${method.toUpperCase()} ${pathAndQuery} HTTP/1.1`,
+    `Host: ${host}`,
+    reqHeaderLines,
+    "",
+    requestBody ?? "",
+  ].join("\r\n");
+
+  const resHeaderLines: string[] = [];
+  res.headers.forEach((v, k) => resHeaderLines.push(`${k}: ${v}`));
+
+  const raw_response = [
+    `HTTP/1.1 ${res.status} ${res.statusText}`,
+    resHeaderLines.join("\r\n"),
+    "",
+    responseBodySlice.slice(0, 500),
+  ].join("\r\n");
+
+  const curlHeaders = Object.entries({ ...requestHeaders })
+    .map(([k, v]) => `-H '${k}: ${v}'`)
+    .join(" ");
+  const curlBody = requestBody ? `-d '${requestBody.slice(0, 200).replace(/'/g, "'\\''")}' ` : "";
+  const reproduction_curl = `curl -s -X ${method.toUpperCase()} '${url}' ${curlHeaders} ${curlBody}`.trim();
+
+  return { raw_request, raw_response, reproduction_curl };
+}
+
 // Returns true if url is within the scan's defined scope
 export function isInScope(ctx: ScanContext, url: string): boolean {
   if (!ctx.scopeHosts || ctx.scopeHosts.length === 0) return true;
@@ -78,6 +128,12 @@ export async function ctxFetch(
   options: RequestInit = {},
   timeoutMs = FETCH_TIMEOUT
 ): Promise<Response | null> {
+  // Scope enforcement — never probe hosts outside the defined scope
+  if (ctx.scopeHosts && ctx.scopeHosts.length > 0 && !isInScope(ctx, url)) {
+    ctx.emit({ type: "log", message: `  [SCOPE] Skipping out-of-scope URL: ${url}` });
+    return null;
+  }
+
   const buildMerged = () => ({
     ...options,
     headers: { ...ctx.authHeaders, ...(options.headers as Record<string, string> ?? {}) },

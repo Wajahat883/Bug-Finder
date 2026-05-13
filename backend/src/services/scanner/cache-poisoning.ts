@@ -61,22 +61,57 @@ export async function runCachePoisoningCheck(ctx: ScanContext): Promise<ScanFind
 
     const body = await r.text().catch(() => "");
 
-    // Check if the injected value is reflected in the response
+    // Step 1: Check if the injected value is reflected in the response
     if (body.includes(test.value) && !baselineBody.includes(test.value)) {
-      emit({ type: "log", message: `  [POISON?] ${test.header}: ${test.value} reflected in response` });
+      emit({ type: "log", message: `  [POISON?] ${test.header}: ${test.value} reflected — verifying cache persistence` });
+
+      // Step 2: Make a second CLEAN request (no injected header) to the same URL.
+      // If the poisoned value still appears, the response was cached — confirmed poisoning.
+      const cleanCb = CACHE_BUSTER();
+      // Use the same cb2 URL so we hit the same cache entry, not a fresh one
+      const cleanRes = await ctxFetch(ctx, testUrl);
+      const cleanBody = cleanRes ? await cleanRes.text().catch(() => "") : "";
+      const cacheConfirmed = isCached && cleanBody.includes(test.value);
+
+      const severity = cacheConfirmed ? "high" : isCached ? "medium" : "low";
+      const confidence = cacheConfirmed ? 0.92 : isCached ? 0.65 : 0.45;
+
+      emit({ type: "log", message: cacheConfirmed
+        ? `  [CONFIRMED CACHE POISON] ${test.header} poisoned cache at ${targetUrl}`
+        : `  [REFLECTION ONLY] ${test.header} reflected but not cached (${testUrl})`
+      });
+
       findings.push({
-        title: `Web Cache Poisoning Signal: ${test.description}`,
+        title: cacheConfirmed
+          ? `Web Cache Poisoning Confirmed: ${test.description}`
+          : `Cache Poisoning Signal (Reflection Only): ${test.description}`,
         category: "Cache Poisoning",
-        severity: isCached ? "high" : "medium",
+        severity,
         endpoint: targetUrl,
-        description: `The header "${test.header}: ${test.value}" was reflected in the response body. If this response is cached, an attacker could poison the cache and serve a malicious response to all users who subsequently request this URL.`,
-        evidence: `GET ${testUrl}\n${test.header}: ${test.value}\nHTTP ${r.status}\n\nInjected value "${test.value}" found in response body.\nCaching active: ${isCached}\nCache-Control: ${baseline.headers.get("cache-control") ?? "not set"}\n\nReflection context: ...${body.slice(Math.max(0, body.indexOf(test.value) - 80), body.indexOf(test.value) + 80)}...`,
-        recommended_fix: "Normalize or strip unkeyed headers before caching. Include all headers that influence the response in the cache key. Set Cache-Control: no-store for sensitive pages.",
-        cvss_score: isCached ? 8.1 : 5.3,
+        description: cacheConfirmed
+          ? `CONFIRMED: The header "${test.header}: ${test.value}" was reflected in the response and the poisoned value persisted in a subsequent clean request, confirming the cache served the poisoned response to other users.`
+          : `The header "${test.header}: ${test.value}" was reflected in the response body, but the value did not persist in a subsequent clean request. This indicates reflection without confirmed caching — lower risk but warrants investigation.`,
+        evidence: [
+          `Probe 1 (with injected header):`,
+          `  GET ${testUrl}`,
+          `  ${test.header}: ${test.value}`,
+          `  HTTP ${r.status}`,
+          `  Reflection context: ...${body.slice(Math.max(0, body.indexOf(test.value) - 80), body.indexOf(test.value) + 80)}...`,
+          ``,
+          `Probe 2 (clean request — no injected header):`,
+          `  GET ${testUrl}`,
+          `  HTTP ${cleanRes?.status ?? "N/A"}`,
+          `  Injected value persisted: ${cacheConfirmed ? "YES (cache poisoned)" : "NO (not cached)"}`,
+          ``,
+          `Cache indicators: ${cacheHeaders.filter(Boolean).join(", ") || "none"}`,
+          `Cache-Control: ${baseline.headers.get("cache-control") ?? "not set"}`,
+        ].join("\n"),
+        recommended_fix: "Normalize or strip unkeyed headers before caching. Include all headers that influence the response in the cache key. Set Cache-Control: no-store for sensitive pages. Use Vary header to key responses on relevant headers.",
+        cvss_score: cacheConfirmed ? 8.1 : 5.3,
         cwe_id: "CWE-444",
         scanner_name: "Bug-Finder/Cache",
         scanner_family: "web",
-        confidence: isCached ? 0.85 : 0.6,
+        confidence,
       });
     } else {
       emit({ type: "log", message: `  ${test.header} — not reflected (${r.status})` });

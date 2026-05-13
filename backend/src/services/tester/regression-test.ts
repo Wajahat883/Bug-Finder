@@ -15,7 +15,7 @@ const regressionTests: TestCase[] = [
     description: "Takes a snapshot of major endpoints and compares with the previous run to detect regressions.",
     tags: ["regression", "api"],
     run: async (ctx) => {
-      const endpoints = ["/health", "/scans?page_size=1", "/findings?page_size=1", "/targets", "/settings"];
+      const endpoints = ["/health", "/scan-jobs?page_size=1", "/findings?page_size=1", "/targets", "/settings"];
       const current: { path: string; status: number; bodyHash: string }[] = [];
 
       for (const ep of endpoints) {
@@ -56,7 +56,7 @@ const regressionTests: TestCase[] = [
     tags: ["regression", "endpoints"],
     run: async (ctx) => {
       await ensureAuthenticated(ctx);
-      const eps = ["/health", "/scans?page_size=1", "/findings?page_size=1", "/targets", "/remediations", "/system", "/settings", "/analytics/dashboard", "/analytics/activity"];
+      const eps = ["/health", "/scan-jobs?page_size=1", "/findings?page_size=1", "/targets", "/remediations", "/system", "/settings", "/analytics/dashboard", "/analytics/activity"];
       const results: Record<string, number> = {};
       for (const ep of eps) {
         const res = await testFetch(ctx, ep);
