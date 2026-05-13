@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch, isWafBlock, handleWafBlock } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isWafBlock, handleWafBlock, curlReproducer } from "./types";
 import { wafVariants } from "./waf-bypass";
 
 const TRAVERSAL_PROBES = [
@@ -103,6 +103,7 @@ export async function runPathTraversalCheck(ctx: ScanContext): Promise<ScanFindi
             scanner_name: "Bug-Finder/Traversal",
             scanner_family: "web",
             confidence: 0.97,
+            reproduction_curl: curlReproducer("GET", testUrl),
           });
           emit({ type: "log", message: `  [PATH TRAVERSAL CONFIRMED] ${leakedFile} + ${isWin ? "system.ini" : "hostname"} both leaked at ${endpoint} param=${param}` });
           break;

@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, curlReproducer } from "./types";
 
 // Server-Side Template Injection payloads
 const SSTI_PROBES = [
@@ -109,6 +109,7 @@ export async function runSstiCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           scanner_name: "Bug-Finder/SSTI",
           scanner_family: "web",
           confidence: 0.97,
+          reproduction_curl: curlReproducer("GET", testUrl),
         });
         emit({ type: "log", message: `  [SSTI CONFIRMED] ${probe.engine} dual-probe confirmed at ${endpoint} param=${param}` });
         break;

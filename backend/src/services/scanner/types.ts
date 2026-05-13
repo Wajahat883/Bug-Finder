@@ -110,6 +110,19 @@ export function buildRawCapture(
   return { raw_request, raw_response, reproduction_curl };
 }
 
+// Lightweight curl reproducer — use when the Response body has already been consumed.
+// For full raw_request + raw_response capture use buildRawCapture() instead.
+export function curlReproducer(
+  method: string,
+  url: string,
+  headers?: Record<string, string>,
+  body?: string
+): string {
+  const h = Object.entries(headers ?? {}).map(([k, v]) => `-H '${k}: ${v}'`).join(" ");
+  const b = body ? `-d '${body.slice(0, 300).replace(/'/g, "'\\''")}' ` : "";
+  return `curl -sv -X ${method.toUpperCase()} '${url}' ${h} ${b}`.replace(/\s+/g, " ").trim();
+}
+
 // Returns true if url is within the scan's defined scope
 export function isInScope(ctx: ScanContext, url: string): boolean {
   if (!ctx.scopeHosts || ctx.scopeHosts.length === 0) return true;

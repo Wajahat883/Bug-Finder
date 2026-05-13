@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch, safeFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, safeFetch, curlReproducer } from "./types";
 
 const IDOR_PATH_PATTERNS = [
   { path: "/api/users/{id}", label: "User object" },
@@ -92,6 +92,7 @@ export async function runIdorCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         scanner_name: "Bug-Finder/IDOR",
         scanner_family: "web",
         confidence: 0.95,
+        reproduction_curl: curlReproducer("GET", url1, { Accept: "application/json" }),
       });
       emit({ type: "log", message: `  [CRITICAL] Unauthenticated access on ${pattern.path}` });
       continue;

@@ -1,5 +1,5 @@
 import { createHmac } from "crypto";
-import { ScanContext, ScanFinding, ctxFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, curlReproducer } from "./types";
 
 const COMMON_JWT_SECRETS = [
   "secret", "password", "123456", "jwt", "key", "auth", "token",
@@ -89,6 +89,7 @@ export async function runJwtCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         scanner_name: "Bug-Finder/JWT",
         scanner_family: "web",
         confidence: 0.99,
+        reproduction_curl: curlReproducer("GET", protectedEp, { Authorization: `Bearer ${algNoneToken}`, Accept: "application/json" }),
       });
       emit({ type: "log", message: "[CRITICAL] JWT alg=none accepted — full authentication bypass" });
     } else {

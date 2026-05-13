@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, curlReproducer } from "./types";
 
 // Test with a realistic attacker origin and null (sandboxed iframe exploit)
 const EVIL_ORIGINS = [
@@ -69,6 +69,7 @@ export async function runCorsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           scanner_name: "Bug-Finder/CORS",
           scanner_family: "web",
           confidence: 0.97,
+          reproduction_curl: curlReproducer("GET", endpoint, { Origin: origin }),
         });
         emit({ type: "log", message: `  [CORS CRITICAL] wildcard + credentials on ${endpoint}` });
         break;

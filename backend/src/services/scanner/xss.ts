@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock, curlReproducer } from "./types";
 import { runOpenApiDiscovery } from "./openapi";
 import { createOastClient } from "./oast";
 import { wafVariants } from "./waf-bypass";
@@ -140,6 +140,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           scanner_name: "Bug-Finder/XSS",
           scanner_family: "web",
           confidence: domXssConfirmed ? 0.98 : 0.92,
+          reproduction_curl: curlReproducer("GET", testUrl),
         });
         emit({ type: "log", message: `  [XSS${domXssConfirmed ? " DOM-CONFIRMED" : " CONFIRMED"}] ${endpoint} param=${paramName} line=${lineNumber}` });
         break; // One confirmed finding per param is enough

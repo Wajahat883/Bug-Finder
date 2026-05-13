@@ -1,4 +1,4 @@
-import { ScanContext, ScanFinding, ctxFetch, isInScope } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isInScope, curlReproducer } from "./types";
 import { createOastClient } from "./oast";
 
 // Common SSRF-triggering parameter names
@@ -84,6 +84,7 @@ export async function runSsrfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               scanner_name: "Bug-Finder/SSRF",
               scanner_family: "web",
               confidence: 0.97,
+              reproduction_curl: curlReproducer("GET", probeUrl),
             });
             emit({ type: "log", message: `  [SSRF CONFIRMED OOB] ${endpoint} param=${param} — OOB callback received` });
             break;
@@ -132,6 +133,7 @@ export async function runSsrfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             scanner_name: "Bug-Finder/SSRF",
             scanner_family: "web",
             confidence: 0.95,
+            reproduction_curl: curlReproducer("GET", probeUrl),
           });
           emit({ type: "log", message: `  [SSRF CRITICAL] ${provider} metadata reflected at ${endpoint} param=${param}` });
           break;
