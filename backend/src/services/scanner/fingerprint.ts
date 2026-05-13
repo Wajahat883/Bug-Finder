@@ -1,5 +1,48 @@
 import { ScanContext, ScanFinding, ctxFetch } from "./types";
 
+// Known exploitable version patterns — checked against version extracted from headers/body
+const EXPLOITABLE_VERSIONS: Array<{
+  tech: string; versionRegex: RegExp; headerOrBody: "header" | "body"; headerName?: string;
+  cve: string; threshold: string; severity: ScanFinding["severity"]; cvss: number; desc: string;
+}> = [
+  {
+    tech: "Apache", versionRegex: /Apache\/(\d+\.\d+\.\d+)/i, headerOrBody: "header", headerName: "server",
+    cve: "CVE-2021-41773", threshold: "2.4.51", severity: "critical", cvss: 9.8,
+    desc: "Path traversal + RCE via mod_cgi when Apache is below 2.4.51.",
+  },
+  {
+    tech: "Nginx", versionRegex: /nginx\/(\d+\.\d+\.\d+)/i, headerOrBody: "header", headerName: "server",
+    cve: "CVE-2021-23017", threshold: "1.20.1", severity: "high", cvss: 7.7,
+    desc: "DNS resolver off-by-one heap write in Nginx < 1.20.1.",
+  },
+  {
+    tech: "PHP", versionRegex: /PHP\/(\d+\.\d+\.\d+)/i, headerOrBody: "header", headerName: "x-powered-by",
+    cve: "CVE-2022-31626", threshold: "8.1.0", severity: "critical", cvss: 9.8,
+    desc: "Buffer overflow via phar extension in PHP < 8.1.0 → RCE.",
+  },
+  {
+    tech: "OpenSSL", versionRegex: /OpenSSL\/(\d+\.\d+\.\d+[a-z]?)/i, headerOrBody: "header", headerName: "server",
+    cve: "CVE-2022-0778", threshold: "1.1.1n", severity: "high", cvss: 7.5,
+    desc: "Infinite loop in BN_mod_sqrt() in OpenSSL < 1.1.1n → DoS.",
+  },
+];
+
+function parseVersion(v: string): number[] {
+  return v.split(".").map(p => parseInt(p.replace(/[^0-9]/g, ""), 10) || 0);
+}
+
+function isBelow(detected: string, threshold: string): boolean {
+  const d = parseVersion(detected);
+  const t = parseVersion(threshold);
+  for (let i = 0; i < Math.max(d.length, t.length); i++) {
+    const dv = d[i] ?? 0;
+    const tv = t[i] ?? 0;
+    if (dv < tv) return true;
+    if (dv > tv) return false;
+  }
+  return false;
+}
+
 interface TechSignature {
   name: string;
   category: string;
@@ -200,6 +243,43 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
     emit({ type: "log", message: "No specific technology signatures detected" });
   } else {
     emit({ type: "log", message: `Technologies identified: ${detected.join(", ")}` });
+  }
+
+  // ── CVE correlation based on detected version from headers/body ─────────────
+  for (const ev of EXPLOITABLE_VERSIONS) {
+    const sourceValue = ev.headerOrBody === "header"
+      ? (res.headers.get(ev.headerName ?? "server") ?? "")
+      : body;
+    const match = sourceValue.match(ev.versionRegex);
+    if (!match?.[1]) continue;
+
+    const detectedVersion = match[1];
+    if (!isBelow(detectedVersion, ev.threshold)) {
+      emit({ type: "log", message: `  [CVE skip] ${ev.tech} ${detectedVersion} >= ${ev.threshold} — not affected by ${ev.cve}` });
+      continue;
+    }
+
+    findings.push({
+      title: `Exploitable Version Detected: ${ev.tech} ${detectedVersion} (${ev.cve})`,
+      category: "Known Vulnerability",
+      severity: ev.severity,
+      endpoint: targetUrl,
+      description: `${ev.tech} version ${detectedVersion} is below the patched version (${ev.threshold}) and is vulnerable to ${ev.cve}. ${ev.desc}`,
+      evidence: [
+        `Detected: ${ev.tech} ${detectedVersion} from ${ev.headerOrBody === "header" ? ev.headerName : "response body"}`,
+        `Vulnerable range: < ${ev.threshold}`,
+        `CVE: ${ev.cve} | CVSS: ${ev.cvss}`,
+        `Header: ${ev.headerName ? `${ev.headerName}: ${res.headers.get(ev.headerName ?? "") ?? ""}` : "body fingerprint"}`,
+        `Reference: https://nvd.nist.gov/vuln/detail/${ev.cve}`,
+      ].join("\n"),
+      recommended_fix: `Update ${ev.tech} to ${ev.threshold} or later. Apply vendor security patches immediately. Reference: https://nvd.nist.gov/vuln/detail/${ev.cve}`,
+      cvss_score: ev.cvss,
+      cwe_id: "CWE-1035",
+      scanner_name: "Bug-Finder/Fingerprint",
+      scanner_family: "web",
+      confidence: 0.88,
+    });
+    emit({ type: "log", message: `  [CVE MATCHED] ${ev.tech} ${detectedVersion} < ${ev.threshold} — ${ev.cve}` });
   }
 
   emit({ type: "engine_done", engine: "Bug-Finder/Fingerprint", message: `Fingerprinting complete — ${findings.length} finding(s)` });

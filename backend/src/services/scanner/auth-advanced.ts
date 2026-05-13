@@ -159,34 +159,149 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
       }
     }
 
-    // Check for 2FA enforcement detection
+    // ── MFA bypass probe — real test, not heuristic ─────────────────────────
+    // Strategy: attempt login with known-bad credentials, look for a MFA challenge
+    // in the response. If no challenge is sent, MFA is either absent or bypassable.
+    // Second probe: send an empty or zero OTP code to see if the MFA step can be skipped.
     const loginBody = await probe.text().catch(() => "");
-    const has2FA = loginBody.toLowerCase().includes("otp") || loginBody.toLowerCase().includes("2fa") || loginBody.toLowerCase().includes("totp") || loginBody.toLowerCase().includes("mfa");
-    if (!has2FA && probe.status !== 404) {
-      // Check login page for 2FA indicators
+    const has2FAResponse = /\b(otp|totp|mfa|2fa|one.?time|authenticator|verify.?code|verification.?code)\b/i.test(loginBody);
+
+    if (has2FAResponse) {
+      // MFA challenge was issued — check if it can be bypassed with an empty code
+      const mfaBypassPaths = [
+        `${base}/api/auth/verify-otp`, `${base}/api/auth/mfa/verify`,
+        `${base}/api/v1/auth/verify`, `${base}/api/mfa`,
+      ];
+      for (const mfaPath of mfaBypassPaths) {
+        const bypassRes = await ctxFetch(ctx, mfaPath, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ otp: "", code: "", token: "" }),
+        });
+        if (!bypassRes) continue;
+        const bypassBody = await bypassRes.text().catch(() => "");
+        // If we get a session token back with an empty OTP → MFA bypass confirmed
+        const hasSession = bypassBody.includes("token") || bypassBody.includes("access_token") || bypassBody.includes("session");
+        if ((bypassRes.status === 200 || bypassRes.status === 201) && hasSession) {
+          findings.push({
+            title: "MFA Bypass: Empty OTP Code Accepted",
+            category: "Authentication",
+            severity: "critical",
+            endpoint: mfaPath,
+            description: `The MFA verification endpoint accepted an empty OTP code and returned an authentication session. An attacker who knows a victim's password can bypass multi-factor authentication by submitting an empty or null OTP.`,
+            evidence: [
+              `Step 1: POST ${endpoint} → MFA challenge issued (HTTP ${probe.status})`,
+              `Step 2: POST ${mfaPath}`,
+              `  Body: {"otp":"","code":"","token":""}`,
+              `  HTTP ${bypassRes.status} — session returned with empty OTP`,
+              `  Response: ${bypassBody.slice(0, 200)}`,
+            ].join("\n"),
+            recommended_fix: "Validate OTP codes server-side: reject empty, null, or zero-length values. Implement TOTP time window validation. Rate-limit OTP attempts. Require OTP to be a 6-digit non-empty string.",
+            cvss_score: 9.8,
+            cwe_id: "CWE-308",
+            scanner_name: "Bug-Finder/Auth",
+            scanner_family: "auth",
+            confidence: 0.96,
+          });
+          emit({ type: "log", message: `  [MFA BYPASS CONFIRMED] empty OTP accepted at ${mfaPath}` });
+          break;
+        }
+      }
+      emit({ type: "log", message: `  MFA challenge detected at ${endpoint} — bypass attempt complete` });
+    } else if (probe.status !== 404) {
+      // No MFA challenge in response — check login page too
       const loginPageR = await ctxFetch(ctx, `${base}/login`, { redirect: "follow" });
       const loginPageBody = loginPageR ? await loginPageR.text().catch(() => "") : "";
-      const page2FA = loginPageBody.toLowerCase().includes("two-factor") || loginPageBody.toLowerCase().includes("authenticator") || loginPageBody.toLowerCase().includes("otp");
-      if (!page2FA) {
+      const page2FA = /\b(two.?factor|authenticator|otp|totp|mfa|2fa)\b/i.test(loginPageBody);
+      if (!page2FA && !seen.has(`mfa:${endpoint}`)) {
+        seen.add(`mfa:${endpoint}`);
         findings.push({
           title: "No Multi-Factor Authentication (MFA) Detected",
           category: "Authentication",
           severity: "medium",
           endpoint,
-          description: "No indication of multi-factor authentication was found on the login endpoint. Applications without MFA are significantly more vulnerable to credential-based attacks.",
-          evidence: `POST ${endpoint}\nHTTP ${probe.status}\nNo OTP/TOTP/2FA field or response indicator found`,
-          recommended_fix: "Implement TOTP-based 2FA (Google Authenticator, Authy). Consider hardware key support (WebAuthn/FIDO2). At minimum, send OTP via email/SMS.",
+          description: "No MFA challenge was observed in the login response or login page. The application may be processing credentials without enforcing a second factor. Applications without MFA are significantly more vulnerable to credential-stuffing and phishing attacks.",
+          evidence: [
+            `POST ${endpoint}`,
+            `HTTP ${probe.status}`,
+            `Login response body (first 300 chars): ${loginBody.slice(0, 300)}`,
+            `Login page (${base}/login) checked: No 2FA/OTP/TOTP/MFA keywords found`,
+          ].join("\n"),
+          recommended_fix: "Implement TOTP-based 2FA (RFC 6238). Support WebAuthn/FIDO2 hardware keys. At minimum, send OTP via email/SMS for high-risk actions.",
           cvss_score: 5.9,
           cwe_id: "CWE-308",
           scanner_name: "Bug-Finder/Auth",
           scanner_family: "auth",
-          confidence: 0.7,
+          confidence: 0.75,
         });
-        emit({ type: "log", message: `  No MFA detected at ${endpoint}` });
+        emit({ type: "log", message: `  No MFA evidence at ${endpoint}` });
         break;
       }
     }
-    break; // Only need one endpoint for 2FA check
+    break; // Only need one endpoint for MFA check
+  }
+
+  // ── Timing-based username enumeration ──────────────────────────────────────
+  // Send login requests for an existing vs. non-existent username. If response
+  // time differs significantly (>200ms), the server reveals whether the username
+  // exists (e.g., bcrypt is skipped for unknown users → faster response).
+  emit({ type: "log", message: "Testing for timing-based username enumeration..." });
+
+  for (const path of LOGIN_PATHS.slice(0, 2)) {
+    const endpoint = `${base}${path}`;
+    const existingUser = "admin@admin.com";
+    const nonExistentUser = `nonexistent_${Date.now()}@zzzzzz-fake-domain-xyz.com`;
+
+    const timings: { user: string; ms: number }[] = [];
+    const ROUNDS = 4;
+
+    for (const email of [existingUser, nonExistentUser]) {
+      let total = 0;
+      for (let i = 0; i < ROUNDS; i++) {
+        const t0 = Date.now();
+        const r = await ctxFetch(ctx, endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password: "WrongPass_timing_probe_9z!" }),
+        });
+        if (r) await r.text().catch(() => "");
+        total += Date.now() - t0;
+      }
+      timings.push({ user: email, ms: Math.round(total / ROUNDS) });
+    }
+
+    const [existing, nonExisting] = timings as [typeof timings[0], typeof timings[0]];
+    const diff = Math.abs(existing.ms - nonExisting.ms);
+    emit({ type: "log", message: `  Timing: existing=${existing.ms}ms nonexistent=${nonExisting.ms}ms diff=${diff}ms at ${endpoint}` });
+
+    // >200ms consistent difference across 4 rounds strongly suggests username oracle
+    if (diff > 200) {
+      const fasterUser = existing.ms < nonExisting.ms ? "existing" : "nonexistent";
+      findings.push({
+        title: "Username Enumeration via Timing Side-Channel",
+        category: "Authentication",
+        severity: "medium",
+        endpoint,
+        description: `The login endpoint responds ${diff}ms faster for ${fasterUser} usernames on average across ${ROUNDS} requests. This timing difference allows an attacker to enumerate valid usernames by observing response latency, significantly reducing the effort for credential-stuffing or brute-force attacks.`,
+        evidence: [
+          `Endpoint: POST ${endpoint}`,
+          `Rounds: ${ROUNDS}`,
+          `Average response — existing user (${existingUser}): ${existing.ms}ms`,
+          `Average response — non-existent user (${nonExistentUser}): ${nonExisting.ms}ms`,
+          `Timing difference: ${diff}ms`,
+          `Threshold for reporting: >200ms`,
+          `Likely cause: bcrypt/argon2 skipped for unknown users, or LDAP/DB lookup takes different time`,
+        ].join("\n"),
+        recommended_fix: "Ensure login response time is constant regardless of whether the username exists. Run password hashing even for non-existent users (use a dummy hash). Return identical error messages for bad username and bad password.",
+        cvss_score: 5.3,
+        cwe_id: "CWE-208",
+        scanner_name: "Bug-Finder/Auth",
+        scanner_family: "auth",
+        confidence: 0.82,
+      });
+      emit({ type: "log", message: `  [TIMING ENUM] ${diff}ms difference at ${endpoint} — username oracle confirmed` });
+      break;
+    }
   }
 
   if (findings.length === 0) {

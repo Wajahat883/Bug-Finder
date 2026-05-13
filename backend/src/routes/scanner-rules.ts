@@ -3,29 +3,12 @@ import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { ScanFinding } from "../services/scanner/types";
-import { requireAuth } from "../middlewares/rbac";
+import { requireAuth, requireAdmin } from "../middlewares/rbac";
 import { runCustomRules as runCustomRulesEngine } from "../services/scanner/custom-rules";
 
 const router = Router();
-
-interface ScannerRule {
-  name: string;
-  category: string;
-  severity: "critical" | "high" | "medium" | "low" | "info";
-  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD";
-  pathPattern: string;
-  headerCheck?: string;
-  bodyCheck?: string;
-  payload?: string;
-  expectedStatus?: number;
-  expectedResponse?: string;
-  failIfFound?: boolean;
-  cwe_id?: string;
-  description: string;
-  remediation: string;
-}
-
 router.use(requireAuth);
+router.use(requireAdmin);
 
 // GET /scanner/rules — List all custom rules
 router.get("/scanner/rules", async (_req, res) => {

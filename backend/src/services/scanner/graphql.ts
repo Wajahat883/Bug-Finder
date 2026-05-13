@@ -107,6 +107,80 @@ export async function runGraphQLCheck(ctx: ScanContext): Promise<ScanFinding[]> 
           });
         }
       }
+      // ── Query depth limit abuse ─────────────────────────────────────────────
+      // Send deeply nested query; if server evaluates it without error/timeout → no depth limit
+      const deepQuery = JSON.stringify({
+        query: `{ __type(name:"Query") { fields { type { fields { type { fields { type { fields { type { name } } } } } } } } } }`,
+      });
+      const depthRes = await ctxFetch(ctx, url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: deepQuery,
+      });
+      if (depthRes && depthRes.status === 200) {
+        const depthBody = await depthRes.text().catch(() => "");
+        // Server returned 200 with data (not a complexity/depth error) → no depth limit enforced
+        if (depthBody.includes('"data"') && !depthBody.includes("complexity") && !depthBody.includes("depth limit") && !depthBody.includes("max depth")) {
+          findings.push({
+            title: "GraphQL No Query Depth Limit",
+            category: "API Security",
+            severity: "high",
+            endpoint: url,
+            description: "The GraphQL endpoint does not enforce a query depth limit. An attacker can send a deeply nested query that causes exponential resolver calls, resulting in a denial-of-service condition.",
+            evidence: `POST ${url}\nNested query depth: 7 levels\nResponse: HTTP ${depthRes.status} — server processed without depth error\nQuery: ${deepQuery.slice(0, 200)}`,
+            recommended_fix: "Implement query depth limiting (e.g., graphql-depth-limit). Set max depth to 5-7 for most APIs. Also consider query complexity analysis.",
+            cvss_score: 7.5,
+            cwe_id: "CWE-770",
+            scanner_name: "Bug-Finder/GraphQL",
+            scanner_family: "web",
+            confidence: 0.85,
+          });
+          emit({ type: "log", message: `  GraphQL no depth limit at ${path}` });
+        }
+      }
+
+      // ── Mutation injection probe ────────────────────────────────────────────
+      // Try common mutations to discover exposed write operations
+      const mutationProbes = [
+        { query: `mutation { createUser(email:"xsstest@bugfinder.test", password:"P@ss1234!") { id email } }`, label: "createUser" },
+        { query: `mutation { register(username:"bugfindertest", email:"test@bugfinder.test", password:"P@ss1234!") { token } }`, label: "register" },
+        { query: `mutation { login(email:"admin@test.com", password:"admin") { token user { role } } }`, label: "login" },
+      ];
+
+      for (const mutProbe of mutationProbes) {
+        const mutRes = await ctxFetch(ctx, url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: mutProbe.query }),
+        });
+        if (!mutRes) continue;
+        const mutBody = await mutRes.text().catch(() => "");
+        // If we get actual data back (not just errors), the mutation exists and is accessible
+        // Only confirmed if "data" key has non-null content AND "errors" array is absent or empty
+        let mutData: Record<string, unknown> | null = null;
+        try { mutData = JSON.parse(mutBody) as Record<string, unknown>; } catch { /* not JSON */ }
+        const dataIsNull = mutData?.["data"] === null || mutData?.["data"] === undefined;
+        const hasErrors = Array.isArray(mutData?.["errors"]) && (mutData["errors"] as unknown[]).length > 0;
+        if (mutRes.status === 200 && mutBody.includes('"data"') && !dataIsNull && !hasErrors) {
+          findings.push({
+            title: `GraphQL Mutation Accessible Without Auth: ${mutProbe.label}`,
+            category: "API Security",
+            severity: "critical",
+            endpoint: url,
+            description: `The GraphQL mutation "${mutProbe.label}" is accessible without authentication and returned a success response. This may allow unauthenticated user registration, login brute-force, or account creation.`,
+            evidence: `POST ${url}\nMutation: ${mutProbe.query}\nHTTP ${mutRes.status}\nResponse: ${mutBody.slice(0, 300)}`,
+            recommended_fix: "Require authentication for sensitive mutations. Implement rate limiting on auth mutations. Validate and sanitize all mutation inputs.",
+            cvss_score: 9.1,
+            cwe_id: "CWE-306",
+            scanner_name: "Bug-Finder/GraphQL",
+            scanner_family: "web",
+            confidence: 0.88,
+          });
+          emit({ type: "log", message: `  [GraphQL] Unauthenticated mutation: ${mutProbe.label}` });
+          break;
+        }
+      }
+
       break; // Found one GraphQL endpoint, don't test more
     }
   }

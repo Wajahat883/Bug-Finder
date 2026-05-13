@@ -28,7 +28,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         "X-Grpc-Web": "1",
         Accept: "application/grpc-web+proto",
       },
-      body: new Uint8Array([0, 0, 0, 0, 0]).buffer as BodyInit,
+      body: new Uint8Array([0, 0, 0, 0, 0]),
     });
 
     if (!r) continue;

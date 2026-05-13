@@ -41,7 +41,8 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
       const data = await rdapRes.json() as Record<string, unknown>;
       const entities = (data.entities as Array<Record<string, unknown>>) ?? [];
       const registrar = entities.find(e => (e.roles as string[] ?? []).includes("registrar"));
-      const registrarName = (registrar?.vcardArray as unknown[][])?.[1]?.find?.((v: unknown[]) => (v as unknown[])[0] === "fn")?.[3] as string ?? "Unknown";
+      const vcardArray = registrar?.vcardArray as unknown[][][] | undefined;
+      const registrarName = vcardArray?.[1]?.find?.((v: unknown[]) => (v as unknown[])[0] === "fn")?.[3] as string ?? "Unknown";
       emit({ type: "log", message: `RDAP: registrar=${registrarName}` });
 
       // Check for recent registration (less than 30 days old — phishing risk)

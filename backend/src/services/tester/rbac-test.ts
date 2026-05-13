@@ -52,11 +52,12 @@ const rbacTests: TestCase[] = [
 
       const allBlocked = Object.values(results).every(s => s === 401 || s === 403);
       const blocked = Object.entries(results).filter(([, s]) => s === 401 || s === 403).length;
+      const total = Object.keys(results).length;
 
       return {
         id: "rbac-02", name: "Normal User Cannot Access Admin Routes", category: "rbac",
         status: allBlocked ? "pass" : "fail", duration: 0,
-        message: `${blocked}/${Object.keys(results).length} admin endpoints blocked`,
+        message: `${blocked}/${total} admin endpoints blocked`,
         evidence: results,
         suggestion: !allBlocked ? "Add requireAdmin middleware to admin routes" : undefined,
       };

@@ -1,4 +1,5 @@
-import { ScanContext, ScanFinding, ctxFetch } from "./types";
+import { ScanContext, ScanFinding, ctxFetch, isWafBlock, handleWafBlock } from "./types";
+import { wafVariants } from "./waf-bypass";
 
 const TRAVERSAL_PROBES = [
   "../../../etc/passwd",
@@ -27,11 +28,24 @@ export async function runPathTraversalCheck(ctx: ScanContext): Promise<ScanFindi
   for (const endpoint of endpoints) {
     for (const param of TRAVERSAL_PARAMS.slice(0, profile === "quick" ? 3 : 6)) {
       for (const probe of TRAVERSAL_PROBES.slice(0, profile === "quick" ? 2 : TRAVERSAL_PROBES.length)) {
-        const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${probe}`;
-        const res = await ctxFetch(ctx, testUrl);
-        if (!res) continue;
+        // Try WAF bypass variants when raw payload is blocked
+        const variants = wafVariants(probe, "path");
+        let res: Awaited<ReturnType<typeof ctxFetch>> = null;
+        let body = "";
+        let wafBlocked = false;
+        let usedVariant = probe;
 
-        const body = await res.text().catch(() => "");
+        for (const variant of variants) {
+          const variantUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${variant}`;
+          const r = await ctxFetch(ctx, variantUrl);
+          if (!r) continue;
+          const b = await r.text().catch(() => "");
+          if (isWafBlock(r, b)) { wafBlocked = true; continue; }
+          res = r; body = b; usedVariant = variant; break;
+        }
+
+        if (!res) { if (wafBlocked) { handleWafBlock(ctx, endpoint); } continue; }
+        const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${usedVariant}`;
         const bodyLower = body.toLowerCase();
 
         const unixHit = UNIX_INDICATORS.find(i => bodyLower.includes(i));

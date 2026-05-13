@@ -151,6 +151,58 @@ export async function runCloudCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
+  // 4. IMDS (Instance Metadata Service) credential exfiltration via SSRF
+  // Test SSRF-reachable IMDS endpoints to confirm credential exposure
+  emit({ type: "log", message: "Checking for IMDS/metadata endpoint exposure via SSRF..." });
+
+  const ssrfParams = ["url", "redirect", "fetch", "proxy", "uri", "endpoint", "target", "host", "src", "callback"];
+  const imdsTargets = [
+    { url: "http://169.254.169.254/latest/meta-data/iam/security-credentials/", label: "AWS IMDS credentials list", fingerprints: ["AmazonEC2", "EC2", "InstanceProfile"] },
+    { url: "http://169.254.169.254/latest/meta-data/", label: "AWS IMDS root", fingerprints: ["iam/", "ami-id", "hostname", "instance-id"] },
+    { url: "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", label: "GCP metadata token", fingerprints: ["access_token", "token_type"] },
+    { url: "http://169.254.169.254/metadata/instance", label: "Azure IMDS", fingerprints: ['"compute"', '"network"'] },
+  ];
+
+  for (const ssrfTarget of imdsTargets) {
+    for (const param of ssrfParams.slice(0, 5)) {
+      const testUrl = `${base}/?${param}=${encodeURIComponent(ssrfTarget.url)}`;
+      const ssrfRes = await ctxFetch(ctx, testUrl, {
+        headers: { "Metadata": "true", "X-aws-ec2-metadata-token-ttl-seconds": "21600" },
+        redirect: "follow",
+      });
+      if (!ssrfRes) continue;
+
+      const ssrfBody = await ssrfRes.text().catch(() => "");
+      const matched = ssrfTarget.fingerprints.find(fp => ssrfBody.includes(fp));
+
+      if (ssrfRes.status === 200 && matched) {
+        findings.push({
+          title: `SSRF → Cloud IMDS Credential Access: ${ssrfTarget.label}`,
+          category: "Cloud Security",
+          severity: "critical",
+          endpoint: base,
+          description: `The application is vulnerable to SSRF that reaches the cloud instance metadata service (IMDS). The endpoint ${ssrfTarget.url} was fetched via the "${param}" parameter and returned cloud credential data. An attacker can use this to obtain IAM role credentials and escalate to full cloud account compromise.`,
+          evidence: [
+            `SSRF vector: GET ${testUrl}`,
+            `IMDS target: ${ssrfTarget.url}`,
+            `HTTP ${ssrfRes.status} — IMDS data returned`,
+            `Fingerprint matched: "${matched}"`,
+            `Response (first 400 bytes):`,
+            ssrfBody.slice(0, 400),
+          ].join("\n"),
+          recommended_fix: "Block outbound requests to 169.254.169.254 and metadata.google.internal at the network level (security groups/firewall rules). Require IMDSv2 (token-based) on AWS. Validate and allowlist all user-controlled URLs. Do not allow server-side URL fetching from user input.",
+          cvss_score: 10.0,
+          cwe_id: "CWE-918",
+          scanner_name: "Bug-Finder/Cloud",
+          scanner_family: "cloud",
+          confidence: 0.97,
+        });
+        emit({ type: "log", message: `  [CRITICAL] SSRF→IMDS confirmed: ${ssrfTarget.label} via param=${param}` });
+        break;
+      }
+    }
+  }
+
   if (findings.length === 0) {
     emit({ type: "log", message: "No cloud storage or container exposure found" });
   }

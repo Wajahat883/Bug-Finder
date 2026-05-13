@@ -1,5 +1,6 @@
 import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock, buildRawCapture } from "./types";
 import { runOpenApiDiscovery } from "./openapi";
+import { wafVariants } from "./waf-bypass";
 
 const SQL_ERROR_PATTERNS = [
   "sql syntax",
@@ -73,10 +74,19 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     const baseLen = baseBody.length;
 
     for (const param of TEST_PARAMS.slice(0, profile === "quick" ? 3 : 6)) {
-      // ── 1. Error-based detection ─────────────────────────────────────────
+      // ── 1. Error-based detection (with WAF bypass variants) ─────────────
       for (const probe of SQL_ERROR_PROBES.slice(0, profile === "quick" ? 2 : SQL_ERROR_PROBES.length)) {
-        const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(probe)}`;
-        const res = await ctxFetch(ctx, testUrl);
+        // Try raw payload first, then WAF bypass variants if WAF blocks
+        const probeVariants = wafVariants(probe, "sqli");
+        let res: Awaited<ReturnType<typeof ctxFetch>> = null;
+        let usedVariant = probe;
+        for (const variant of probeVariants) {
+          const testUrlVariant = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(variant)}`;
+          const r = await ctxFetch(ctx, testUrlVariant);
+          if (!r) continue;
+          if (!isWafBlock(r, "")) { res = r; usedVariant = variant; break; }
+        }
+        const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${encodeURIComponent(usedVariant)}`;
         if (!res) continue;
 
         const body = (await res.text().catch(() => "")).toLowerCase();

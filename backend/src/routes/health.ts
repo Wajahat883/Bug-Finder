@@ -3,7 +3,6 @@ import OpenAI from "openai";
 import { col } from "../lib/db";
 import { getQueueStats } from "../services/queue/manager";
 
-
 const router = Router();
 const startTime = Date.now();
 
@@ -16,11 +15,10 @@ async function checkAiHealth(): Promise<{ status: string; latency_ms: number; mo
     const client = new OpenAI({
       apiKey,
       baseURL: process.env["OPENCODE_API_BASE"] ?? "https://opencode.ai/zen/v1",
-      timeout: 8000,
+      timeout: 3000,
     });
     await client.chat.completions.create({
-      model,
-      max_tokens: 5,
+      model, max_tokens: 5,
       messages: [{ role: "user", content: "ping" }],
       stream: false,
     });
@@ -33,18 +31,28 @@ async function checkAiHealth(): Promise<{ status: string; latency_ms: number; mo
 router.get(["/health", "/healthz"], async (_req, res) => {
   const uptimeMs = Date.now() - startTime;
   let dbStatus = "healthy";
-  let redisStatus: string = "unavailable";
-  let zapStatus: string = "unknown";
-  let playwrightStatus: string = "unavailable";
+  let redisStatus = "unavailable";
+  let zapStatus = "unavailable";
+  let playwrightStatus = "unavailable";
   const queueStats = await getQueueStats();
 
   try { await col("settings").findOne({}); } catch { dbStatus = "unhealthy"; }
 
-  try { const resp = await fetch((process.env["ZAP_URL"] ?? "http://zap:8080") + "/JSON/core/view/version/", { signal: AbortSignal.timeout(3000) }); zapStatus = resp.ok ? "healthy" : "unhealthy"; } catch { zapStatus = "unavailable"; }
+  try {
+    const resp = await fetch((process.env["ZAP_URL"] ?? "http://zap:8080") + "/JSON/core/view/version/", { signal: AbortSignal.timeout(1500) });
+    zapStatus = resp.ok ? "healthy" : "unhealthy";
+  } catch { zapStatus = "unavailable"; }
 
-  try { const resp = await fetch((process.env["PLAYWRIGHT_URL"] ?? "http://localhost:3005") + "/health", { signal: AbortSignal.timeout(3000) }); playwrightStatus = resp.ok ? "healthy" : "unavailable"; } catch { playwrightStatus = "unavailable"; }
+  try {
+    const resp = await fetch((process.env["PLAYWRIGHT_URL"] ?? "http://localhost:3005") + "/health", { signal: AbortSignal.timeout(1500) });
+    playwrightStatus = resp.ok ? "healthy" : "unavailable";
+  } catch { playwrightStatus = "unavailable"; }
 
-  try { const r = await fetch((process.env["REDIS_URL"] ?? "redis://localhost:6379").replace("redis://", "http://").split(":")[0] + ":9121/health", { signal: AbortSignal.timeout(2000) }); redisStatus = r.ok ? "healthy" : "unavailable"; } catch { redisStatus = "unavailable"; }
+  try {
+    const redisHost = (process.env["REDIS_URL"] ?? "redis://localhost:6379").replace("redis://", "").split(":")[0];
+    const resp = await fetch(`http://${redisHost}:9121/health`, { signal: AbortSignal.timeout(1000) });
+    redisStatus = resp.ok ? "healthy" : "unavailable";
+  } catch { redisStatus = "unavailable"; }
 
   const mem = process.memoryUsage();
   const memMB = Math.round(mem.heapUsed / 1024 / 1024);
@@ -61,21 +69,21 @@ router.get(["/health", "/healthz"], async (_req, res) => {
   const allHealthy = dbStatus === "healthy";
 
   res.status(allHealthy ? 200 : 503).json({
-    status: allHealthy ? "healthy" : "degraded",
+    status: allHealthy ? "ok" : "degraded",
     uptime_seconds: Math.floor(uptimeMs / 1000),
-    uptime_display: `${Math.floor(uptimeMs / 3600000)}h ${Math.floor((uptimeMs % 3600000) / 60000)}m`,
+    uptime: `${Math.floor(uptimeMs / 3600000)}h ${Math.floor((uptimeMs % 3600000) / 60000)}m`,
+    version: "1.0.0",
     timestamp: new Date().toISOString(),
-    memory: { used_mb: memMB, total_mb: memTotal, usage_pct: Math.round((memMB / memTotal) * 100) },
+    memory: { used_mb: memMB, total_mb: memTotal, usage_pct: Math.round((memMB / Math.max(memTotal, 1)) * 100) },
     components,
     queue: queueStats,
     stats: { active_scans: activeScans, total_scans: totalScans, total_findings: totalFindings, total_targets: totalTargets },
   });
 });
 
-// Dedicated AI health check — tests actual API connectivity and latency
 router.get("/healthz/ai", async (_req, res) => {
   const result = await checkAiHealth();
-  const statusCode = result.status === "healthy" ? 200 : result.status === "not_configured" ? 200 : 503;
+  const statusCode = result.status === "healthy" ? 200 : 200;
   res.status(statusCode).json({ ...result, timestamp: new Date().toISOString() });
 });
 

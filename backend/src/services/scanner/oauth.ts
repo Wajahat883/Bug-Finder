@@ -19,7 +19,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const oidcRes = await ctxFetch(ctx, `${base}/.well-known/openid-configuration`, {}, 8000);
   if (oidcRes && oidcRes.status === 200) {
     let config: Record<string, unknown> = {};
-    try { config = await oidcRes.json(); } catch { /* skip */ }
+    try { config = await oidcRes.json() as Record<string, unknown>; } catch { /* skip */ }
 
     emit({ type: "log", message: `OpenID Connect configuration found at /.well-known/openid-configuration` });
 
@@ -67,7 +67,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       const jwksRes = await ctxFetch(ctx, jwksUri, {}, 5000);
       if (jwksRes && jwksRes.status === 200) {
         let jwks: Record<string, unknown> = {};
-        try { jwks = await jwksRes.json(); } catch { /* skip */ }
+        try { jwks = await jwksRes.json() as Record<string, unknown>; } catch { /* skip */ }
         const keys = jwks.keys as Array<Record<string, unknown>> ?? [];
         const weakKeys = keys.filter(k => k.kty === "RSA" && Number(k.n?.toString().length ?? 0) < 344);
         if (weakKeys.length > 0) {

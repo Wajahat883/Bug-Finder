@@ -28,22 +28,31 @@ const INTERESTING_PORTS: PortInfo[] = [
   { port: 8888, service: "Jupyter Notebook", severity: "critical", description: "Port 8888 is open — commonly used by Jupyter Notebook which may allow arbitrary code execution.", cvss: 9.8, cwe: "CWE-284" },
 ];
 
-function checkPort(host: string, port: number, timeoutMs = 3000): Promise<boolean> {
+function grabBanner(host: string, port: number, timeoutMs = 4000): Promise<{ open: boolean; banner: string }> {
   return new Promise(resolve => {
     const socket = new net.Socket();
     let resolved = false;
+    let banner = "";
 
     const done = (open: boolean) => {
       if (resolved) return;
       resolved = true;
       socket.destroy();
-      resolve(open);
+      resolve({ open, banner: banner.slice(0, 200).trim() });
     };
 
     socket.setTimeout(timeoutMs);
-    socket.once("connect", () => done(true));
+    socket.once("connect", () => {
+      // Send a generic probe — many services respond with a banner immediately
+      socket.write("HEAD / HTTP/1.0\r\n\r\n");
+    });
+    socket.on("data", (chunk: Buffer) => {
+      banner += chunk.toString("utf8", 0, 200);
+      if (banner.length >= 200) done(true);
+    });
     socket.once("error", () => done(false));
-    socket.once("timeout", () => done(false));
+    socket.once("timeout", () => done(banner.length > 0));
+    socket.once("end", () => done(true));
 
     try {
       socket.connect(port, host);
@@ -83,19 +92,25 @@ export async function runPortScan(ctx: ScanContext): Promise<ScanFinding[]> {
   const results = await Promise.all(
     portsToCheck.map(async (p) => ({
       info: p,
-      open: await checkPort(host, p.port),
+      ...(await grabBanner(host, p.port)),
     }))
   );
 
-  for (const { info, open } of results) {
+  for (const { info, open, banner } of results) {
     if (open) {
+      // Extract version from banner for CVE correlation
+      const versionMatch = banner.match(/[\w\-]+\/(\d+[\.\d]+)/);
+      const detectedVersion = versionMatch?.[1];
+      const bannerLine = banner ? `\nBanner: ${banner}` : "";
+      const versionLine = detectedVersion ? `\nDetected version from banner: ${detectedVersion}` : "";
+
       findings.push({
-        title: `Open Port: ${info.port}/${info.service}`,
+        title: `Open Port: ${info.port}/${info.service}${detectedVersion ? ` (v${detectedVersion})` : ""}`,
         category: "Network Security",
         severity: info.severity,
         endpoint: `${host}:${info.port}`,
-        description: info.description,
-        evidence: `TCP connect to ${host}:${info.port} succeeded\nService: ${info.service}`,
+        description: info.description + (detectedVersion ? ` Detected version: ${detectedVersion}.` : ""),
+        evidence: `TCP connect to ${host}:${info.port} — SUCCESS\nService: ${info.service}${bannerLine}${versionLine}`,
         recommended_fix: `Firewall port ${info.port} to restrict access. Only expose services that must be publicly accessible.`,
         cvss_score: info.cvss,
         cwe_id: info.cwe,
@@ -103,7 +118,7 @@ export async function runPortScan(ctx: ScanContext): Promise<ScanFinding[]> {
         scanner_family: "network",
         confidence: 0.98,
       });
-      emit({ type: "log", message: `  [OPEN] Port ${info.port}/${info.service}` });
+      emit({ type: "log", message: `  [OPEN] Port ${info.port}/${info.service}${banner ? ` — banner: ${banner.slice(0, 60)}` : ""}` });
     } else {
       emit({ type: "log", message: `  Port ${info.port}/${info.service} — closed` });
     }

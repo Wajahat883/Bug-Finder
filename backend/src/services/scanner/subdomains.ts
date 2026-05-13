@@ -1,4 +1,35 @@
+import * as dns from "dns/promises";
 import { ScanContext, ScanFinding, safeFetch } from "./types";
+
+// Same fingerprint list as dns.ts but imported inline to keep modules self-contained
+const TAKEOVER_FINGERPRINTS: Array<{ service: string; cnameSuffix: string; fingerprint: string }> = [
+  { service: "GitHub Pages", cnameSuffix: ".github.io", fingerprint: "There isn't a GitHub Pages site here" },
+  { service: "Heroku", cnameSuffix: ".herokuapp.com", fingerprint: "No such app" },
+  { service: "Fastly", cnameSuffix: ".fastly.net", fingerprint: "Fastly error: unknown domain" },
+  { service: "Shopify", cnameSuffix: ".myshopify.com", fingerprint: "Sorry, this shop is currently unavailable" },
+  { service: "Tumblr", cnameSuffix: ".tumblr.com", fingerprint: "There's nothing here" },
+  { service: "Surge.sh", cnameSuffix: ".surge.sh", fingerprint: "project not found" },
+  { service: "Netlify", cnameSuffix: ".netlify.app", fingerprint: "Not Found - Request ID" },
+  { service: "Azure", cnameSuffix: ".azurewebsites.net", fingerprint: "404 Web Site not found" },
+  { service: "S3 Bucket", cnameSuffix: ".s3.amazonaws.com", fingerprint: "NoSuchBucket" },
+];
+
+async function checkSubdomainTakeover(sub: string): Promise<{ vulnerable: boolean; service: string; cname: string; fingerprint: string } | null> {
+  try {
+    const cnames = await dns.resolveCname(sub).catch(() => [] as string[]);
+    for (const cname of cnames) {
+      const fp = TAKEOVER_FINGERPRINTS.find(t => cname.toLowerCase().endsWith(t.cnameSuffix));
+      if (!fp) continue;
+      // Fetch the subdomain URL to confirm unclaimed fingerprint
+      const res = await safeFetch(`https://${sub}`, {}, 6000);
+      const body = res ? await res.text().catch(() => "") : "";
+      if (body.toLowerCase().includes(fp.fingerprint.toLowerCase())) {
+        return { vulnerable: true, service: fp.service, cname, fingerprint: fp.fingerprint };
+      }
+    }
+  } catch { /* DNS or network error */ }
+  return null;
+}
 
 export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, discoveredEndpoints } = ctx;
@@ -66,7 +97,7 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
 
   let certs: Array<{ name_value: string }> = [];
   try {
-    certs = await res.json();
+    certs = await res.json() as Array<{ name_value: string }>;
   } catch {
     emit({ type: "log", message: "Could not parse crt.sh response" });
     emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: "Parse error" });
@@ -127,6 +158,37 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
     }
   }
 
+  // ── Takeover probe for all discovered subdomains ────────────────────────────
+  const takeoverCandidates = [...subdomains].slice(0, 20); // cap to 20 to stay within budget
+  emit({ type: "log", message: `Probing ${takeoverCandidates.length} subdomains for takeover vulnerability...` });
+
+  for (const sub of takeoverCandidates) {
+    const takeover = await checkSubdomainTakeover(sub);
+    if (takeover) {
+      findings.push({
+        title: `Subdomain Takeover Confirmed via ${takeover.service}: ${sub}`,
+        category: "Subdomain Takeover",
+        severity: "high",
+        endpoint: `https://${sub}`,
+        description: `The subdomain ${sub} has a dangling CNAME pointing to ${takeover.cname} (${takeover.service}), and the service shows an unclaimed-resource fingerprint. An attacker can register this resource and serve arbitrary content from your domain.`,
+        evidence: [
+          `Subdomain: ${sub}`,
+          `CNAME: ${takeover.cname}`,
+          `Service: ${takeover.service}`,
+          `Fingerprint confirmed: "${takeover.fingerprint}"`,
+          `Source: crt.sh certificate transparency`,
+        ].join("\n"),
+        recommended_fix: `Immediately remove the CNAME record for ${sub} or claim the ${takeover.service} resource. Audit all DNS records for dangling CNAMEs quarterly.`,
+        cvss_score: 8.2,
+        cwe_id: "CWE-350",
+        scanner_name: "Bug-Finder/Subdomain",
+        scanner_family: "network",
+        confidence: 0.95,
+      });
+      emit({ type: "log", message: `  [TAKEOVER CONFIRMED] ${sub} → ${takeover.cname} (${takeover.service})` });
+    }
+  }
+
   emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: `Found ${subdomains.size} subdomains, ${findings.length} issue(s)` });
   return findings;
 }
@@ -158,7 +220,7 @@ export async function runWaybackCrawl(ctx: ScanContext): Promise<ScanFinding[]> 
   }
 
   let rows: string[][] = [];
-  try { rows = await res.json(); } catch {
+  try { rows = await res.json() as string[][]; } catch {
     emit({ type: "engine_done", engine: "Wayback Machine", message: "Parse error" });
     return findings;
   }

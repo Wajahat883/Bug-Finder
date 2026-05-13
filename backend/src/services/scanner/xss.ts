@@ -1,6 +1,7 @@
 import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock } from "./types";
 import { runOpenApiDiscovery } from "./openapi";
 import { createOastClient } from "./oast";
+import { wafVariants } from "./waf-bypass";
 
 // Harmless XSS markers — detect reflection without executing code
 const XSS_PROBES = [
@@ -38,15 +39,28 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     const paramBudget = profile === "quick" ? 3 : profile === "standard" ? 6 : PARAM_NAMES.length;
     for (const paramName of PARAM_NAMES.slice(0, paramBudget)) {
       for (const probe of XSS_PROBES.slice(0, 3)) {
-        const testUrl = buildUrl(endpoint, paramName, probe.payload);
-        const res = await ctxFetch(ctx, testUrl, { redirect: "follow" });
-        if (!res) continue;
+        // Try raw payload first; if WAF-blocked, try encoding variants
+        const variants = wafVariants(probe.payload, "xss");
+        let res: Awaited<ReturnType<typeof ctxFetch>> = null;
+        let usedVariant = probe.payload;
+        let body = "";
+        let wafBlocked = false;
+
+        for (const variant of variants) {
+          const testUrlVariant = buildUrl(endpoint, paramName, variant);
+          const r = await ctxFetch(ctx, testUrlVariant, { redirect: "follow" });
+          if (!r) continue;
+          const b = await r.text().catch(() => "");
+          if (isWafBlock(r, b)) { wafBlocked = true; continue; }
+          res = r; usedVariant = variant; body = b; break;
+        }
+
+        if (!res) { if (wafBlocked) { handleWafBlock(ctx, endpoint); break; } continue; }
+        const testUrl = buildUrl(endpoint, paramName, usedVariant);
 
         const ct = res.headers.get("content-type") ?? "";
         if (!ct.includes("html") && !ct.includes("text") && !ct.includes("json")) continue;
 
-        const body = await res.text().catch(() => "");
-        if (isWafBlock(res, body)) { handleWafBlock(ctx, endpoint); break; }
         if (!body.includes(probe.marker)) continue;
 
         // Skip if marker is HTML-entity encoded (safe reflection)

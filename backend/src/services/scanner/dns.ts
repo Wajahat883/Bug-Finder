@@ -1,5 +1,21 @@
 import * as dns from "dns/promises";
-import { ScanContext, ScanFinding } from "./types";
+import { ScanContext, ScanFinding, safeFetch } from "./types";
+
+// Known services vulnerable to subdomain takeover — fingerprint is what a dangling CNAME shows
+const TAKEOVER_FINGERPRINTS: Array<{ service: string; cnameSuffix: string; fingerprint: string; severity: ScanFinding["severity"] }> = [
+  { service: "GitHub Pages", cnameSuffix: ".github.io", fingerprint: "There isn't a GitHub Pages site here", severity: "high" },
+  { service: "Heroku", cnameSuffix: ".herokuapp.com", fingerprint: "No such app", severity: "high" },
+  { service: "Fastly", cnameSuffix: ".fastly.net", fingerprint: "Fastly error: unknown domain", severity: "high" },
+  { service: "Shopify", cnameSuffix: ".myshopify.com", fingerprint: "Sorry, this shop is currently unavailable", severity: "high" },
+  { service: "Tumblr", cnameSuffix: ".tumblr.com", fingerprint: "There's nothing here", severity: "high" },
+  { service: "WordPress", cnameSuffix: ".wordpress.com", fingerprint: "Do you want to register", severity: "medium" },
+  { service: "Zendesk", cnameSuffix: ".zendesk.com", fingerprint: "Help Center Closed", severity: "high" },
+  { service: "Surge.sh", cnameSuffix: ".surge.sh", fingerprint: "project not found", severity: "high" },
+  { service: "Netlify", cnameSuffix: ".netlify.app", fingerprint: "Not Found - Request ID", severity: "high" },
+  { service: "Azure", cnameSuffix: ".azurewebsites.net", fingerprint: "404 Web Site not found", severity: "high" },
+  { service: "AWS CloudFront", cnameSuffix: ".cloudfront.net", fingerprint: "Bad request", severity: "medium" },
+  { service: "S3 Bucket", cnameSuffix: ".s3.amazonaws.com", fingerprint: "NoSuchBucket", severity: "critical" },
+];
 
 export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit } = ctx;
@@ -124,6 +140,50 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   } catch {
     emit({ type: "log", message: "Could not retrieve TXT records" });
+  }
+
+  // ── CNAME subdomain takeover check ─────────────────────────────────────────
+  // Check if CNAME points to a service that shows "unclaimed" fingerprint
+  try {
+    const cnames = await dns.resolveCname(hostname).catch(() => [] as string[]);
+    for (const cname of cnames) {
+      const matched = TAKEOVER_FINGERPRINTS.find(fp => cname.toLowerCase().endsWith(fp.cnameSuffix));
+      if (!matched) continue;
+
+      // Actually fetch the CNAME target URL to check for the takeover fingerprint
+      const cnameUrl = `https://${hostname}`;
+      const cnameRes = await safeFetch(cnameUrl, {}, 8000);
+      const cnameBody = cnameRes ? await cnameRes.text().catch(() => "") : "";
+
+      if (cnameBody.toLowerCase().includes(matched.fingerprint.toLowerCase())) {
+        findings.push({
+          title: `Subdomain Takeover via ${matched.service}: ${hostname}`,
+          category: "Subdomain Takeover",
+          severity: matched.severity,
+          endpoint: `https://${hostname}`,
+          description: `The subdomain ${hostname} has a CNAME record pointing to ${cname} (${matched.service}), but the target service is unclaimed. An attacker can register this ${matched.service} resource and serve arbitrary content from your domain — enabling session hijacking, phishing, and cookie theft.`,
+          evidence: [
+            `CNAME: ${hostname} → ${cname}`,
+            `Service: ${matched.service}`,
+            `Takeover fingerprint confirmed: "${matched.fingerprint}"`,
+            `GET ${cnameUrl}`,
+            `HTTP ${cnameRes?.status ?? "N/A"} — response body contains unclaimed fingerprint`,
+            `Response snippet: ${cnameBody.slice(0, 300)}`,
+          ].join("\n"),
+          recommended_fix: `Remove the dangling CNAME record for ${hostname} immediately, or claim the ${matched.service} resource. Implement a monitoring process for CNAME records pointing to third-party services.`,
+          cvss_score: matched.severity === "critical" ? 9.3 : 8.2,
+          cwe_id: "CWE-350",
+          scanner_name: "Bug-Finder/DNS",
+          scanner_family: "network",
+          confidence: 0.95,
+        });
+        emit({ type: "log", message: `  [TAKEOVER CONFIRMED] ${hostname} → ${cname} (${matched.service}) — fingerprint matched` });
+      } else {
+        emit({ type: "log", message: `  CNAME ${hostname} → ${cname} (${matched.service}) — fingerprint not matched, no takeover` });
+      }
+    }
+  } catch {
+    emit({ type: "log", message: "CNAME resolution failed — skipping takeover check" });
   }
 
   emit({
