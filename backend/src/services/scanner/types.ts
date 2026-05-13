@@ -13,10 +13,10 @@ export interface ScanFinding {
   scanner_name: string;
   scanner_family: string;
   confidence: number;
-  // Optional raw HTTP reproduction data — set when the scanner captures exact request/response
-  raw_request?: string;   // e.g. "GET /api/users HTTP/1.1\nHost: example.com\n..."
-  raw_response?: string;  // e.g. "HTTP/1.1 200 OK\nContent-Type: application/json\n\n{...}"
-  reproduction_curl?: string; // curl command for easy manual reproduction
+  source_location?: string;
+  raw_request?: string;
+  raw_response?: string;
+  reproduction_curl?: string;
 }
 
 export interface ScannerEvent {

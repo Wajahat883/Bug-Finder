@@ -44,6 +44,11 @@ import { runNucleiScan } from "./nuclei";
 import { runPlaywrightScan } from "./playwright";
 import { runOsintEnrichment } from "./osint";
 import { runCustomRules } from "./custom-rules";
+import { runDomBrowserScan } from "./dom-browser";
+import { isSuppressed } from "./fp-learner";
+import { isPathAllowed, rateAwareFetch as _rateAwareFetch } from "./scope-manager";
+import { findSourceLocation, indexRepo, formatSourceLocation } from "./source-mapper";
+import { notifyAllChannels } from "../notifications";
 import { runSsrfCheck } from "./ssrf";
 import { runOpenApiDiscovery } from "./openapi";
 import { runRawSmugglingCheck } from "./smuggling-raw";
@@ -65,8 +70,8 @@ export interface ScanJobOptions {
   sessionCookie?: string;
   authToken?: string;
   customHeaders?: Record<string, string>;
-  scopeHosts?: string[];
-  targetId?: string;        // used to load saved credentials from the vault
+  repoUrl?: string;
+  githubToken?: string;
 }
 
 // ─── Scanner Pipeline Definitions ────────────────────────────────────────────
@@ -90,8 +95,9 @@ const PIPELINE_QUICK = [
   { name: "Cloud & Container",       fn: (ctx: ScanContext) => runCloudCheck(ctx) },
   { name: "CORS",                    fn: (ctx: ScanContext) => runCorsCheck(ctx) },
   { name: "Port Scanner",            fn: (ctx: ScanContext) => runPortScan(ctx) },
+  { name: "DOM Browser Scan",        fn: (ctx: ScanContext) => runDomBrowserScan(ctx) },
   { name: "OSINT Enrichment",        fn: (ctx: ScanContext) => runOsintEnrichment(ctx) },
-  { name: "Custom Scanner Rules",    fn: (ctx: ScanContext) => runCustomRules(ctx.targetUrl, ctx) },
+  { name: "Custom Scanner Rules",    fn: (ctx: ScanContext) => runCustomRules(ctx.targetUrl) },
 ];
 
 const PIPELINE_STANDARD = [
@@ -175,6 +181,12 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
   try { normalizedEndpoint = new URL(finding.endpoint).origin + new URL(finding.endpoint).pathname; } catch { /* use as-is */ }
   const dedupKey = `${finding.title}||${normalizedEndpoint}`;
 
+  // Check suppression via FP learner patterns
+  if (await isSuppressed(finding.title, finding.endpoint, finding.scanner_name, finding.description)) {
+    logger.info({ title: finding.title }, "Finding suppressed by FP learner pattern — skipping");
+    return 0;
+  }
+
   // Check suppression rules — skip this finding entirely if a matching active rule exists
   if (await isSuppressionActive(dedupKey, targetUrl)) {
     logger.info({ dedupKey, targetUrl }, "Finding suppressed by rule — skipping");
@@ -255,6 +267,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     target_url: targetUrl,
     dedup_key: dedupKey,
     has_raw_evidence: (sev === "critical" || sev === "high") && finding.evidence.length > 200,
+    source_location: finding.source_location ?? null,
   });
 
   // For critical/high findings, store the complete untruncated evidence in a

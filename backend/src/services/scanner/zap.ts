@@ -1,124 +1,250 @@
+import { exec } from "child_process";
+import { logger } from "../../lib/logger";
 import { ScanContext, ScanFinding } from "./types";
 
-const ZAP_URL = process.env["ZAP_URL"] ?? "http://zap:8080";
-const ZAP_API = `${ZAP_URL}/JSON`;
+let isZapAvailable = false;
+let isZapStarting = false;
+let startupPromise: Promise<boolean> | null = null;
 
-async function zapGet(path: string): Promise<Record<string, unknown>> {
+export async function ensureZapRunning(): Promise<boolean> {
+  if (isZapAvailable) return true;
+  if (isZapStarting && startupPromise) return startupPromise;
+
+  const zapUrl = process.env["ZAP_URL"] ?? "http://localhost:8080";
+
+  // Step 1: Check if ZAP is already running
   try {
-    const res = await fetch(`${ZAP_API}/${path}`, { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) return {};
-    return await res.json() as Record<string, unknown>;
+    const res = await fetch(`${zapUrl}/JSON/core/view/version/`, { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      isZapAvailable = true;
+      logger.info({ zapUrl }, "OWASP ZAP is running");
+      return true;
+    }
   } catch {
-    return {};
+    logger.info({ zapUrl }, "ZAP not responding — attempting auto-start");
   }
+
+  isZapStarting = true;
+  startupPromise = startZapContainer(zapUrl);
+  isZapStarting = false;
+  return startupPromise;
 }
 
-async function waitForSpider(scanId: string, maxWait = 120000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    const status = await zapGet(`spider/view/status/?scanId=${scanId}`);
-    if (Number(status["status"]) >= 100) return;
-    await new Promise((r) => setTimeout(r, 2000));
+async function startZapContainer(zapUrl: string): Promise<boolean> {
+  const zapPort = new URL(zapUrl).port || "8080";
+
+  // Try Docker
+  logger.info("Attempting to start ZAP via Docker...");
+  try {
+    await execShell(`docker run -d --name zap-scanner -p ${zapPort}:8080 -i ghcr.io/zaproxy/zaproxy:stable zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.disablekey=true 2>/dev/null`);
+    logger.info("ZAP Docker container started — waiting for readiness...");
+
+    // Wait up to 30s for ZAP to be ready
+    for (let i = 0; i < 15; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const res = await fetch(`${zapUrl}/JSON/core/view/version/`, { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          isZapAvailable = true;
+          logger.info({ zapUrl }, "OWASP ZAP is now ready");
+          return true;
+        }
+      } catch { /* still starting */ }
+      logger.info(`Waiting for ZAP... (${(i + 1) * 2}s)`);
+    }
+    logger.warn("ZAP container started but not responding within 30s");
+    return false;
+  } catch (dockerErr) {
+    logger.warn({ dockerErr }, "Docker not available — trying local ZAP installation...");
   }
-}
 
-async function waitForActiveScan(scanId: string, maxWait = 300000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < maxWait) {
-    const status = await zapGet(`ascan/view/status/?scanId=${scanId}`);
-    if (Number(status["status"]) >= 100) return;
-    await new Promise((r) => setTimeout(r, 3000));
-  }
-}
+  // Try local ZAP binary
+  try {
+    const zapPath = process.env["ZAP_PATH"] ?? "zap.sh";
+    exec(`${zapPath} -daemon -port ${zapPort} -config api.disablekey=true &`, (err) => {
+      if (err) logger.warn({ err }, "Failed to start local ZAP");
+    });
 
-const ZAP_RISK_MAP: Record<string, "critical" | "high" | "medium" | "low" | "info"> = {
-  "3": "high",
-  "2": "medium",
-  "1": "low",
-  "0": "info",
-};
+    for (let i = 0; i < 10; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const res = await fetch(`${zapUrl}/JSON/core/view/version/`, { signal: AbortSignal.timeout(3000) });
+        if (res.ok) {
+          isZapAvailable = true;
+          return true;
+        }
+      } catch { /* still starting */ }
+    }
+  } catch { /* no local ZAP */ }
 
-const ZAP_CVSS_MAP: Record<string, number> = {
-  "3": 7.5,
-  "2": 5.0,
-  "1": 3.1,
-  "0": 0.0,
-};
-
-function zapAlertToFinding(alert: Record<string, unknown>, targetUrl: string): ScanFinding {
-  const risk = String(alert["riskcode"] ?? "0");
-  const severity = ZAP_RISK_MAP[risk] ?? "info";
-
-  return {
-    title: String(alert["name"] ?? "Unknown Finding"),
-    category: String(alert["tags"] ? "Web Application" : "Web Application"),
-    severity,
-    endpoint: String(alert["url"] ?? targetUrl),
-    description: String(alert["description"] ?? ""),
-    evidence: alert["evidence"] ? String(alert["evidence"]) : `ZAP alert at ${String(alert["url"] ?? targetUrl)}`,
-    recommended_fix: String(alert["solution"] ?? "Apply vendor-recommended security patches."),
-    cvss_score: ZAP_CVSS_MAP[risk] ?? 0,
-    cwe_id: alert["cweid"] ? `CWE-${alert["cweid"]}` : "CWE-200",
-    scanner_name: "Bug-Finder/ZAP",
-    scanner_family: "active",
-    confidence: risk === "3" ? 0.90 : risk === "2" ? 0.75 : 0.60,
-  };
+  logger.warn("OWASP ZAP not available — active scanning will use fallback HTTP probes");
+  return false;
 }
 
 export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
-  const { targetUrl, emit, profile } = ctx;
+  const findings: ScanFindings[] = [];
+  const zapUrl = process.env["ZAP_URL"] ?? "http://localhost:8080";
 
-  emit({ type: "engine_start", engine: "Bug-Finder/ZAP", message: "Starting OWASP ZAP active scan" });
+  const available = await ensureZapRunning();
 
-  // Check ZAP is reachable
-  const version = await zapGet("core/view/version/");
-  if (!version["version"]) {
-    emit({ type: "log", message: "ZAP not reachable — skipping active scan" });
-    return [];
+  if (!available) {
+    // Fallback: run basic HTTP probe checks instead of full ZAP scan
+    return runZapFallback(ctx);
   }
 
-  emit({ type: "log", message: `ZAP ${version["version"]} connected` });
+  ctx.emit({ type: "engine_start", engine: "OWASP ZAP", message: "Running ZAP spider + active scan..." });
 
-  // Spider the target first
-  emit({ type: "log", message: `Spidering ${targetUrl}...` });
-  const spiderResp = await zapGet(`spider/action/scan/?url=${encodeURIComponent(targetUrl)}&maxChildren=10&recurse=true`);
-  const spiderId = String(spiderResp["scan"] ?? "");
-  if (spiderId) await waitForSpider(spiderId, 60000);
+  try {
+    // Start spider
+    const spiderRes = await fetch(`${zapUrl}/JSON/spider/action/scan/?url=${encodeURIComponent(ctx.targetUrl)}&maxChildren=3`, {
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!spiderRes.ok) throw new Error("Spider failed to start");
 
-  emit({ type: "log", message: "Spider complete — starting active scan" });
+    const spiderData = await spiderRes.json() as Record<string, unknown>;
+    const spiderId = String(spiderData["scan"] ?? "");
 
-  // Active scan (skip for quick profile — only passive)
-  if (profile !== "quick") {
-    const scanStrength = profile === "deep" ? "HIGH" : "MEDIUM";
-    const ascanResp = await zapGet(
-      `ascan/action/scan/?url=${encodeURIComponent(targetUrl)}&recurse=true&scanPolicyName=&method=GET&postData=&contextId=&strength=${scanStrength}`
-    );
-    const ascanId = String(ascanResp["scan"] ?? "");
-    if (ascanId) {
-      const maxWait = profile === "deep" ? 300000 : 120000;
-      await waitForActiveScan(ascanId, maxWait);
-      emit({ type: "log", message: "Active scan complete" });
+    // Wait for spider
+    let spiderDone = false;
+    for (let i = 0; i < 30 && !spiderDone; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const statusRes = await fetch(`${zapUrl}/JSON/spider/view/status/?scanId=${spiderId}`, { signal: AbortSignal.timeout(5000) });
+      if (statusRes.ok) {
+        const statusData = await statusRes.json() as Record<string, unknown>;
+        const progress = String(statusData["status"] ?? "0");
+        if (i % 5 === 0) ctx.emit({ type: "log", message: `  ZAP Spider progress: ${progress}%` });
+        if (progress === "100") spiderDone = true;
+      }
     }
+
+    // Active scan
+    const scanRes = await fetch(`${zapUrl}/JSON/ascan/action/scan/?url=${encodeURIComponent(ctx.targetUrl)}`, {
+      signal: AbortSignal.timeout(10000),
+    });
+    if (scanRes.ok) {
+      const scanData = await scanRes.json() as Record<string, unknown>;
+      const scanId = String(scanData["scan"] ?? "");
+
+      let scanDone = false;
+      for (let i = 0; i < 60 && !scanDone; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const statusRes = await fetch(`${zapUrl}/JSON/ascan/view/status/?scanId=${scanId}`, { signal: AbortSignal.timeout(5000) });
+        if (statusRes.ok) {
+          const statusData = await statusRes.json() as Record<string, unknown>;
+          const progress = String(statusData["status"] ?? "0");
+          if (i % 5 === 0) ctx.emit({ type: "log", message: `  ZAP Active Scan: ${progress}%` });
+          if (progress === "100") scanDone = true;
+        }
+      }
+
+      // Get alerts
+      const alertsRes = await fetch(`${zapUrl}/JSON/core/view/alerts/?baseurl=${encodeURIComponent(ctx.targetUrl)}`, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (alertsRes.ok) {
+        const alertsData = await alertsRes.json() as { alerts: Array<Record<string, unknown>> };
+
+        const seen = new Set<string>();
+        for (const alert of (alertsData["alerts"] ?? [])) {
+          const dedupKey = `${alert["alert"] ?? ""}|${alert["url"] ?? ""}`;
+          if (seen.has(dedupKey)) continue;
+          seen.add(dedupKey);
+
+          findings.push({
+            title: String(alert["alert"] ?? "ZAP Finding"),
+            category: String(alert["alert"] ?? "Security").slice(0, 50),
+            severity: mapZapRisk(alert["risk"]),
+            endpoint: String(alert["url"] ?? ctx.targetUrl),
+            description: String(alert["description"] ?? ""),
+            evidence: `ZAP Alert: ${alert["alert"]}\nURL: ${alert["url"]}\nParameter: ${alert["param"] ?? "N/A"}\nEvidence: ${alert["evidence"] ?? "N/A"}\nAttack: ${alert["attack"] ?? "N/A"}`,
+            recommended_fix: String(alert["solution"] ?? "Review and fix based on OWASP guidance"),
+            cvss_score: mapZapToCvss(alert["risk"]),
+            cwe_id: String(alert["cweid"] ?? String(alert["pluginId"] ?? "N/A")),
+            scanner_name: `zap/${alert["pluginId"] ?? "active"}`,
+            scanner_family: "zap",
+            confidence: 0.92,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    logger.error({ err }, "ZAP scan error — running fallback");
+    return runZapFallback(ctx);
   }
 
-  // Retrieve alerts
-  const alertsResp = await zapGet(`core/view/alerts/?baseurl=${encodeURIComponent(targetUrl)}&start=0&count=200`);
-  const alerts = (alertsResp["alerts"] as Record<string, unknown>[] | undefined) ?? [];
-
-  // Deduplicate by name+url
-  const seen = new Set<string>();
-  const findings: ScanFinding[] = [];
-  for (const alert of alerts) {
-    const key = `${alert["name"]}|${alert["url"]}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    findings.push(zapAlertToFinding(alert, targetUrl));
-  }
-
-  emit({ type: "log", message: `ZAP found ${findings.length} alerts` });
-
-  // Clean up ZAP session
-  await zapGet("core/action/deleteAllAlerts/");
-
+  ctx.emit({ type: "engine_done", engine: "OWASP ZAP", message: `ZAP scan complete — ${findings.length} finding(s)` });
   return findings;
+}
+
+function mapZapRisk(risk: unknown): ScanFinding["severity"] {
+  const r = String(risk ?? "").toLowerCase();
+  if (r === "high" || r === "3") return "high";
+  if (r === "medium" || r === "2") return "medium";
+  if (r === "low" || r === "1") return "low";
+  if (r === "informational" || r === "0") return "info";
+  return "medium";
+}
+
+function mapZapToCvss(risk: unknown): number {
+  const r = String(risk ?? "").toLowerCase();
+  if (r === "high" || r === "3") return 7.5;
+  if (r === "medium" || r === "2") return 5.0;
+  if (r === "low" || r === "1") return 3.0;
+  return 1.0;
+}
+
+async function runZapFallback(ctx: ScanContext): Promise<ScanFinding[]> {
+  const findings: ScanFinding[] = [];
+  ctx.emit({ type: "engine_start", engine: "ZAP Fallback", message: "Running basic HTTP vulnerability probes..." });
+
+  const base = new URL(ctx.targetUrl);
+  const probes = [
+    { path: "/.env", title: "Environment File Exposure", severity: "critical", cwe: "CWE-538" },
+    { path: "/.git/config", title: "Git Repository Exposure", severity: "high", cwe: "CWE-538" },
+    { path: "/wp-config.php.bak", title: "WordPress Config Backup", severity: "critical", cwe: "CWE-538" },
+    { path: "/phpinfo.php", title: "PHP Info Exposure", severity: "medium", cwe: "CWE-200" },
+    { path: "/actuator/env", title: "Spring Actuator Exposure", severity: "high", cwe: "CWE-200" },
+    { path: "/swagger.json", title: "API Documentation Exposure", severity: "low", cwe: "CWE-200" },
+    { path: "/graphql", title: "GraphQL Endpoint", severity: "info", cwe: "CWE-200" },
+    { path: "/metrics", title: "Metrics Endpoint", severity: "low", cwe: "CWE-200" },
+  ];
+
+  for (const probe of probes) {
+    try {
+      const url = `${base.protocol}//${base.host}${probe.path}`;
+      const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(6000), redirect: "manual" });
+      if (res.status === 200) {
+        const body = await res.text().catch(() => "");
+        if (body.length > 10) {
+          findings.push({
+            title: probe.title,
+            category: "Security Misconfiguration",
+            severity: probe.severity as ScanFinding["severity"],
+            endpoint: url,
+            description: `Sensitive path ${probe.path} is publicly accessible.`,
+            evidence: `HTTP 200 — ${body.length} bytes: ${body.slice(0, 300)}`,
+            recommended_fix: "Restrict access to sensitive paths via web server configuration.",
+            cvss_score: probe.severity === "critical" ? 9.1 : probe.severity === "high" ? 7.5 : 5.0,
+            cwe_id: probe.cwe,
+            scanner_name: "zap-fallback",
+            scanner_family: "zap",
+            confidence: 0.85,
+          });
+          ctx.emit({ type: "finding", finding: findings[findings.length - 1] });
+        }
+      }
+    } catch { /* skip unreachable */ }
+  }
+
+  ctx.emit({ type: "engine_done", engine: "ZAP Fallback", message: `Fallback scan complete — ${findings.length} issue(s)` });
+  return findings;
+}
+
+function execShell(cmd: string): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    exec(cmd, { timeout: 30000 }, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout, stderr });
+    });
+  });
 }

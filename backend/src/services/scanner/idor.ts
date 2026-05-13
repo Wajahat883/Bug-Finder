@@ -12,6 +12,25 @@ const IDOR_PATH_PATTERNS = [
   { path: "/api/invoices/{id}", label: "Invoice object" },
 ];
 
+// Extracts ownership fields from a JSON response body — returns the owner identity if present
+function extractOwnerField(body: string): string | null {
+  try {
+    const obj = JSON.parse(body) as Record<string, unknown>;
+    const ownerKeys = ["user_id", "userId", "owner_id", "ownerId", "owner", "created_by", "createdBy", "author_id", "authorId"];
+    for (const key of ownerKeys) {
+      if (obj[key] !== undefined && obj[key] !== null) return String(obj[key]);
+      // Handle nested data.attributes style
+      const data = obj["data"] as Record<string, unknown> | undefined;
+      if (data && typeof data === "object" && data[key] !== undefined) return String(data[key]);
+      const attrs = (data?.["attributes"] ?? obj["attributes"]) as Record<string, unknown> | undefined;
+      if (attrs && typeof attrs === "object" && attrs[key] !== undefined) return String(attrs[key]);
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
 // Extracts all UUID v4, MongoDB ObjectIDs, and Snowflake-style IDs from a response body
 function extractAlternateIds(body: string): string[] {
   const ids = new Set<string>();
@@ -98,39 +117,86 @@ export async function runIdorCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       continue;
     }
 
-    // ── Ownership cross-check: confirm responses contain different data ────
-    const distinctBodies = new Set(successfulResponses.map(r => r.body.slice(0, 200))).size;
+    // ── Ownership cross-check: extract owner fields and compare across IDs ────
+    // Enterprise-grade IDOR proof: if two IDs return data with different owner fields,
+    // the authenticated user is accessing objects they don't own.
     const allReturnData = successfulResponses.length >= 2;
 
     if (allReturnData) {
+      // Try to determine current user's identity from /api/me or /api/profile
+      let currentUserId: string | null = null;
+      for (const meEndpoint of [`${base.origin}/api/me`, `${base.origin}/api/profile`, `${base.origin}/api/users/me`]) {
+        const meRes = await ctxFetch(ctx, meEndpoint, { headers: { Accept: "application/json" } });
+        if (meRes && meRes.status === 200) {
+          const meBody = await meRes.text().catch(() => "");
+          currentUserId = extractOwnerField(meBody);
+          if (!currentUserId) {
+            // Try id/uuid directly in the /me response
+            try {
+              const meObj = JSON.parse(meBody) as Record<string, unknown>;
+              const idVal = meObj["id"] ?? meObj["uuid"] ?? meObj["user_id"];
+              if (idVal) currentUserId = String(idVal);
+            } catch { /* not JSON */ }
+          }
+          if (currentUserId) { emit({ type: "log", message: `  Current user identity: ${currentUserId}` }); break; }
+        }
+      }
+
+      // Extract owner fields from each response
+      const ownerFields = successfulResponses.map(r => ({
+        id: r.id,
+        owner: extractOwnerField(r.body),
+        body: r.body,
+        bodyLen: r.bodyLen,
+        status: r.status,
+      }));
+
+      const uniqueOwners = new Set(ownerFields.map(o => o.owner).filter(Boolean));
+      const crossUserConfirmed =
+        // Owner fields explicitly differ across IDs — proof of cross-user access
+        (uniqueOwners.size > 1) ||
+        // Owner field matches a known different user (not current user)
+        (currentUserId !== null && ownerFields.some(o => o.owner !== null && o.owner !== currentUserId));
+
       const evidenceParts = [
         `Probed IDs with auth credentials: ${successfulResponses.map(r => r.id).join(", ")}`,
         `All returned HTTP 200 with data:`,
-        ...successfulResponses.map(r => `  ID ${r.id} (${r.bodyLen} bytes): ${r.body.slice(0, 120)}`),
+        ...ownerFields.map(o => `  ID ${o.id} (${o.bodyLen}b) owner_field=${o.owner ?? "not extracted"}: ${o.body.slice(0, 100)}`),
       ];
 
-      if (hasAuth) {
-        evidenceParts.push(``, `Two-session test: unauthenticated request returned HTTP ${unauthRes?.status ?? "no response"} — objects require auth but are accessible to any authenticated user via ID enumeration`);
+      if (currentUserId) {
+        evidenceParts.push(``, `Authenticated user identity: ${currentUserId}`);
+        const foreignOwner = ownerFields.find(o => o.owner !== null && o.owner !== currentUserId);
+        if (foreignOwner) {
+          evidenceParts.push(`CROSS-USER ACCESS CONFIRMED: ID ${foreignOwner.id} belongs to owner "${foreignOwner.owner}" — not the authenticated user ("${currentUserId}")`);
+        }
       }
 
-      const confidence = distinctBodies >= 2 ? 0.82 : 0.65;
-      const severity = distinctBodies >= 2 ? "high" as const : "medium" as const;
+      evidenceParts.push(``, `Unauthenticated probe: HTTP ${unauthRes?.status ?? "no response"} — endpoint requires auth but not ownership validation`);
+
+      const confidence = crossUserConfirmed ? 0.95 : uniqueOwners.size > 1 ? 0.82 : 0.65;
+      const severity = crossUserConfirmed ? "critical" as const : "high" as const;
 
       findings.push({
-        title: `IDOR: ${pattern.label} Accessible via Sequential ID Enumeration`,
+        title: crossUserConfirmed
+          ? `IDOR Confirmed: Cross-User Data Access on ${pattern.label}`
+          : `IDOR: ${pattern.label} Accessible via Sequential ID Enumeration`,
         category: "Broken Access Control",
         severity,
         endpoint: url1,
-        description: `The ${pattern.label} endpoint returns data for sequential numeric IDs. ${distinctBodies >= 2 ? "Different data was returned for different IDs, confirming objects belonging to different users are accessible." : "Multiple IDs return data — ownership validation may be absent."} An authenticated attacker can enumerate all objects by iterating IDs.`,
+        description: crossUserConfirmed
+          ? `The authenticated user can access ${pattern.label} objects belonging to other users by changing the numeric ID. Owner field comparison confirms the accessed objects are owned by a different identity. This is a confirmed cross-user IDOR with proven data leakage.`
+          : `The ${pattern.label} endpoint returns data for sequential numeric IDs without apparent ownership validation. Multiple distinct objects are accessible to the authenticated user via ID enumeration.`,
         evidence: evidenceParts.join("\n"),
         recommended_fix: "Verify object ownership on every request: ensure the authenticated user owns the requested resource. Use UUIDs instead of sequential integers. Implement row-level authorization in database queries.",
-        cvss_score: 7.5,
+        cvss_score: crossUserConfirmed ? 8.8 : 7.5,
         cwe_id: "CWE-639",
         scanner_name: "Bug-Finder/IDOR",
         scanner_family: "web",
         confidence,
+        reproduction_curl: curlReproducer("GET", url1, { Accept: "application/json", ...ctx.authHeaders }),
       });
-      emit({ type: "log", message: `  [IDOR] Sequential IDs work on ${pattern.path} (confidence: ${confidence})` });
+      emit({ type: "log", message: `  [IDOR] ${crossUserConfirmed ? "CROSS-USER ACCESS CONFIRMED" : "Sequential IDs work"} on ${pattern.path} (confidence: ${confidence})` });
     }
   }
 

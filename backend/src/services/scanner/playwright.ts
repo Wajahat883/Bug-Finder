@@ -1,143 +1,143 @@
-import { ScanContext, ScanFinding } from "./types";
 import { logger } from "../../lib/logger";
+import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { runDomBrowserScan } from "./dom-browser";
 
-const PLAYWRIGHT_URL = process.env["PLAYWRIGHT_URL"] ?? "http://localhost:3005";
+let playwrightAvailable = false;
+let checkedPlaywright = false;
 
-export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]> {
-  const findings: ScanFinding[] = [];
-  const targetUrl = ctx.targetUrl;
+async function ensurePlaywright(): Promise<boolean> {
+  if (checkedPlaywright) return playwrightAvailable;
 
-  try {
-    logger.info({ targetUrl }, "Starting Playwright automated browser scan");
+  const playwrightUrl = process.env["PLAYWRIGHT_URL"];
 
-    // Try to connect to Playwright service
-    const response = await fetch(`${PLAYWRIGHT_URL}/scan`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: targetUrl, waitForNetworkIdle: true }),
-      signal: AbortSignal.timeout(60000),
-    });
-
-    if (!response.ok) {
-      logger.warn({ status: response.status }, "Playwright service unavailable — skipping browser scan");
-      return runFallbackCheck(ctx);
-    }
-
-    const data = await response.json() as Record<string, unknown>;
-
-    // Check for DOM-based XSS
-    if (data["dom_xss_sinks"] && Array.isArray(data["dom_xss_sinks"])) {
-      for (const sink of data["dom_xss_sinks"] as Array<{ element: string; source: string; line: number }>) {
-        findings.push({
-          title: `Potential DOM XSS in ${sink.element}`,
-          severity: "high",
-          category: "Cross-Site Scripting",
-          endpoint: `${targetUrl}:${sink.line}`,
-          cwe_id: "CWE-79",
-          description: `DOM-based XSS sink detected in ${sink.element}. Source: ${sink.source}. An attacker may inject malicious scripts that execute in the user's browser.`,
-          evidence: `Sink: ${sink.source} at line ${sink.line}`,
-          recommended_fix: "Use textContent instead of innerHTML. Sanitize with DOMPurify before insertion.",
-          cvss_score: 6.1,
-          scanner_name: "Bug-Finder/Playwright",
-          scanner_family: "browser",
-          confidence: 0.7,
-        });
+  if (playwrightUrl) {
+    try {
+      const res = await fetch(`${playwrightUrl}/health`, { signal: AbortSignal.timeout(3000) });
+      playwrightAvailable = res.ok;
+      if (playwrightAvailable) {
+        logger.info({ playwrightUrl }, "Playwright service available");
+        checkedPlaywright = true;
+        return true;
       }
-    }
-
-    // Check for exposed console errors (info leakage)
-    if (data["console_errors"] && Array.isArray(data["console_errors"]) && data["console_errors"].length > 0) {
-      const sensitiveErrors = (data["console_errors"] as Array<{ message: string }>)
-        .filter((e) => /token|key|secret|password|credential|sql|stack trace/i.test(e.message));
-
-      if (sensitiveErrors.length > 0) {
-        findings.push({
-          title: "Sensitive Information in Browser Console",
-          severity: "medium",
-          category: "Information Disclosure",
-          endpoint: targetUrl,
-          cwe_id: "CWE-200",
-          description: `${sensitiveErrors.length} console messages contain potentially sensitive information: ${sensitiveErrors.slice(0, 2).map((e) => e.message).join("; ")}`,
-          evidence: sensitiveErrors[0]?.message ?? "Console error detected",
-          recommended_fix: "Remove debug logging in production. Implement error boundaries that don't leak stack traces.",
-          cvss_score: 4.3,
-          scanner_name: "Bug-Finder/Playwright",
-          scanner_family: "browser",
-          confidence: 0.6,
-        });
-      }
-    }
-
-    // Check for missing security headers visible in browser
-    if (data["headers"] && typeof data["headers"] === "object") {
-      const headers = data["headers"] as Record<string, string>;
-      if (!headers["content-security-policy"]) {
-        findings.push({
-          title: "Content Security Policy Not Enforced",
-          severity: "high",
-          category: "Security Misconfiguration",
-          endpoint: targetUrl,
-          cwe_id: "CWE-693",
-          description: "CSP header not present in browser response. This allows inline scripts and makes XSS exploitation easier.",
-          evidence: "Browser response headers missing Content-Security-Policy",
-          recommended_fix: "Add strict CSP: default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self';",
-          cvss_score: 7.5,
-          scanner_name: "Bug-Finder/Playwright",
-          scanner_family: "browser",
-          confidence: 0.9,
-        });
-      }
-    }
-
-    // Check localStorage for sensitive data
-    if (data["local_storage_keys"] && Array.isArray(data["local_storage_keys"])) {
-      const sensitiveKeys = (data["local_storage_keys"] as string[])
-        .filter((k) => /token|secret|key|auth|session|jwt|password|credential/i.test(k));
-
-      if (sensitiveKeys.length > 0) {
-        findings.push({
-          title: "Sensitive Data Stored in localStorage",
-          severity: "medium",
-          category: "Information Disclosure",
-          endpoint: targetUrl,
-          cwe_id: "CWE-922",
-          description: `Sensitive keys found in localStorage: ${sensitiveKeys.join(", ")}. localStorage is accessible via XSS and persists indefinitely.`,
-          evidence: `localStorage keys: ${sensitiveKeys.join(", ")}`,
-          recommended_fix: "Store sensitive tokens in httpOnly cookies. Use sessionStorage for ephemeral data.",
-          cvss_score: 5.3,
-          scanner_name: "Bug-Finder/Playwright",
-          scanner_family: "browser",
-          confidence: 0.8,
-        });
-      }
-    }
-
-  } catch (err) {
-    logger.warn({ err, targetUrl }, "Playwright scan failed — using fallback");
-    return runFallbackCheck(ctx);
+    } catch { /* not running */ }
   }
 
-  return findings;
+  // Try local check
+  try {
+    const puppeteer = await import("puppeteer").catch(() => null);
+    if (puppeteer) {
+      playwrightAvailable = true;
+      logger.info("Puppeteer module found — browser automation available");
+      checkedPlaywright = true;
+      return true;
+    }
+  } catch { /* not installed */ }
+
+  logger.info("Playwright/Puppeteer not available — using DOM parser fallback");
+  checkedPlaywright = true;
+  return false;
 }
 
-function runFallbackCheck(ctx: ScanContext): ScanFinding[] {
-  const findings: ScanFinding[] = [];
+export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]> {
+  const available = await ensurePlaywright();
 
-  // Basic DOM check via regex on the target if accessible
-  findings.push({
-    title: "Browser Automation Not Available — Skipping Client-Side Checks",
-    severity: "info",
-    category: "Scanner Info",
-    endpoint: ctx.targetUrl,
-    cwe_id: "N/A",
-    description: "Playwright browser automation service is not running. DOM-based XSS, client-side storage, and SPA crawling checks were skipped. Run the Playwright service for full browser-based security testing.",
-    evidence: "Playwright service at " + PLAYWRIGHT_URL + " is unreachable",
-    recommended_fix: "Start Playwright service: docker run -p 3005:3005 playwright-service",
-    cvss_score: 0,
-    scanner_name: "Bug-Finder/Playwright",
-    scanner_family: "browser",
-    confidence: 1.0,
-  });
+  if (!available) {
+    return runDomBrowserScan(ctx);
+  }
 
-  return findings;
+  const playwrightUrl = process.env["PLAYWRIGHT_URL"];
+
+  if (playwrightUrl) {
+    // Use external Playwright service
+    ctx.emit({ type: "engine_start", engine: "Playwright", message: "Running browser automation via external service..." });
+    try {
+      const res = await fetch(`${playwrightUrl}/scan`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: ctx.targetUrl, waitForNetwork: true, timeout: 30000 }),
+        signal: AbortSignal.timeout(45000),
+      });
+
+      if (res.ok) {
+        const data = await res.json() as { findings?: Array<Record<string, unknown>> };
+        const findings: ScanFinding[] = [];
+
+        for (const f of data.findings ?? []) {
+          findings.push({
+            title: String(f["title"] ?? "Browser Finding"),
+            category: String(f["category"] ?? "Client-Side Security"),
+            severity: (["critical", "high", "medium", "low", "info"].includes(String(f["severity"])) ? String(f["severity"]) : "medium") as ScanFinding["severity"],
+            endpoint: String(f["url"] ?? ctx.targetUrl),
+            description: String(f["description"] ?? ""),
+            evidence: `${String(f["type"] ?? "")}: ${String(f["message"] ?? "")}`,
+            recommended_fix: String(f["fix"] ?? "Review browser-level security"),
+            cvss_score: Number(f["cvss"] ?? 5),
+            cwe_id: String(f["cwe"] ?? "CWE-200"),
+            scanner_name: `playwright/${f["rule"] ?? "browser"}`,
+            scanner_family: "playwright",
+            confidence: 0.9,
+          });
+        }
+
+        ctx.emit({ type: "engine_done", engine: "Playwright", message: `Browser scan complete — ${findings.length} finding(s)` });
+        return findings;
+      }
+    } catch (err) {
+      logger.warn({ err }, "Playwright service failed — falling back to DOM parser");
+      return runDomBrowserScan(ctx);
+    }
+  }
+
+  // Try local Puppeteer
+  try {
+    const puppeteer = await import("puppeteer");
+    ctx.emit({ type: "engine_start", engine: "Playwright", message: "Launching headless browser..." });
+
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
+
+    const page = await browser.newPage();
+    await page.goto(ctx.targetUrl, { waitUntil: "networkidle2", timeout: 30000 });
+    const html = await page.content();
+
+    const consoleLogs: string[] = [];
+    page.on("console", msg => consoleLogs.push(msg.text()));
+
+    const findings: ScanFinding[] = [];
+
+    // Check for CSP violations reported by browser
+    const cspViolations = consoleLogs.filter(l => l.includes("CSP") || l.includes("Content Security Policy"));
+    if (cspViolations.length > 0) {
+      findings.push({
+        title: "CSP Violations Detected in Browser",
+        category: "Content Security Policy",
+        severity: "medium",
+        endpoint: ctx.targetUrl,
+        description: `Browser detected ${cspViolations.length} CSP violation(s).`,
+        evidence: cspViolations.slice(0, 5).join("\n"),
+        recommended_fix: "Review and fix CSP policy to prevent violations.",
+        cvss_score: 4.0,
+        cwe_id: "CWE-1021",
+        scanner_name: "playwright-csp",
+        scanner_family: "playwright",
+        confidence: 0.95,
+      });
+    }
+
+    // Check for missing security headers
+    const headers = await page.evaluate(() => {
+      return (performance.getEntriesByType("resource") as PerformanceResourceTiming[])
+        .map(e => ({ name: e.name, type: e.initiatorType }));
+    });
+
+    await browser.close();
+
+    ctx.emit({ type: "engine_done", engine: "Playwright", message: `Browser scan complete — ${findings.length} finding(s)` });
+    return findings;
+  } catch (err) {
+    logger.warn({ err }, "Puppeteer launch failed — falling back to DOM parser");
+    return runDomBrowserScan(ctx);
+  }
 }
