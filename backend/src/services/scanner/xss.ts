@@ -123,7 +123,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "HTML-encode all user input before rendering: use escapeHtml() or a templating engine with auto-escaping. Add Content-Security-Policy: script-src 'self' to limit script execution.",
           cvss_score: domXssConfirmed ? 8.8 : 7.4,
           cwe_id: "CWE-79",
-          scanner_name: "Bug-Finder",
+          scanner_name: "Bug-Finder/XSS",
           scanner_family: "web",
           confidence: domXssConfirmed ? 0.98 : 0.92,
         });
@@ -191,7 +191,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "HTML-encode all values before inserting them into HTML — even values sourced from JSON bodies. Use auto-escaping templates and set Content-Security-Policy.",
           cvss_score: 7.4,
           cwe_id: "CWE-79",
-          scanner_name: "Bug-Finder",
+          scanner_name: "Bug-Finder/XSS",
           scanner_family: "web",
           confidence: 0.91,
         });
@@ -250,7 +250,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "HTML-encode all stored content before rendering. Implement a strict Content-Security-Policy. Sanitize all user input at the point of storage.",
         cvss_score: 9.0,
         cwe_id: "CWE-79",
-        scanner_name: "Bug-Finder",
+        scanner_name: "Bug-Finder/XSS",
         scanner_family: "web",
         confidence: 0.90,
       });
@@ -322,7 +322,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               recommended_fix: "HTML-encode all stored user content before rendering. Implement a strict Content-Security-Policy with script-src 'self'. Sanitize HTML at storage time using DOMPurify or equivalent. Audit all admin/email/PDF rendering pipelines for stored XSS vectors.",
               cvss_score: 9.3,
               cwe_id: "CWE-79",
-              scanner_name: "Bug-Finder",
+              scanner_name: "Bug-Finder/XSS",
               scanner_family: "web",
               confidence: 0.97,
             });
@@ -389,7 +389,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "HTML-encode all form field values before rendering. Use auto-escaping templates.",
           cvss_score: 7.4,
           cwe_id: "CWE-79",
-          scanner_name: "Bug-Finder",
+          scanner_name: "Bug-Finder/XSS",
           scanner_family: "web",
           confidence: 0.92,
         });
@@ -432,7 +432,7 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "HTML-encode all output. Use auto-escaping templates and Content-Security-Policy.",
         cvss_score: 7.4,
         cwe_id: "CWE-79",
-        scanner_name: "Bug-Finder",
+        scanner_name: "Bug-Finder/XSS",
         scanner_family: "web",
         confidence: 0.91,
       });

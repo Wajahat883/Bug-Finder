@@ -4,17 +4,17 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
   const { targetUrl, emit, discoveredEndpoints } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Subfinder/crt.sh", message: "Enumerating subdomains via certificate transparency" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Subdomains", message: "Enumerating subdomains via certificate transparency" });
 
   let hostname: string;
   try { hostname = new URL(targetUrl).hostname; } catch {
-    emit({ type: "engine_done", engine: "Subfinder/crt.sh", message: "Skipped — invalid URL" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: "Skipped — invalid URL" });
     return findings;
   }
 
   if (hostname === "localhost" || hostname.startsWith("127.") || hostname.endsWith(".replit.dev")) {
     emit({ type: "log", message: "Skipping subdomain enum for local/dev host" });
-    emit({ type: "engine_done", engine: "Subfinder/crt.sh", message: "Skipped (local host)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: "Skipped (local host)" });
     return findings;
   }
 
@@ -39,15 +39,15 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
         for (const sub of subdomains) {
           const prefix = sub.replace(`.${hostname}`, "").toLowerCase();
           if (sensitivePatterns.some(p => prefix.includes(p))) {
-            findings.push({ title: `Sensitive Subdomain Exposed: ${sub}`, category: "Attack Surface", severity: "medium", endpoint: `https://${sub}`, description: `The subdomain "${sub}" suggests a development, staging, or internal service.`, evidence: `Found via SecurityTrails\nSubdomain: ${sub}`, recommended_fix: `Restrict access to ${sub} via IP allowlisting or VPN.`, cvss_score: 5.3, cwe_id: "CWE-200", scanner_name: "SecurityTrails", scanner_family: "network", confidence: 0.85 });
+            findings.push({ title: `Sensitive Subdomain Exposed: ${sub}`, category: "Attack Surface", severity: "medium", endpoint: `https://${sub}`, description: `The subdomain "${sub}" suggests a development, staging, or internal service.`, evidence: `Found via SecurityTrails API\nSubdomain: ${sub}`, recommended_fix: `Restrict access to ${sub} via IP allowlisting or VPN.`, cvss_score: 5.3, cwe_id: "CWE-200", scanner_name: "Bug-Finder/Subdomains", scanner_family: "network", confidence: 0.85 });
             const subUrl = `https://${sub}`;
             if (!discoveredEndpoints.includes(subUrl)) discoveredEndpoints.push(subUrl);
           }
         }
         if (subdomains.size > 30) {
-          findings.push({ title: `Large Attack Surface: ${subdomains.size} Subdomains Discovered`, category: "Attack Surface", severity: "medium", endpoint: hostname, description: `SecurityTrails reports ${subdomains.size} subdomains. Each is a potential entry point.`, evidence: `SecurityTrails query for ${hostname}\nSubdomains:\n${[...subdomains].slice(0, 20).join("\n")}${subdomains.size > 20 ? `\n... and ${subdomains.size - 20} more` : ""}`, recommended_fix: "Audit all subdomains. Decommission unused ones.", cvss_score: 5.3, cwe_id: "CWE-200", scanner_name: "SecurityTrails", scanner_family: "network", confidence: 0.95 });
+          findings.push({ title: `Large Attack Surface: ${subdomains.size} Subdomains Discovered`, category: "Attack Surface", severity: "medium", endpoint: hostname, description: `SecurityTrails reports ${subdomains.size} subdomains. Each is a potential entry point.`, evidence: `SecurityTrails query for ${hostname}\nSubdomains:\n${[...subdomains].slice(0, 20).join("\n")}${subdomains.size > 20 ? `\n... and ${subdomains.size - 20} more` : ""}`, recommended_fix: "Audit all subdomains. Decommission unused ones.", cvss_score: 5.3, cwe_id: "CWE-200", scanner_name: "Bug-Finder/Subdomains", scanner_family: "network", confidence: 0.95 });
         }
-        emit({ type: "engine_done", engine: "Subfinder/crt.sh", message: `SecurityTrails: ${subdomains.size} subdomains, ${findings.length} issue(s)` });
+        emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: `SecurityTrails: ${subdomains.size} subdomains, ${findings.length} issue(s)` });
         return findings;
       }
     }
@@ -60,7 +60,7 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
   const res = await safeFetch(crtUrl, { headers: { "Accept": "application/json" } }, 15000);
   if (!res || res.status !== 200) {
     emit({ type: "log", message: "crt.sh unreachable or returned error" });
-    emit({ type: "engine_done", engine: "Subfinder/crt.sh", message: "Subdomain enum skipped (crt.sh unavailable)" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: "Subdomain enum skipped (crt.sh unavailable)" });
     return findings;
   }
 
@@ -69,7 +69,7 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
     certs = await res.json();
   } catch {
     emit({ type: "log", message: "Could not parse crt.sh response" });
-    emit({ type: "engine_done", engine: "Subfinder/crt.sh", message: "Parse error" });
+    emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: "Parse error" });
     return findings;
   }
 
@@ -127,7 +127,7 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
     }
   }
 
-  emit({ type: "engine_done", engine: "Subfinder/crt.sh", message: `Found ${subdomains.size} subdomains, ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: `Found ${subdomains.size} subdomains, ${findings.length} issue(s)` });
   return findings;
 }
 
@@ -190,7 +190,7 @@ export async function runWaybackCrawl(ctx: ScanContext): Promise<ScanFinding[]> 
         recommended_fix: "Check if these URLs are still accessible. Remove backup files from the web root and verify they cannot be downloaded.",
         cvss_score: 5.3,
         cwe_id: "CWE-538",
-        scanner_name: "Wayback Machine",
+        scanner_name: "Bug-Finder/Subdomains",
         scanner_family: "web",
         confidence: 0.75,
       });

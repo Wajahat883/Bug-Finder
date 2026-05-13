@@ -38,7 +38,7 @@ export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]
           evidence: `Sink: ${sink.source} at line ${sink.line}`,
           recommended_fix: "Use textContent instead of innerHTML. Sanitize with DOMPurify before insertion.",
           cvss_score: 6.1,
-          scanner_name: "playwright-dom-xss",
+          scanner_name: "Bug-Finder/Playwright",
           scanner_family: "browser",
           confidence: 0.7,
         });
@@ -61,7 +61,7 @@ export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]
           evidence: sensitiveErrors[0]?.message ?? "Console error detected",
           recommended_fix: "Remove debug logging in production. Implement error boundaries that don't leak stack traces.",
           cvss_score: 4.3,
-          scanner_name: "playwright-console",
+          scanner_name: "Bug-Finder/Playwright",
           scanner_family: "browser",
           confidence: 0.6,
         });
@@ -82,7 +82,7 @@ export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]
           evidence: "Browser response headers missing Content-Security-Policy",
           recommended_fix: "Add strict CSP: default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self';",
           cvss_score: 7.5,
-          scanner_name: "playwright-headers",
+          scanner_name: "Bug-Finder/Playwright",
           scanner_family: "browser",
           confidence: 0.9,
         });
@@ -105,7 +105,7 @@ export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]
           evidence: `localStorage keys: ${sensitiveKeys.join(", ")}`,
           recommended_fix: "Store sensitive tokens in httpOnly cookies. Use sessionStorage for ephemeral data.",
           cvss_score: 5.3,
-          scanner_name: "playwright-storage",
+          scanner_name: "Bug-Finder/Playwright",
           scanner_family: "browser",
           confidence: 0.8,
         });
@@ -134,7 +134,7 @@ function runFallbackCheck(ctx: ScanContext): ScanFinding[] {
     evidence: "Playwright service at " + PLAYWRIGHT_URL + " is unreachable",
     recommended_fix: "Start Playwright service: docker run -p 3005:3005 playwright-service",
     cvss_score: 0,
-    scanner_name: "playwright-fallback",
+    scanner_name: "Bug-Finder/Playwright",
     scanner_family: "browser",
     confidence: 1.0,
   });

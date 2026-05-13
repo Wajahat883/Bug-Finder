@@ -164,7 +164,7 @@ export async function runCsrfCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Set SameSite=Strict on all session cookies. Validate Origin header — reject any request where Origin does not match your domain. Add CSRF tokens to all state-changing forms.",
         cvss_score: corsPermissive ? 8.1 : 6.1,
         cwe_id: "CWE-352",
-        scanner_name: "Bug-Finder",
+        scanner_name: "Bug-Finder/CSRF",
         scanner_family: "web",
         confidence: corsPermissive ? 0.88 : 0.65,
       });

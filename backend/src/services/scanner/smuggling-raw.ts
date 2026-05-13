@@ -201,10 +201,11 @@ export async function runRawSmugglingCheck(ctx: ScanContext): Promise<ScanFindin
       `\r\n`;
     const followResp2 = await sendRaw(host, port, useTls, follow2);
 
+    // Only confirm via marker reflection — a bare 400 from the initial probe is not
+    // specific enough (any malformed POST returns 400) and causes false positives.
     const clteConfirmed =
       followResp2.toLowerCase().includes(SMUGGLE_MARKER.toLowerCase()) ||
-      followResp2.includes("smuggled-") ||
-      clteResp.includes("400") && !clteResp.includes("404"); // back-end parsed TE and rejected invalid method
+      followResp2.includes("smuggled-");
 
     emit({ type: "log", message: `CL-TE probe: response=${clteResp.slice(0, 20).replace(/\r\n/g, " ")} follow-up confirmed=${clteConfirmed}` });
 

@@ -53,9 +53,11 @@ router.get("/scan-jobs", async (req, res) => {
     }
 
     const col_ = col("scan_jobs");
-    const all = (await col_.find(query).sort({ created_at: -1 }).toArray()) as Array<Record<string, unknown>>;
-    const total = all.length;
-    const items = all.slice((page - 1) * pageSize, page * pageSize).map(formatJob);
+    const [all, total] = await Promise.all([
+      col_.find(query).sort({ created_at: -1 }).skip((page - 1) * pageSize).limit(pageSize).toArray() as Promise<Array<Record<string, unknown>>>,
+      (col_.countDocuments as (q: Record<string, unknown>) => Promise<number>)(query),
+    ]);
+    const items = all.map(formatJob);
 
     res.json({ items, total, page, page_size: pageSize });
   } catch (err) {

@@ -130,7 +130,6 @@ const PIPELINE_DEEP = [
   { name: "Request Smuggling",       fn: (ctx: ScanContext) => runRequestSmugglingCheck(ctx) },
   { name: "Smuggling (Raw TCP)",     fn: (ctx: ScanContext) => runRawSmugglingCheck(ctx) },
   { name: "Business Logic",          fn: (ctx: ScanContext) => runBusinessLogicCheck(ctx) },
-  { name: "SSRF",                    fn: (ctx: ScanContext) => runSsrfCheck(ctx) },
 ];
 
 function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled: boolean, bugBountyMode: boolean) {
@@ -154,10 +153,13 @@ function getPipeline(profile: string, validationEnabled: boolean, fuzzingEnabled
 
 async function saveFinding(jobId: string, targetUrl: string, finding: ScanFinding, userId?: string) {
   const sev = finding.severity;
-  const riskScore = sev === "critical" ? 90 + Math.floor(Math.random() * 10)
-    : sev === "high" ? 70 + Math.floor(Math.random() * 15)
-    : sev === "medium" ? 40 + Math.floor(Math.random() * 20)
-    : sev === "low" ? 15 + Math.floor(Math.random() * 15) : 5;
+  // Deterministic risk score: CVSS * 10, clamped to severity band, never random.
+  // This ensures the same finding always gets the same score across rescans.
+  const cvssBase = Math.round(finding.cvss_score * 10);
+  const riskScore = sev === "critical" ? Math.max(cvssBase, 90)
+    : sev === "high" ? Math.min(Math.max(cvssBase, 70), 89)
+    : sev === "medium" ? Math.min(Math.max(cvssBase, 40), 69)
+    : sev === "low" ? Math.min(Math.max(cvssBase, 10), 39) : 5;
 
   // Truncated evidence for the main findings collection (UI display)
   const evidenceTruncated = typeof finding.evidence === "string" && finding.evidence.length > 800

@@ -110,7 +110,7 @@ export async function runHeaderCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       recommended_fix: "Remove or redact the Server header in your web server configuration.",
       cvss_score: 3.7,
       cwe_id: "CWE-200",
-      scanner_name: "Bug-Finder",
+      scanner_name: "Bug-Finder/Headers",
       scanner_family: "web",
       confidence: 0.95,
     });
@@ -130,7 +130,7 @@ export async function runHeaderCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       recommended_fix: "Remove the X-Powered-By header (e.g., in Express: app.disable('x-powered-by')).",
       cvss_score: 3.1,
       cwe_id: "CWE-200",
-      scanner_name: "Bug-Finder",
+      scanner_name: "Bug-Finder/Headers",
       scanner_family: "web",
       confidence: 0.95,
     });
@@ -159,7 +159,7 @@ export async function runHeaderCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: check.recommended,
         cvss_score: check.cvss,
         cwe_id: check.cwe,
-        scanner_name: "Bug-Finder",
+        scanner_name: "Bug-Finder/Headers",
         scanner_family: "web",
         confidence: 0.95,
       });

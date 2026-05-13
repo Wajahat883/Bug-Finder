@@ -69,7 +69,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Disable external entity processing in your XML parser. In Java: factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true). In PHP: libxml_disable_entity_loader(true). Use a safe XML parsing library.",
         cvss_score: 9.8,
         cwe_id: "CWE-611",
-        scanner_name: "Bug-Finder",
+        scanner_name: "Bug-Finder/XXE",
         scanner_family: "web",
         confidence: 0.95,
       });
@@ -93,7 +93,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Disable external entity processing and DTD processing in your XML parser. Validate and sanitize all XML input.",
           cvss_score: 7.5,
           cwe_id: "CWE-611",
-          scanner_name: "Bug-Finder",
+          scanner_name: "Bug-Finder/XXE",
           scanner_family: "web",
           confidence: 0.6,
         });
@@ -122,7 +122,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Disable external entity and DTD processing in your SOAP/XML parser. Use an updated XML library with secure defaults.",
           cvss_score: 9.8,
           cwe_id: "CWE-611",
-          scanner_name: "Bug-Finder",
+          scanner_name: "Bug-Finder/XXE",
           scanner_family: "web",
           confidence: 0.95,
         });
@@ -151,7 +151,7 @@ export async function runXxeCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Disable external entity processing. Never process untrusted XML with DTD enabled.",
         cvss_score: 9.8,
         cwe_id: "CWE-611",
-        scanner_name: "Bug-Finder",
+        scanner_name: "Bug-Finder/XXE",
         scanner_family: "web",
         confidence: 0.95,
       });

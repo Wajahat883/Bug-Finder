@@ -40,8 +40,10 @@ export async function runApiAdvancedCheck(ctx: ScanContext): Promise<ScanFinding
 
         if (r.status === 200) {
           const body = await r.text().catch(() => "");
-          // Check if old version has less strict security
-          const hasNoAuth = !r.headers.get("www-authenticate") && r.status === 200 && body.includes("[");
+          // Confirm the response contains actual user/resource data — not just any JSON array
+          const dataFieldHints = ["email", "username", "user_id", "userId", "id", "name", "phone", "address", "role", "created_at", "token"];
+          const hasUserData = dataFieldHints.some(field => body.includes(`"${field}"`));
+          const hasNoAuth = !r.headers.get("www-authenticate") && r.status === 200 && hasUserData;
           if (hasNoAuth && !seen.has(`version:${url}`)) {
             seen.add(`version:${url}`);
             findings.push({

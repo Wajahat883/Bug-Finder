@@ -114,7 +114,7 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
           recommended_fix: "Verify hosting location meets data residency and compliance requirements (GDPR, HIPAA, etc.).",
           cvss_score: 0,
           cwe_id: "CWE-200",
-          scanner_name: "IPRep",
+          scanner_name: "Bug-Finder/PassiveRecon",
           scanner_family: "recon",
           confidence: 0.95,
         });
@@ -151,7 +151,7 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
         recommended_fix: `Block or restrict access to ${check.path} at the web server level. Review what information is being disclosed.`,
         cvss_score: check.sev === "high" ? 7.5 : check.sev === "medium" ? 5.3 : check.sev === "low" ? 3.1 : 2.0,
         cwe_id: "CWE-200",
-        scanner_name: "WHOIS",
+        scanner_name: "Bug-Finder/PassiveRecon",
         scanner_family: "recon",
         confidence: 0.92,
       });

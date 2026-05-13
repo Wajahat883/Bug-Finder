@@ -59,10 +59,16 @@ type Collection = {
 
 function matchesQuery(doc: Doc, query: Record<string, unknown>): boolean {
   for (const [k, v] of Object.entries(query)) {
+    if (k === "$or" && Array.isArray(v)) {
+      if (!(v as Record<string, unknown>[]).some(clause => matchesQuery(doc, clause))) return false;
+      continue;
+    }
     if (v !== null && typeof v === "object" && !ObjectId.isValid(v as string)) {
       const ops = v as Record<string, unknown>;
       if ("$in" in ops) {
         if (!(ops["$in"] as unknown[]).includes(doc[k])) return false;
+      } else if ("$ne" in ops) {
+        if (String(doc[k] ?? "") === String(ops["$ne"])) return false;
       } else if ("$regex" in ops) {
         const re = new RegExp(ops["$regex"] as string, (ops["$options"] as string) || "");
         if (!re.test(String(doc[k] ?? ""))) return false;
@@ -97,7 +103,8 @@ function makeCollection(name: string): Collection {
       let _skip = 0;
       let _limit = filtered.length;
       let _sort: Record<string, 1 | -1> | null = null;
-      const buildInner = (): { toArray: () => Doc[]; sort: (s: Record<string, 1 | -1>) => { toArray: () => Doc[] } } => {
+
+      const buildPage = (): Doc[] => {
         let arr = [...filtered];
         if (_sort) {
           const [key, dir] = Object.entries(_sort)[0] ?? [];
@@ -108,19 +115,18 @@ function makeCollection(name: string): Collection {
             return (an - bn) * dir;
           });
         }
-        const page = arr.slice(_skip, _skip + _limit);
-        return {
-          toArray: () => page,
-          sort: (s: Record<string, 1 | -1>) => { _sort = s; return buildInner(); },
-        };
+        return arr.slice(_skip, _skip + _limit);
       };
-      const self = {
-        toArray: () => buildInner().toArray(),
-        sort: (s: Record<string, 1 | -1>) => { _sort = s; return buildInner(); },
-        skip: (n: number) => { _skip = n; const inner = buildInner(); return { ...inner, skip: (n2: number) => { _skip = n2; return buildInner(); } }; },
-        limit: (n: number) => { _limit = n; const inner = buildInner(); return { ...inner, limit: (n2: number) => { _limit = n2; return buildInner(); } }; },
+
+      // Cursor object — all chainable methods always return the same cursor so
+      // arbitrary call order (.sort().skip().limit() or .skip().sort().limit()) works.
+      const cursor = {
+        toArray: () => buildPage(),
+        sort(s: Record<string, 1 | -1>) { _sort = s; return cursor; },
+        skip(n: number) { _skip = n; return cursor; },
+        limit(n: number) { _limit = n; return cursor; },
       };
-      return self;
+      return cursor;
     },
     async insertOne(doc) {
       const id = new ObjectId();
@@ -193,6 +199,7 @@ async function ensureIndexes(database: Db): Promise<void> {
     await database.collection("findings").createIndex({ dedup_key: 1, target_url: 1 });
     await database.collection("findings").createIndex({ validation_status: 1 });
     await database.collection("findings").createIndex({ last_seen_at: -1 });
+    await database.collection("findings").createIndex({ user_id: 1, created_at: -1 });
     await database.collection("scan_jobs").createIndex({ status: 1, created_at: -1 });
     await database.collection("scan_jobs").createIndex({ target_url: 1 });
     await database.collection("targets").createIndex({ domain: 1 }, { unique: true, sparse: true });

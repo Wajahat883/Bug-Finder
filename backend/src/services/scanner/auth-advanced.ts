@@ -48,7 +48,9 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
 
     // Test default credentials (limited to first 3 for speed)
     const credsBudget = profile === "deep" ? 10 : 3;
+    let lockoutDetected = false;
     for (const cred of DEFAULT_CREDENTIALS.slice(0, credsBudget)) {
+      if (lockoutDetected) break;
       const r = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,8 +59,38 @@ export async function runAdvancedAuthCheck(ctx: ScanContext): Promise<ScanFindin
 
       if (!r) continue;
 
-      // If we get a token/session back, credentials worked
+      // Detect account lockout — stop brute force and report lockout as working
+      if (r.status === 429 || r.status === 423) {
+        lockoutDetected = true;
+        if (!seen.has(`lockout:${endpoint}`)) {
+          seen.add(`lockout:${endpoint}`);
+          findings.push({
+            title: "Account Lockout / Rate Limiting Active on Login",
+            category: "Authentication",
+            severity: "info",
+            endpoint,
+            description: "The login endpoint returned HTTP 429/423 after multiple failed attempts, indicating rate limiting or account lockout is active. This is a positive security control.",
+            evidence: `POST ${endpoint}\nAttempts made: ${DEFAULT_CREDENTIALS.slice(0, credsBudget).indexOf(cred) + 1}\nHTTP ${r.status} — rate limit/lockout triggered`,
+            recommended_fix: "Ensure lockout thresholds are low (3-5 attempts) and lockout duration is sufficient (15+ minutes or permanent with admin unlock).",
+            cvss_score: 0,
+            cwe_id: "CWE-307",
+            scanner_name: "Bug-Finder/Auth",
+            scanner_family: "auth",
+            confidence: 0.95,
+          });
+          emit({ type: "log", message: `  Rate limiting / lockout active at ${endpoint} (HTTP ${r.status})` });
+        }
+        break;
+      }
       const body = await r.text().catch(() => "");
+      const lockoutInBody = ["locked", "too many", "rate limit", "blocked", "suspended"].some(kw => body.toLowerCase().includes(kw));
+      if (lockoutInBody) {
+        lockoutDetected = true;
+        emit({ type: "log", message: `  Account lockout response detected at ${endpoint}` });
+        break;
+      }
+
+      // If we get a token/session back, credentials worked
       const hasToken = body.includes("token") || body.includes("access_token") || body.includes("jwt") || body.includes("session");
       const isSuccess = (r.status === 200 || r.status === 201) && hasToken;
 

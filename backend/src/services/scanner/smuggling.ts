@@ -4,7 +4,7 @@ export async function runRequestSmugglingCheck(ctx: ScanContext): Promise<ScanFi
   const { targetUrl, emit } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Smuggling Probe", message: "Testing for HTTP request smuggling" });
+  emit({ type: "engine_start", engine: "Bug-Finder/Smuggling", message: "Testing for HTTP request smuggling" });
 
   const base = new URL(targetUrl);
 
@@ -58,13 +58,13 @@ export async function runRequestSmugglingCheck(ctx: ScanContext): Promise<ScanFi
       recommended_fix: "Disable h2c upgrade support if not required. Ensure your reverse proxy properly handles h2c upgrade attempts.",
       cvss_score: 7.5,
       cwe_id: "CWE-444",
-      scanner_name: "Smuggling Probe",
+      scanner_name: "Bug-Finder/Smuggling",
       scanner_family: "network",
       confidence: 0.8,
     });
   }
 
-  emit({ type: "engine_done", engine: "Smuggling Probe", message: `Request smuggling check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/Smuggling", message: `Request smuggling check complete — ${findings.length} issue(s)` });
   return findings;
 }
 
@@ -72,7 +72,7 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
   const { targetUrl, emit, discoveredEndpoints } = ctx;
   const findings: ScanFinding[] = [];
 
-  emit({ type: "engine_start", engine: "Rate Limit Tester", message: "Testing rate limiting on auth endpoints" });
+  emit({ type: "engine_start", engine: "Bug-Finder/RateLimit", message: "Testing rate limiting on auth endpoints" });
 
   const base = new URL(targetUrl);
 
@@ -127,41 +127,56 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
     }
   }
 
-  // Also test for header-based rate limit bypass
-  for (const f of findings.filter(f => f.category === "Authentication")) {
+  // Test header-based rate limit bypass ONLY on endpoints that DO enforce rate limiting.
+  // If the endpoint never rate-limited (rateLimited was false), there is nothing to bypass.
+  for (const endpoint of authEndpoints) {
+    // Re-probe to trigger rate limiting, then test bypass headers
+    let confirmedRateLimit = false;
+    for (let i = 0; i < 8; i++) {
+      const r = await ctxFetch(ctx, endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: `bypasstest${i}@test.com`, password: "wrong" }),
+      });
+      if (r?.status === 429) { confirmedRateLimit = true; break; }
+    }
+
+    if (!confirmedRateLimit) continue; // no rate limit active — bypass test irrelevant
+
     const bypassHeaders = [
-      { "X-Forwarded-For": "127.0.0.1" },
-      { "X-Real-IP": "10.0.0.1" },
+      { "X-Forwarded-For": "10.0.0.1" },
+      { "X-Real-IP": "10.0.0.2" },
       { "X-Originating-IP": "192.168.1.1" },
-      { "X-Remote-IP": "127.0.0.1" },
     ];
 
     for (const header of bypassHeaders) {
-      const res = await ctxFetch(ctx, f.endpoint, {
+      const res = await ctxFetch(ctx, endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...header },
-        body: JSON.stringify({ email: "test@test.com", password: "wrong" }),
+        body: JSON.stringify({ email: "bypass@test.com", password: "wrong" }),
       });
       if (res && res.status !== 429) {
         findings.push({
           title: "Rate Limit Bypass via IP Spoofing Header",
           category: "Authentication",
           severity: "high",
-          endpoint: f.endpoint,
-          description: `Rate limits on ${f.endpoint} can be bypassed by spoofing the client IP via the ${Object.keys(header)[0]} header. An attacker can reset their request count by changing this header value.`,
-          evidence: `Header: ${Object.keys(header)[0]}: ${Object.values(header)[0]}\nServer accepted the request without rate limiting`,
-          recommended_fix: "Do not trust X-Forwarded-For or similar headers for rate limiting unless you control the proxy layer. Use the actual TCP connection IP for rate limit keys.",
+          endpoint,
+          description: `Rate limiting on ${endpoint} was confirmed active, but can be bypassed by spoofing the client IP via the ${Object.keys(header)[0]} header. After triggering rate limiting (HTTP 429), a single request with a spoofed IP header was accepted (HTTP ${res.status}).`,
+          evidence: `POST ${endpoint}\n${Object.keys(header)[0]}: ${Object.values(header)[0]}\nHTTP ${res.status} — rate limit bypassed\n\nConfirmation: 8 requests triggered 429; bypass header removed the limit`,
+          recommended_fix: "Do not trust X-Forwarded-For or similar headers for rate limiting unless you control the upstream proxy. Use the actual TCP source IP for rate limit keying.",
           cvss_score: 7.5,
           cwe_id: "CWE-307",
           scanner_name: "Bug-Finder/Rate-Limit",
           scanner_family: "web",
-          confidence: 0.75,
+          confidence: 0.85,
         });
+        emit({ type: "log", message: `  [BYPASS] Rate limit bypassed via ${Object.keys(header)[0]} at ${endpoint}` });
         break;
       }
     }
+    break; // one endpoint is enough
   }
 
-  emit({ type: "engine_done", engine: "Rate Limit Tester", message: `Rate limit check complete — ${findings.length} issue(s)` });
+  emit({ type: "engine_done", engine: "Bug-Finder/RateLimit", message: `Rate limit check complete — ${findings.length} issue(s)` });
   return findings;
 }

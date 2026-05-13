@@ -19,18 +19,28 @@ router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
 
     const findingsAll = await col("findings").find({ scan_job_id: new ObjectId(id) } as Record<string, unknown>).sort({ severity: 1 }).toArray() as Array<Record<string, unknown>>;
 
+    // Escape HTML to prevent stored XSS — finding data originates from external targets
+    // and may contain <script> tags or other HTML that would execute in the report browser.
+    const esc = (s: string) => s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#x27;");
+
     const findings = findingsAll.map((f) => ({
-      title: String(f["title"] ?? ""),
-      severity: String(f["severity"] ?? ""),
-      category: String(f["category"] ?? ""),
-      endpoint: String(f["endpoint"] ?? ""),
+      title: esc(String(f["title"] ?? "")),
+      severity: esc(String(f["severity"] ?? "")),
+      category: esc(String(f["category"] ?? "")),
+      endpoint: esc(String(f["endpoint"] ?? "")),
       cvss_score: f["cvss_score"] ?? 0,
-      cwe_id: f["cwe_id"] ?? "N/A",
-      description: String(f["description"] ?? "").slice(0, 300),
-      recommended_fix: String(f["recommended_fix"] ?? "").slice(0, 200),
+      cwe_id: esc(String(f["cwe_id"] ?? "N/A")),
+      description: esc(String(f["description"] ?? "").slice(0, 300)),
+      recommended_fix: esc(String(f["recommended_fix"] ?? "").slice(0, 200)),
     }));
 
     const now = new Date().toISOString().slice(0, 10);
+    const safeTargetUrl = esc(String(scan["target_url"] ?? ""));
     const riskScore = (scan["risk_score"] as number) ?? 0;
     const riskLabel = riskScore > 80 ? "CRITICAL" : riskScore > 60 ? "HIGH" : riskScore > 30 ? "MEDIUM" : "LOW";
     const critCount = (scan["critical_count"] as number) ?? 0;
@@ -80,7 +90,7 @@ router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
 <div class="cover">
   <h1>Bug Finder Pro</h1>
   <h2 style="font-weight:400;color:#e8e8ef;margin-bottom:24px;">Security Assessment Report</h2>
-  <div class="target">${scan["target_url"]}</div>
+  <div class="target">${safeTargetUrl}</div>
   <div class="date">${new Date(scan["created_at"] as string).toLocaleDateString("en-US", {year:"numeric",month:"long",day:"numeric"})} — ${now}</div>
   <div class="score" style="color:${riskScore>80?'#ef4444':riskScore>60?'#f97316':riskScore>30?'#eab308':'#22d3ee'}">${riskScore}</div>
   <div class="risk-label" style="color:${riskScore>80?'#ef4444':riskScore>60?'#f97316':riskScore>30?'#eab308':'#22d3ee'}">Risk Score: ${riskLabel}</div>
@@ -88,7 +98,7 @@ router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
 </div>
 <div class="summary">
   <h2>Executive Summary</h2>
-  <p style="margin-bottom:12px;">This scan identified ${findings.length} security vulnerabilities across ${scan["target_url"]}. The overall risk posture is <strong>${riskLabel}</strong>.</p>
+  <p style="margin-bottom:12px;">This scan identified ${findings.length} security vulnerabilities across ${safeTargetUrl}. The overall risk posture is <strong>${riskLabel}</strong>.</p>
   <div class="summary-grid">
     <div class="summary-card critical"><div class="count">${critCount}</div><div class="label">Critical</div></div>
     <div class="summary-card high"><div class="count">${highCount}</div><div class="label">High</div></div>

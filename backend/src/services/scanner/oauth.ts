@@ -36,7 +36,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Disable implicit flow. Use Authorization Code flow with PKCE instead. Update all clients to use the secure flow.",
         cvss_score: 6.1,
         cwe_id: "CWE-287",
-        scanner_name: "OAuth Scanner",
+        scanner_name: "Bug-Finder/OAuth",
         scanner_family: "auth",
         confidence: 0.92,
       });
@@ -55,7 +55,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Disable the password grant. Use Authorization Code with PKCE. Only use ROPC for highly trusted legacy clients.",
         cvss_score: 5.9,
         cwe_id: "CWE-287",
-        scanner_name: "OAuth Scanner",
+        scanner_name: "Bug-Finder/OAuth",
         scanner_family: "auth",
         confidence: 0.9,
       });
@@ -114,7 +114,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         recommended_fix: "Strictly validate redirect_uri against a pre-registered whitelist. Never allow arbitrary URIs. Use exact string matching, not prefix matching.",
         cvss_score: 9.1,
         cwe_id: "CWE-601",
-        scanner_name: "OAuth Scanner",
+        scanner_name: "Bug-Finder/OAuth",
         scanner_family: "auth",
         confidence: 0.95,
       });
@@ -139,7 +139,7 @@ export async function runOAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           recommended_fix: "Require and validate the state parameter in all OAuth authorization requests. Generate a cryptographically random state value per request.",
           cvss_score: 6.1,
           cwe_id: "CWE-352",
-          scanner_name: "OAuth Scanner",
+          scanner_name: "Bug-Finder/OAuth",
           scanner_family: "auth",
           confidence: 0.75,
         });

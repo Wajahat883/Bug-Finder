@@ -114,7 +114,7 @@ function throttleSet(host: string, val: { lastMs: number; delayMs: number }): vo
     }
     if (oldestKey) targetThrottle.delete(oldestKey);
   }
-  throttleSet(host, val);
+  targetThrottle.set(host, val);
 }
 
 function getHostKey(url: string): string {

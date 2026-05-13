@@ -35,9 +35,16 @@ router.get("/findings", requireAuth, async (req, res) => {
     if (scanJobId && ObjectId.isValid(scanJobId)) query["scan_job_id"] = new ObjectId(scanJobId);
     if (suppressFp) query["validation_status"] = { $ne: "false_positive" };
 
-    const all = (await col("findings").find(query).sort({ created_at: -1 }).toArray()) as Array<Record<string, unknown>>;
-    const total = all.length;
-    const items = all.slice((page - 1) * pageSize, page * pageSize).map(formatFinding);
+    const [items, total] = await Promise.all([
+      col("findings")
+        .find(query)
+        .sort({ created_at: -1 })
+        .skip((page - 1) * pageSize)
+        .limit(pageSize)
+        .toArray()
+        .then(rows => (rows as Array<Record<string, unknown>>).map(formatFinding)),
+      col("findings").countDocuments(query as Record<string, unknown>),
+    ]);
 
     res.json({ items, total, page, page_size: pageSize, total_pages: Math.ceil(total / pageSize) });
   } catch (err) {

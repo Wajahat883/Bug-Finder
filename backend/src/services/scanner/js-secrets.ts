@@ -21,7 +21,8 @@ const SECRET_PATTERNS: SecretPattern[] = [
   { name: "Private Key", regex: /-----BEGIN (?:EC |DSA |OPENSSH )?PRIVATE KEY-----/g, severity: "critical", cvss: 9.8, cwe: "CWE-321", fix: "Never embed private keys in client-side JavaScript." },
   { name: "JWT Secret", regex: /jwt[_-]?secret['":\s=]+['"][^'"]{8,}/gi, severity: "critical", cvss: 9.1, cwe: "CWE-798", fix: "Rotate the JWT secret. Store secrets in environment variables, not source code." },
   { name: "Database Connection String", regex: /(?:mongodb|postgres|mysql|mssql):\/\/[^:]+:[^@]+@[^\s'"]+/gi, severity: "critical", cvss: 9.8, cwe: "CWE-798", fix: "Remove database credentials from source code. Use environment variables." },
-  { name: "Hardcoded Password", regex: /password['":\s=]+['"][^'"]{6,}/gi, severity: "high", cvss: 7.5, cwe: "CWE-259", fix: "Never hardcode passwords. Use environment variables or a secrets manager." },
+  // Match password = "actualvalue" but exclude placeholder text (phrases with spaces, common placeholder words)
+  { name: "Hardcoded Password", regex: /(?:password|passwd|pwd)\s*[:=]\s*['"][^'" \t]{8,}['"]/gi, severity: "high", cvss: 7.5, cwe: "CWE-259", fix: "Never hardcode passwords. Use environment variables or a secrets manager." },
   { name: "Slack Webhook URL", regex: /https:\/\/hooks\.slack\.com\/services\/[A-Z0-9]+\/[A-Z0-9]+\/[a-zA-Z0-9]+/g, severity: "medium", cvss: 5.3, cwe: "CWE-200", fix: "Regenerate the Slack webhook URL. Treat webhook URLs as secrets." },
   { name: "SendGrid API Key", regex: /SG\.[a-zA-Z0-9_-]{22}\.[a-zA-Z0-9_-]{43}/g, severity: "high", cvss: 7.5, cwe: "CWE-798", fix: "Rotate your SendGrid API key immediately." },
   { name: "Twilio API Key", regex: /SK[a-zA-Z0-9]{32}/g, severity: "high", cvss: 7.5, cwe: "CWE-798", fix: "Rotate your Twilio API credentials." },
@@ -82,11 +83,19 @@ export async function runJsSecretScan(ctx: ScanContext): Promise<ScanFinding[]> 
 
     emit({ type: "log", message: `  Scanning ${jsUrl.split("/").pop() ?? jsUrl} (${Math.round(code.length / 1024)}KB)` });
 
+    // Placeholder strings that appear in credential patterns but are not real secrets
+    const PLACEHOLDER_PHRASES = ["enter your", "your password", "must be", "please enter", "confirm your", "example", "placeholder", "replace with", "put your", "insert your", "change me", "changeme", "todo", "fixme", "xxxxxxxxx"];
+
     for (const pattern of SECRET_PATTERNS) {
       const matches = [...code.matchAll(pattern.regex)];
       for (const match of matches.slice(0, 2)) {
         const key = `${jsUrl}:${pattern.name}`;
         if (seen.has(key)) continue;
+
+        // Skip obvious placeholder values
+        const matchLower = match[0].toLowerCase();
+        if (PLACEHOLDER_PHRASES.some(p => matchLower.includes(p))) continue;
+
         seen.add(key);
 
         const offset = match.index ?? 0;

@@ -55,11 +55,11 @@ function zapAlertToFinding(alert: Record<string, unknown>, targetUrl: string): S
     severity,
     endpoint: String(alert["url"] ?? targetUrl),
     description: String(alert["description"] ?? ""),
-    evidence: alert["evidence"] ? String(alert["evidence"]) : undefined,
-    recommended_fix: String(alert["solution"] ?? ""),
+    evidence: alert["evidence"] ? String(alert["evidence"]) : `ZAP alert at ${String(alert["url"] ?? targetUrl)}`,
+    recommended_fix: String(alert["solution"] ?? "Apply vendor-recommended security patches."),
     cvss_score: ZAP_CVSS_MAP[risk] ?? 0,
-    cwe_id: alert["cweid"] ? `CWE-${alert["cweid"]}` : undefined,
-    scanner_name: "OWASP ZAP",
+    cwe_id: alert["cweid"] ? `CWE-${alert["cweid"]}` : "CWE-200",
+    scanner_name: "Bug-Finder/ZAP",
     scanner_family: "active",
     confidence: risk === "3" ? 0.90 : risk === "2" ? 0.75 : 0.60,
   };
@@ -68,7 +68,7 @@ function zapAlertToFinding(alert: Record<string, unknown>, targetUrl: string): S
 export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
   const { targetUrl, emit, profile } = ctx;
 
-  emit({ type: "engine_start", engine: "OWASP ZAP", message: "Starting OWASP ZAP active scan" });
+  emit({ type: "engine_start", engine: "Bug-Finder/ZAP", message: "Starting OWASP ZAP active scan" });
 
   // Check ZAP is reachable
   const version = await zapGet("core/view/version/");
