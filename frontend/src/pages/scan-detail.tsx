@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Download, AlertTriangle, Clock, Activity, FileText, CheckCircle2, XCircle,
   Radio, Loader2, GitCompare, Link2, StopCircle, Pause, Play, Moon, Sun,
-  Copy, RefreshCw, X, Send, GitBranch, Filter
+  Copy, RefreshCw, X, Send, GitBranch, Filter, Sparkles, ChevronRight,
 } from "lucide-react";
 import { format } from "date-fns";
 import jsPDF from "jspdf";
@@ -451,14 +451,37 @@ export default function ScanDetail() {
   }
 
   if (scanLoading) {
-    return <div className="p-8 flex justify-center text-muted-foreground">Loading scan details...</div>;
+    return (
+      <div className="space-y-4 p-6">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-16 rounded-lg animate-pulse" style={{ background: "hsl(var(--muted))" }} />
+        ))}
+      </div>
+    );
   }
 
   if (!scan) {
-    return <div className="p-8 text-center text-destructive">Scan not found</div>;
+    return (
+      <div className="p-8 text-center space-y-3">
+        <AlertTriangle className="w-10 h-10 mx-auto text-destructive" />
+        <p className="text-destructive font-medium">Scan not found</p>
+        <p className="text-sm text-muted-foreground">This scan may have been deleted or the ID is invalid.</p>
+      </div>
+    );
   }
 
   const isRunning = scan.status === "running" || scan.status === "queued";
+
+  // Derive scan phase from active engine for progress label
+  const SCAN_PHASES = ["Recon", "Port Scan", "Service Detection", "Vulnerability Scan", "Reporting"];
+  const activePhaseIdx = activeEngine
+    ? SCAN_PHASES.findIndex(p => activeEngine.toLowerCase().includes(p.toLowerCase().split(" ")[0]))
+    : -1;
+  const phaseLabel = activePhaseIdx >= 0
+    ? `Phase ${activePhaseIdx + 1}/${SCAN_PHASES.length}: ${SCAN_PHASES[activePhaseIdx]}`
+    : activeEngine
+    ? `Running: ${activeEngine}`
+    : "Initializing…";
 
   return (
     <div className="space-y-6">
@@ -521,18 +544,60 @@ export default function ScanDetail() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium text-blue-500 flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                {activeEngine ? `Running: ${activeEngine}` : "Scan in progress…"}
+                {phaseLabel}
               </span>
-              <span className="text-sm font-mono text-blue-500">{scan.progress}%</span>
+              <span className="text-sm font-mono text-blue-500">{scan.progress ?? 0}%</span>
             </div>
-            <Progress value={scan.progress} className="h-2 [&>div]:bg-blue-500" />
-            <p className="text-xs text-blue-400/60 mt-2">
+            <Progress value={scan.progress ?? 0} className="h-2 [&>div]:bg-blue-500" />
+            {/* Phase step indicators */}
+            <div className="flex items-center gap-1 mt-2">
+              {SCAN_PHASES.map((phase, i) => {
+                const pct = scan.progress ?? 0;
+                const phaseThreshold = ((i + 1) / SCAN_PHASES.length) * 100;
+                const isActive = i === activePhaseIdx;
+                const isDone = pct >= phaseThreshold;
+                return (
+                  <div key={phase} className="flex items-center gap-1 flex-1">
+                    <div className="flex-1 flex items-center gap-1">
+                      <div className={`h-1 flex-1 rounded-full transition-all ${isDone ? "bg-blue-500" : isActive ? "bg-blue-400/50" : "bg-blue-500/15"}`} />
+                      <span className={`text-[9px] font-mono whitespace-nowrap hidden sm:block ${isActive ? "text-blue-400 font-bold" : isDone ? "text-blue-400/60" : "text-blue-400/30"}`}>
+                        {phase}
+                      </span>
+                    </div>
+                    {i < SCAN_PHASES.length - 1 && <ChevronRight className="w-2.5 h-2.5 text-blue-500/30 flex-shrink-0" />}
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-xs text-blue-400/60 mt-1.5">
               {scan.findings_count > 0
                 ? `${scan.findings_count} finding(s) detected so far (${scan.critical_count} critical, ${scan.high_count} high)`
                 : "Scanning target for vulnerabilities…"}
             </p>
           </CardContent>
         </Card>
+      )}
+
+      {/* AI suggestion banner — shown when scan just completed */}
+      {scan.status === "completed" && scan.findings_count > 0 && (
+        <div className="flex items-center gap-4 px-4 py-3 rounded-lg cursor-pointer group"
+          style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.12), rgba(168,85,247,0.08))", border: "1px solid rgba(124,58,237,0.3)" }}
+          onClick={() => {
+            const el = document.querySelector('[data-value="summary"]') as HTMLElement | null;
+            if (el) el.click();
+          }}>
+          <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: "rgba(124,58,237,0.2)" }}>
+            <Sparkles className="w-4 h-4" style={{ color: "#a855f7" }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium" style={{ color: "#a855f7" }}>AI Analysis Ready</p>
+            <p className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>
+              {scan.findings_count} findings discovered — click to generate an AI executive summary &amp; remediation plan.
+            </p>
+          </div>
+          <ChevronRight className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-opacity" style={{ color: "#a855f7" }} />
+        </div>
       )}
 
       {(sseLog.length > 0 || sseActive) && (
@@ -617,7 +682,7 @@ export default function ScanDetail() {
             ["surface", "Attack Surface"],
             ["config", "Configuration"],
           ].map(([value, label]) => (
-            <TabsTrigger key={value} value={value}
+            <TabsTrigger key={value} value={value} data-value={value}
               className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 text-xs">
               {value === "diff" ? <><GitCompare className="w-3.5 h-3.5 mr-1.5 inline" />{label}</> :
                value === "kill-chains" ? <><Link2 className="w-3.5 h-3.5 mr-1.5 inline" />{label}</> :

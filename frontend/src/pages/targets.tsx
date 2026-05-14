@@ -13,8 +13,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Search, Globe, ShieldAlert, ChevronUp, ChevronDown, ChevronsUpDown,
-  Upload, Tag, Play, Cpu, X, Plus, AlertTriangle,
+  Upload, Tag, Play, Cpu, X, Plus, AlertTriangle, Target as TargetIcon,
+  Trash2,
 } from "lucide-react";
+import { TableSkeleton } from "@/components/loading-skeleton";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { format, differenceInDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 
@@ -301,6 +304,22 @@ export default function Targets() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [showImport, setShowImport] = useState(false);
   const [tagTarget, setTagTarget] = useState<Target | null>(null);
+  const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<Target | null>(null);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const deleteTarget = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/targets/${id}`, { method: "DELETE", credentials: "include" }).then(async r => {
+        if (!r.ok) throw new Error(await r.text());
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/targets"] });
+      toast({ title: "Target deleted", description: "Target removed from inventory." });
+      setConfirmDeleteTarget(null);
+    },
+    onError: () => toast({ title: "Delete failed", description: "Could not delete this target. Please try again.", variant: "destructive" }),
+  });
 
   const { data, isLoading } = useQuery<TargetsResponse>({
     queryKey: ["/api/targets", search, tagFilter, sortBy, sortDir],
@@ -370,6 +389,9 @@ export default function Targets() {
       </div>
 
       {/* Table */}
+      {isLoading ? (
+        <TableSkeleton rows={6} cols={8} />
+      ) : (
       <Card className="overflow-hidden">
         <CardContent className="p-0">
           <div className="overflow-x-auto">
@@ -388,12 +410,42 @@ export default function Targets() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {isLoading ? (
-                  <tr><td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">Loading targets…</td></tr>
-                ) : targets.length === 0 ? (
-                  <tr><td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
-                    {search || tagFilter ? "No targets match your filters." : "No targets yet. Run a scan or use Bulk Import."}
-                  </td></tr>
+                {targets.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-16 text-center">
+                      {search || tagFilter ? (
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-muted">
+                            <Search className="w-6 h-6 text-muted-foreground" />
+                          </div>
+                          <p className="text-sm font-medium">No targets match your filters</p>
+                          <p className="text-xs text-muted-foreground">Try clearing the search or tag filter</p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-4">
+                          <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.2), rgba(168,85,247,0.1))", border: "1px solid rgba(124,58,237,0.3)" }}>
+                            <TargetIcon className="w-8 h-8" style={{ color: "#a855f7" }} />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold">No targets yet</p>
+                            <p className="text-xs text-muted-foreground max-w-[260px]">
+                              Add domains to monitor by running a scan or using Bulk Import.
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button size="sm" onClick={() => setShowImport(true)} variant="outline">
+                              <Upload className="w-4 h-4 mr-1.5" />Bulk Import
+                            </Button>
+                            <Button size="sm" onClick={() => nav("/scans/new")}
+                              style={{ background: "linear-gradient(135deg, #7c3aed, #a855f7)", color: "white", border: "none" }}>
+                              <Play className="w-4 h-4 mr-1.5" />Run First Scan
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
                 ) : targets.map((target) => (
                   <tr key={target.id} className="hover:bg-muted/20 transition-colors group">
                     {/* Domain */}
@@ -469,6 +521,11 @@ export default function Targets() {
                           onClick={() => setTagTarget(target)}>
                           <Tag className="w-3 h-3 mr-1" />Tags
                         </Button>
+                        <Button size="sm" variant="ghost"
+                          className="h-7 px-2 text-xs text-destructive hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => setConfirmDeleteTarget(target)}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -478,6 +535,7 @@ export default function Targets() {
           </div>
         </CardContent>
       </Card>
+      )}
 
       {/* Dialogs */}
       <Dialog open={showImport} onOpenChange={setShowImport}>
@@ -487,6 +545,17 @@ export default function Targets() {
       <Dialog open={!!tagTarget} onOpenChange={(o) => { if (!o) setTagTarget(null); }}>
         {tagTarget && <TagEditorDialog target={tagTarget} onClose={() => setTagTarget(null)} />}
       </Dialog>
+
+      <ConfirmDialog
+        open={!!confirmDeleteTarget}
+        onOpenChange={(o) => { if (!o) setConfirmDeleteTarget(null); }}
+        title="Delete Target"
+        description={`Remove "${confirmDeleteTarget?.domain}" from your inventory? Its scan history and findings will remain, but the target will no longer be monitored.`}
+        confirmLabel="Delete Target"
+        variant="destructive"
+        loading={deleteTarget.isPending}
+        onConfirm={() => { if (confirmDeleteTarget) deleteTarget.mutate(confirmDeleteTarget.id); }}
+      />
     </div>
   );
 }

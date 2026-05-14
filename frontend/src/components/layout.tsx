@@ -78,41 +78,41 @@ const NAV_GROUPS = [
   {
     label: "Core",
     items: [
-      { href: "/dashboard",    label: "Dashboard",   icon: LayoutDashboard },
-      { href: "/scans",        label: "Scans",       icon: Activity },
-      { href: "/findings",     label: "Findings",    icon: ShieldAlert },
-      { href: "/targets",      label: "Targets",     icon: Target },
-      { href: "/remediations", label: "Remediations",icon: CheckSquare },
+      { href: "/dashboard",    label: "Dashboard",   icon: LayoutDashboard, shortcut: null },
+      { href: "/scans",        label: "Scans",       icon: Activity,        shortcut: null },
+      { href: "/findings",     label: "Findings",    icon: ShieldAlert,     shortcut: "F" },
+      { href: "/targets",      label: "Targets",     icon: Target,          shortcut: null },
+      { href: "/remediations", label: "Remediations",icon: CheckSquare,     shortcut: "R" },
     ],
   },
   {
     label: "Analytics",
     items: [
-      { href: "/executive",           label: "Executive",       icon: TrendingUp },
-      { href: "/attack-surface",      label: "Attack Surface",  icon: Network },
-      { href: "/owasp",               label: "OWASP Top 10",    icon: Shield },
-      { href: "/timeline",            label: "Timeline",        icon: Clock },
-      { href: "/compliance",          label: "Compliance",      icon: ClipboardCheck },
-      { href: "/sla",                 label: "SLA Tracking",    icon: Timer },
-      { href: "/metrics",             label: "Metrics",         icon: BarChart2 },
-      { href: "/analytics-enhanced",  label: "Analytics+",      icon: TrendingUp },
-      { href: "/engagements",         label: "Engagements",     icon: Briefcase },
+      { href: "/executive",           label: "Executive",       icon: TrendingUp,    shortcut: null },
+      { href: "/attack-surface",      label: "Attack Surface",  icon: Network,       shortcut: null },
+      { href: "/owasp",               label: "OWASP Top 10",    icon: Shield,        shortcut: null },
+      { href: "/timeline",            label: "Timeline",        icon: Clock,         shortcut: null },
+      { href: "/compliance",          label: "Compliance",      icon: ClipboardCheck,shortcut: null },
+      { href: "/sla",                 label: "SLA Tracking",    icon: Timer,         shortcut: null },
+      { href: "/metrics",             label: "Metrics",         icon: BarChart2,     shortcut: null },
+      { href: "/analytics-enhanced",  label: "Analytics+",      icon: TrendingUp,    shortcut: null },
+      { href: "/engagements",         label: "Engagements",     icon: Briefcase,     shortcut: null },
     ],
   },
   {
     label: "AI & Tools",
     items: [
-      { href: "/ai-triage",      label: "AI Triage",   icon: Sparkles },
-      { href: "/scans/compare",  label: "Scan Compare",icon: GitCompare },
-      { href: "/scan-templates", label: "Templates",   icon: Bookmark },
-      { href: "/cvss",           label: "CVSS Calc",   icon: Calculator },
+      { href: "/ai-triage",      label: "AI Triage",   icon: Sparkles,  shortcut: null },
+      { href: "/scans/compare",  label: "Scan Compare",icon: GitCompare,shortcut: null },
+      { href: "/scan-templates", label: "Templates",   icon: Bookmark,  shortcut: null },
+      { href: "/cvss",           label: "CVSS Calc",   icon: Calculator,shortcut: null },
     ],
   },
   {
     label: "Automation",
     items: [
-      { href: "/scheduled-scans", label: "Scheduled",  icon: Timer },
-      { href: "/testing",         label: "Testing",     icon: Activity },
+      { href: "/scheduled-scans", label: "Scheduled",  icon: Timer,    shortcut: null },
+      { href: "/testing",         label: "Testing",     icon: Activity, shortcut: null },
     ],
   },
 ];
@@ -386,8 +386,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {sidebarOpen ? <X className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
       </button>
 
+      {/* Mobile backdrop overlay */}
+      {sidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 z-30 bg-black/50 backdrop-blur-sm"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className={`flex flex-col border-r fixed lg:relative z-40 h-full transition-transform ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
+      <aside className={`flex flex-col border-r fixed lg:relative z-40 h-full transition-transform duration-200 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} lg:translate-x-0`}
         style={{ width: 200, minWidth: 200, background: "hsl(var(--sidebar))", borderColor: "hsl(var(--sidebar-border))" }}>
         <div className="flex items-center gap-3 px-4 py-4 flex-shrink-0">
           <div className="w-8 h-8 rounded-md flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
@@ -415,12 +423,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                       const active = location === item.href || (item.href !== "/dashboard" && location.startsWith(item.href));
                       return (
                         <Link key={item.href} href={item.href}
-                          className="flex items-center gap-3 px-3 py-1.5 rounded-md text-sm transition-all relative"
+                          onClick={() => setSidebarOpen(false)}
+                          className="flex items-center gap-3 px-3 py-1.5 rounded-md text-sm transition-all relative group/navitem"
                           style={active
                             ? { background: "rgba(124,58,237,0.15)", color: "hsl(var(--primary))", borderLeft: "2px solid hsl(var(--primary))", paddingLeft: "10px" }
                             : { color: "hsl(var(--muted-foreground))", borderLeft: "2px solid transparent", paddingLeft: "10px" }}>
                           <Icon className="w-4 h-4 flex-shrink-0" />
-                          <span>{item.label}</span>
+                          <span className="flex-1">{item.label}</span>
+                          {item.shortcut && (
+                            <kbd className="text-[9px] px-1 py-0.5 rounded border font-mono opacity-0 group-hover/navitem:opacity-60 transition-opacity"
+                              style={{ borderColor: "hsl(var(--sidebar-border))", color: "hsl(var(--muted-foreground))" }}>
+                              {item.shortcut}
+                            </kbd>
+                          )}
                         </Link>
                       );
                     })}
@@ -430,6 +445,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+
+        {/* Quick action: New Scan */}
+        <div className="px-2 pb-2 flex-shrink-0">
+          <button
+            onClick={() => { setLocation("/scans/new"); setSidebarOpen(false); }}
+            className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-semibold transition-all hover:opacity-90"
+            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.25), rgba(168,85,247,0.15))", color: "hsl(var(--primary))", border: "1px solid rgba(124,58,237,0.3)" }}>
+            <Activity className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1 text-left">New Scan</span>
+            <kbd className="text-[9px] px-1 py-0.5 rounded border font-mono opacity-50"
+              style={{ borderColor: "rgba(124,58,237,0.4)", color: "hsl(var(--primary))" }}>N</kbd>
+          </button>
+        </div>
 
         <div className="px-3 py-3 border-t flex-shrink-0" style={{ borderColor: "hsl(var(--sidebar-border))" }}>
           <div className="flex items-center gap-2">
