@@ -13,11 +13,14 @@ import { ipAllowlistMiddleware } from "./middlewares/ip-allowlist";
 import { globalLimiter } from "./middlewares/rate-limit";
 import { correlationMiddleware } from "./middlewares/correlation";
 import { initScheduler } from "./services/scheduler";
+import { seedDefaultFlags } from "./lib/feature-flags";
+import { tenantMiddleware } from "./middlewares/tenant";
 
 const app: Express = express();
 
 connectDb()
   .then(() => seedData())
+  .then(() => seedDefaultFlags())
   .then(() => initScheduler())
   .catch((err) => logger.warn({ err }, "DB init/seed error — continuing without database"));
 
@@ -118,6 +121,8 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 app.use("/api", apiKeyAuth);
 app.use(ipAllowlistMiddleware);
 app.use("/api", globalLimiter);
+// Multi-tenant context injection — runs before all API routes
+app.use("/api", tenantMiddleware);
 app.use("/api", router);
 
 app.use((_req, res) => {

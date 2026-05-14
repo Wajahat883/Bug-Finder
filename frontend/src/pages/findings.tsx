@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
+import { exportToExcel, exportToCsv, prepareFindingsForExport } from "@/lib/excel-export";
+import { useFeatureFlag } from "@/hooks/use-feature-flags";
 
 function SeverityBadge({ severity }: { severity: string }) {
   const colors: Record<string, string> = {
@@ -194,8 +196,17 @@ export default function Findings() {
           <h1 className="text-3xl font-bold tracking-tight">Findings Explorer</h1>
           <p className="text-muted-foreground">Investigate and validate discovered vulnerabilities.</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={exportCSV}>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" onClick={() => {
+            const rows = prepareFindingsForExport((data?.items ?? []) as Record<string, unknown>[]);
+            exportToExcel(rows, "findings-export", "Findings");
+          }}>
+            <Download className="w-4 h-4 mr-1.5" />Excel
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => {
+            const rows = prepareFindingsForExport((data?.items ?? []) as Record<string, unknown>[]);
+            exportToCsv(rows, "findings-export");
+          }}>
             <Download className="w-4 h-4 mr-1.5" />CSV
           </Button>
           <Button variant="outline" size="sm" onClick={exportJSON}>

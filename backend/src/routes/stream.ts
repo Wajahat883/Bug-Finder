@@ -5,11 +5,24 @@ import { logger } from "../lib/logger";
 import { scanEvents } from "../services/scanner/index";
 import { ScannerEvent } from "../services/scanner/types";
 import { requireAuth } from "../middlewares/rbac";
+import { errorResponse } from "../lib/response";
 
 const router = Router();
 
+// ── SSE connection rate limiter (max 5 concurrent per user, tracked in memory) ─
+// In production, use Redis with ioredis for cross-instance tracking.
+const sseConnections = new Map<string, number>();
+const MAX_SSE_PER_USER = 5;
+
 // Both paths serve SSE streams — frontend uses /api/stream/:id
 router.get(["/stream/:id", "/scan-jobs/:id/stream"], requireAuth, async (req, res) => {
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const userId = session?.userId ?? "anon";
+  const current = sseConnections.get(userId) ?? 0;
+  if (current >= MAX_SSE_PER_USER) {
+    return errorResponse(res, 429, "Too Many Connections", `Max ${MAX_SSE_PER_USER} concurrent SSE streams per user`);
+  }
+  sseConnections.set(userId, current + 1);
   const { id } = req.params;
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -104,6 +117,10 @@ router.get(["/stream/:id", "/scan-jobs/:id/stream"], requireAuth, async (req, re
   const cleanup = () => {
     clearInterval(heartbeat);
     scanEvents.off(eventName, handler);
+    // Decrement SSE connection counter
+    const cnt = sseConnections.get(userId) ?? 1;
+    if (cnt <= 1) sseConnections.delete(userId);
+    else sseConnections.set(userId, cnt - 1);
     try { res.end(); } catch { /* ignore */ }
   };
 

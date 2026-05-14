@@ -47,6 +47,9 @@ import AnalyticsEnhanced from "@/pages/analytics-enhanced";
 import Engagements from "@/pages/engagements";
 import EngagementDetail from "@/pages/engagement-detail";
 import ApiKeysPage from "@/pages/api-keys";
+import FalsePositivesPage from "@/pages/false-positives";
+import TriageMetricsPage from "@/pages/triage-metrics";
+import FeatureFlagsAdmin from "@/pages/feature-flags-admin";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -131,6 +134,11 @@ function Router() {
             <Route path="/metrics" component={MetricsDashboard} />
             <Route path="/analytics-enhanced" component={AnalyticsEnhanced} />
             <Route path="/ai-triage" component={AiTriage} />
+            <Route path="/false-positives" component={FalsePositivesPage} />
+            <Route path="/triage-metrics" component={TriageMetricsPage} />
+            <Route path="/feature-flags">
+              {() => <AdminRoute component={FeatureFlagsAdmin} />}
+            </Route>
 
             {/* ── Admin-only routes ── */}
             <Route path="/testing">

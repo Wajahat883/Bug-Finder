@@ -32,9 +32,11 @@ router.post("/auth/register", authLimiter, async (req, res) => {
     if (!firstName || !lastName || !email || !password) {
       return res.status(400).json({ error: "First name, last name, email, and password are required" });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ error: "Password must be at least 6 characters" });
-    }
+    // Enterprise password policy — min 12 chars, uppercase, number, special char
+    if (password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
+    if (!/[A-Z]/.test(password)) return res.status(400).json({ error: "Password must contain at least one uppercase letter" });
+    if (!/[0-9]/.test(password)) return res.status(400).json({ error: "Password must contain at least one number" });
+    if (!/[^A-Za-z0-9]/.test(password)) return res.status(400).json({ error: "Password must contain at least one special character (!@#$%^&*)" });
 
     const baseUsername = `${firstName.trim().toLowerCase()}_${lastName.trim().toLowerCase()}`.replace(/[^a-z0-9_]/g, "");
     const existingEmail = await col("users").findOne({ email });

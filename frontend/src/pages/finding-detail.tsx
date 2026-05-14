@@ -281,6 +281,45 @@ export default function FindingDetail() {
 
   const qc = useQueryClient();
   const [newComment, setNewComment] = useState("");
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [fpDialogOpen, setFpDialogOpen] = useState(false);
+  const [fpReason, setFpReason] = useState("not_applicable");
+  const [fpEvidence, setFpEvidence] = useState("");
+  const [aiAssessment, setAiAssessment] = useState<{ fp_probability: number; reasoning: string; cached?: boolean } | null>(null);
+  const [aiAssessLoading, setAiAssessLoading] = useState(false);
+
+  async function submitTriage(status: string, extra?: Record<string, unknown>) {
+    setTriageLoading(true);
+    try {
+      const res = await fetch(`/api/findings/${findingId}/triage`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status, ...extra }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      qc.invalidateQueries({ queryKey: ["/api/findings", findingId] });
+      toast({ title: "Triage updated", description: `Status set to ${status.replace(/_/g, " ")}` });
+    } catch (e: unknown) {
+      toast({ title: "Triage failed", description: e instanceof Error ? e.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setTriageLoading(false);
+    }
+  }
+
+  async function runAiAssessment() {
+    setAiAssessLoading(true);
+    try {
+      const res = await fetch(`/api/ai/triage/${findingId}`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      setAiAssessment(data);
+    } catch (e: unknown) {
+      toast({ title: "AI Assessment failed", description: e instanceof Error ? e.message : "Error", variant: "destructive" });
+    } finally {
+      setAiAssessLoading(false);
+    }
+  }
 
   const { data: comments = [] } = useQuery<any[]>({
     queryKey: ["/api/findings", findingId, "comments"],
@@ -493,6 +532,111 @@ export default function FindingDetail() {
           </div>
         </div>
       </div>
+
+      {/* ── Phase 1: Triage Bar ─────────────────────────────────────────── */}
+      <Card className="border-indigo-500/20 bg-indigo-500/5">
+        <CardContent className="p-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wide shrink-0">Triage</span>
+            <div className="flex flex-wrap gap-2 flex-1">
+              <Button size="sm" variant="outline"
+                className="border-green-500/50 text-green-400 hover:bg-green-500/10 gap-1.5"
+                disabled={triageLoading}
+                onClick={() => submitTriage("confirmed")}>
+                <CheckCircle2 className="w-3.5 h-3.5" /> Confirm Real
+              </Button>
+              <Button size="sm" variant="outline"
+                className="border-yellow-500/50 text-yellow-400 hover:bg-yellow-500/10 gap-1.5"
+                disabled={triageLoading}
+                onClick={() => setFpDialogOpen(true)}>
+                <XCircle className="w-3.5 h-3.5" /> Mark False Positive
+              </Button>
+              <Button size="sm" variant="outline"
+                className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 gap-1.5"
+                disabled={triageLoading}
+                onClick={() => submitTriage("needs_review")}>
+                <HelpCircle className="w-3.5 h-3.5" /> Needs Review
+              </Button>
+              <Button size="sm" variant="outline"
+                className="border-purple-500/50 text-purple-400 hover:bg-purple-500/10 gap-1.5"
+                disabled={triageLoading}
+                onClick={() => submitTriage("suppressed", { suppressed_until: new Date(Date.now() + 90 * 86400_000).toISOString() })}>
+                <Shield className="w-3.5 h-3.5" /> Suppress 90d
+              </Button>
+              <Button size="sm" variant="outline"
+                className="border-violet-500/50 text-violet-400 hover:bg-violet-500/10 gap-1.5"
+                disabled={aiAssessLoading}
+                onClick={runAiAssessment}>
+                {aiAssessLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className="w-3.5 h-3.5" />}
+                AI Assess
+              </Button>
+            </div>
+            {triageLoading && <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />}
+          </div>
+
+          {/* AI Assessment Result */}
+          {aiAssessment && (
+            <div className={`mt-3 p-3 rounded-lg border text-sm ${aiAssessment.fp_probability >= 70 ? "bg-green-500/10 border-green-500/30 text-green-300" : aiAssessment.fp_probability >= 40 ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-300" : "bg-red-500/10 border-red-500/30 text-red-300"}`}>
+              <div className="flex items-center gap-2 mb-1">
+                <Brain className="w-3.5 h-3.5" />
+                <span className="font-semibold">AI FP Probability: {aiAssessment.fp_probability}%</span>
+                {aiAssessment.cached && <span className="text-xs opacity-60">(cached)</span>}
+              </div>
+              <p className="text-xs opacity-80">{aiAssessment.reasoning}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* FP Reason Dialog */}
+      {fpDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setFpDialogOpen(false)}>
+          <Card className="w-full max-w-md border-border" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <XCircle className="w-4 h-4 text-yellow-400" /> Mark as False Positive
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Reason *</label>
+                <select
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
+                  value={fpReason}
+                  onChange={e => setFpReason(e.target.value)}>
+                  <option value="test_environment">Test Environment</option>
+                  <option value="accepted_risk">Accepted Risk</option>
+                  <option value="compensating_control">Compensating Control</option>
+                  <option value="not_applicable">Not Applicable</option>
+                  <option value="duplicate">Duplicate Finding</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Supporting Evidence</label>
+                <textarea
+                  className="w-full bg-background border border-border rounded px-3 py-2 text-sm resize-none h-20"
+                  placeholder="Describe why this is a false positive..."
+                  value={fpEvidence}
+                  onChange={e => setFpEvidence(e.target.value)} />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setFpDialogOpen(false)}>Cancel</Button>
+                <Button size="sm"
+                  className="bg-yellow-500 hover:bg-yellow-600 text-black"
+                  disabled={triageLoading}
+                  onClick={async () => {
+                    await submitTriage("false_positive", { fp_reason: fpReason, fp_evidence: fpEvidence });
+                    setFpDialogOpen(false);
+                  }}>
+                  {triageLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                  Submit for Review
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-4">

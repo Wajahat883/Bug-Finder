@@ -13,6 +13,7 @@ import { useState, useEffect, useRef } from "react";
 import { CommandPalette } from "./command-palette";
 import { CommandSearch } from "@/components/command-search";
 import { useToast } from "@/hooks/use-toast";
+import { SessionExpiryModal } from "./session-expiry-modal";
 import { useNotifications, pushNotification } from "@/hooks/use-notifications";
 
 // ─── Audio ping for critical alerts ──────────────────────────────────────────
@@ -69,6 +70,9 @@ function pageName(loc: string): string {
   if (loc.startsWith("/engagements/")) return "Engagement Detail";
   if (loc.startsWith("/engagements")) return "Engagements";
   if (loc.startsWith("/api-keys")) return "API Keys";
+  if (loc.startsWith("/false-positives")) return "FP Review Queue";
+  if (loc.startsWith("/triage-metrics")) return "Triage Metrics";
+  if (loc.startsWith("/feature-flags")) return "Feature Flags";
   return "Dashboard";
 }
 
@@ -97,6 +101,14 @@ const NAV_GROUPS = [
       { href: "/metrics",             label: "Metrics",         icon: BarChart2,     shortcut: null },
       { href: "/analytics-enhanced",  label: "Analytics+",      icon: TrendingUp,    shortcut: null },
       { href: "/engagements",         label: "Engagements",     icon: Briefcase,     shortcut: null },
+    ],
+  },
+  {
+    label: "Triage",
+    items: [
+      { href: "/false-positives", label: "FP Review Queue", icon: ShieldAlert, shortcut: null },
+      { href: "/triage-metrics",  label: "Triage Metrics",  icon: BarChart2,   shortcut: null },
+      { href: "/feature-flags",   label: "Feature Flags",   icon: KeyRound,    shortcut: null },
     ],
   },
   {
@@ -373,6 +385,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const grouped = groupedPreview(notifications);
 
   return (
+    <>
     <div className="flex h-screen w-full overflow-hidden" style={{ background: "hsl(var(--background))" }}>
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
       <CommandSearch open={cmdOpen} onClose={() => setCmdOpen(false)} />
@@ -716,5 +729,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
       </div>
     </div>
+    <SessionExpiryModal />
+    </>
   );
 }

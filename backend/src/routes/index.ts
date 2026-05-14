@@ -42,6 +42,10 @@ import credentialsRouter from "./credentials";
 import cicdRouter from "./cicd";
 import suppressionRouter from "./suppression";
 import oidcRouter from "./oidc";
+import triageRouter from "./triage";
+import featureFlagsRouter from "./feature-flags";
+import webauthnRouter from "./webauthn";
+import samlRouter from "./saml";
 
 const router: IRouter = Router();
 
@@ -83,5 +87,14 @@ router.use(complianceReportsRouter);
 router.use(apiVersionRouter);
 router.use(oidcSsoRouter);
 router.use(projectRbacRouter);
+router.use(adminRouter);
+router.use(credentialsRouter);
+router.use(cicdRouter);
+router.use(suppressionRouter);
+router.use(oidcRouter);
+router.use(triageRouter);
+router.use(featureFlagsRouter);
+router.use(webauthnRouter);
+router.use(samlRouter);
 
 export default router;
