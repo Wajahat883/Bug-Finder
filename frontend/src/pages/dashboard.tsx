@@ -1,5 +1,7 @@
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
+import { format } from "date-fns";
 import { OnboardingWizard, useOnboarding } from "@/components/onboarding-wizard";
 import {
   useGetDashboardStats,
@@ -8,7 +10,7 @@ import {
 } from "@/api-client";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  LineChart, Line, Legend,
+  LineChart, Line, Legend, ReferenceLine,
 } from "recharts";
 import { Plus, Activity, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -160,6 +162,36 @@ export default function Dashboard() {
   const [, setLocation] = useLocation();
   const { show: showOnboarding, dismiss: dismissOnboarding } = useOnboarding();
 
+  const [isLive, setIsLive] = useState(false);
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const es = new EventSource("/api/stream/dashboard", { withCredentials: true } as EventSourceInit);
+    es.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as Record<string, unknown>;
+        setIsLive(true);
+        if (data["type"] === "stats_update") {
+          queryClient.setQueryData(["/api/dashboard/stats"], data["stats"]);
+        }
+        if (data["type"] === "new_finding" || data["type"] === "scan_complete") {
+          queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/dashboard/activity"] });
+        }
+      } catch { /* ignore */ }
+    };
+    es.onerror = () => { setIsLive(false); };
+    return () => es.close();
+  }, [queryClient]);
+
+  const [trendDays, setTrendDays] = useState(90);
+  const { data: trendRaw } = useQuery({
+    queryKey: ["/api/risk-trend", trendDays],
+    queryFn: () =>
+      fetch(`/api/risk-trend?days=${trendDays}`, { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 60000,
+  });
+
   const scans: any[] = Array.isArray(scansResp)
     ? scansResp
     : (scansResp as any)?.items ?? [];
@@ -201,7 +233,15 @@ export default function Dashboard() {
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Security Operations Console</h1>
+          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+            Security Operations Console
+            {isLive && (
+              <span className="flex items-center gap-1 text-xs text-green-400 font-mono">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
+                LIVE
+              </span>
+            )}
+          </h1>
           <p className="text-xs mt-0.5" style={{ color: "hsl(var(--muted-foreground))" }}>
             Live vulnerability assessment and threat surface monitoring.
           </p>
@@ -430,6 +470,96 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Risk Score Trend */}
+      {(() => {
+        const trendData: { date: string; score: number }[] = Array.isArray(trendRaw)
+          ? trendRaw
+          : Array.isArray((trendRaw as any)?.data)
+          ? (trendRaw as any).data
+          : [];
+        return (
+          <div
+            className="rounded-lg border p-4 flex flex-col"
+            style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4" style={{ color: "hsl(var(--primary))" }} />
+                <span className="text-sm font-medium">Risk Score Trend</span>
+              </div>
+              <div className="flex gap-1">
+                {([30, 60, 90] as const).map((d) => (
+                  <button
+                    key={d}
+                    onClick={() => setTrendDays(d)}
+                    className="px-2.5 py-0.5 rounded text-xs font-mono transition-all"
+                    style={{
+                      background: trendDays === d ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                      color: trendDays === d ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
+                      border: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {d}d
+                  </button>
+                ))}
+              </div>
+            </div>
+            {trendData.length === 0 ? (
+              <p className="text-xs text-center py-8" style={{ color: "hsl(var(--muted-foreground))" }}>
+                No risk trend data yet
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={trendData} margin={{ top: 4, right: 16, left: -20, bottom: 0 }}>
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(d) => format(new Date(d), "MMM d")}
+                  />
+                  <YAxis
+                    domain={[0, 10]}
+                    tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "hsl(var(--popover))",
+                      border: "1px solid hsl(var(--border))",
+                      borderRadius: 6,
+                      fontSize: 11,
+                    }}
+                    labelStyle={{ color: "hsl(var(--foreground))" }}
+                  />
+                  <ReferenceLine
+                    y={7}
+                    stroke="#ef4444"
+                    strokeDasharray="4 4"
+                    label={{ value: "High", fill: "#ef4444", fontSize: 10 }}
+                  />
+                  <ReferenceLine
+                    y={4}
+                    stroke="#f97316"
+                    strokeDasharray="4 4"
+                    label={{ value: "Med", fill: "#f97316", fontSize: 10 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="score"
+                    stroke="hsl(var(--primary))"
+                    dot={false}
+                    strokeWidth={2}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

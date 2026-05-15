@@ -9,11 +9,21 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import { AlertCircle, Rocket, Shield, Zap, Lock, FileText, ChevronDown, ChevronUp, Bookmark, Brain, Loader2 } from "lucide-react";
+import { AlertCircle, Rocket, Shield, Zap, Lock, FileText, ChevronDown, ChevronUp, Bookmark, Brain, Loader2, X as XIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const ENGINE_GROUPS: Record<string, string[]> = {
+  "Web": ["xss", "sqli", "csrf", "cors", "idor", "redirect", "file-upload", "injection-advanced"],
+  "Authentication": ["auth", "jwt", "oauth", "session-recorder"],
+  "Infrastructure": ["headers", "tls", "ports", "subdomains", "dns", "fingerprint"],
+  "Advanced": ["ssrf", "xxe", "graphql", "nuclei", "waf-bypass", "js-secrets", "dom-browser", "openapi", "business-logic", "cache-poisoning"],
+};
+const ALL_ENGINES = Object.values(ENGINE_GROUPS).flat();
+
+const TIME_ESTIMATE: Record<string, string> = { quick: "~2 min", standard: "~5 min", deep: "~15 min", full: "~30 min", custom: "varies" };
 
 interface Template {
   id: string;
@@ -54,6 +64,29 @@ export default function NewScan() {
   const [nlLoading, setNlLoading] = useState(false);
   const [maxFindings, setMaxFindings] = useState<number | "">("");
   const [maxDurationMin, setMaxDurationMin] = useState<number | "">("");
+
+  // Engine selection state
+  const [selectedEngines, setSelectedEngines] = useState<string[]>([...ALL_ENGINES]);
+  const [enginesExpanded, setEnginesExpanded] = useState(false);
+
+  // Advanced settings state
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+  const [scanDepth, setScanDepth] = useState(3);
+  const [timeoutMs, setTimeoutMs] = useState(5000);
+  const [rateLimit, setRateLimit] = useState(10);
+  const [excludedPaths, setExcludedPaths] = useState<string[]>([]);
+  const [excludedPathInput, setExcludedPathInput] = useState("");
+  const [customHeaders, setCustomHeaders] = useState<{ key: string; value: string }[]>([]);
+  const [userAgent, setUserAgent] = useState("");
+  const [credentialId, setCredentialId] = useState("");
+  const [credentials, setCredentials] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    fetch("/api/credentials", { credentials: "include" })
+      .then(r => r.json())
+      .then(data => setCredentials(Array.isArray(data) ? data : (data?.items ?? [])))
+      .catch(() => {});
+  }, []);
 
   async function applyNaturalLanguageConfig() {
     if (!nlPrompt.trim()) return;
@@ -135,7 +168,7 @@ export default function NewScan() {
     e.preventDefault();
     if (!targetUrl || !authorized) return;
 
-    const customHeaders = parseCustomHeaders();
+    const parsedCustomHeaders = parseCustomHeaders();
 
     createScan.mutate({
       data: {
@@ -148,10 +181,20 @@ export default function NewScan() {
         template_id: selectedTemplate || undefined,
         session_cookie: sessionCookie || undefined,
         auth_token: authToken || undefined,
-        custom_headers: customHeaders as Record<string, string> | undefined,
+        custom_headers: parsedCustomHeaders as Record<string, string> | undefined,
         max_findings: maxFindings !== "" ? Number(maxFindings) : undefined,
         max_duration_minutes: maxDurationMin !== "" ? Number(maxDurationMin) : undefined,
-      }
+        engines: selectedEngines,
+        advanced_config: {
+          depth: scanDepth,
+          timeout_ms: timeoutMs,
+          rate_limit: rateLimit,
+          excluded_paths: excludedPaths,
+          custom_headers: customHeaders,
+          user_agent: userAgent || undefined,
+          credential_id: credentialId || undefined,
+        },
+      } as any
     });
   };
 
@@ -257,7 +300,232 @@ export default function NewScan() {
                 </div>
               ))}
             </RadioGroup>
+            <p className="text-xs text-muted-foreground mt-3">Estimated time: {TIME_ESTIMATE[profile] ?? "varies"}</p>
           </CardContent>
+        </Card>
+
+        {/* Engine Selection */}
+        <Card>
+          <CardHeader>
+            <button
+              type="button"
+              className="flex items-center justify-between w-full"
+              onClick={() => setEnginesExpanded(v => !v)}
+            >
+              <div>
+                <CardTitle className="text-base text-left">Select Scan Engines</CardTitle>
+                <p className="text-sm text-muted-foreground font-normal text-left">
+                  {selectedEngines.length}/{ALL_ENGINES.length} engines selected
+                </p>
+              </div>
+              {enginesExpanded ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
+            </button>
+          </CardHeader>
+          {enginesExpanded && (
+            <CardContent className="space-y-5 pt-0">
+              {Object.entries(ENGINE_GROUPS).map(([groupName, groupEngines]) => {
+                const allSelected = groupEngines.every(e => selectedEngines.includes(e));
+                const noneSelected = groupEngines.every(e => !selectedEngines.includes(e));
+                return (
+                  <div key={groupName}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold">{groupName}</span>
+                      <div className="flex gap-2">
+                        <button type="button" className="text-xs text-primary hover:underline" onClick={() => {
+                          setSelectedEngines(prev => Array.from(new Set([...prev, ...groupEngines])));
+                        }} disabled={allSelected}>Select All</button>
+                        <span className="text-muted-foreground">·</span>
+                        <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => {
+                          setSelectedEngines(prev => prev.filter(e => !groupEngines.includes(e)));
+                        }} disabled={noneSelected}>None</button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {groupEngines.map(engine => (
+                        <div key={engine} className="flex items-center gap-2">
+                          <Checkbox
+                            id={`engine-${engine}`}
+                            checked={selectedEngines.includes(engine)}
+                            onCheckedChange={(checked) => {
+                              setSelectedEngines(prev =>
+                                checked ? [...prev, engine] : prev.filter(e => e !== engine)
+                              );
+                            }}
+                          />
+                          <label htmlFor={`engine-${engine}`} className="text-xs capitalize cursor-pointer select-none">
+                            {engine.replace(/-/g, " ")}
+                          </label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </CardContent>
+          )}
+        </Card>
+
+        {/* Advanced Settings */}
+        <Card>
+          <CardHeader>
+            <button
+              type="button"
+              className="flex items-center justify-between w-full"
+              onClick={() => setAdvancedExpanded(v => !v)}
+            >
+              <div>
+                <CardTitle className="text-base text-left">Advanced Settings</CardTitle>
+                <p className="text-sm text-muted-foreground font-normal text-left">Depth, timeouts, rate limits, headers</p>
+              </div>
+              {advancedExpanded ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
+            </button>
+          </CardHeader>
+          {advancedExpanded && (
+            <CardContent className="space-y-6 pt-0">
+              {/* Scan Depth */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm">Scan Depth</Label>
+                  <span className="text-sm font-mono text-primary">{scanDepth}</span>
+                </div>
+                <input type="range" min={1} max={5} value={scanDepth} onChange={e => setScanDepth(Number(e.target.value))} className="w-full accent-primary" />
+                <p className="text-xs text-muted-foreground">1 = shallow crawl, 5 = exhaustive crawl</p>
+              </div>
+
+              {/* Request Timeout */}
+              <div className="space-y-2">
+                <Label htmlFor="timeoutMs" className="text-sm">Request Timeout (ms)</Label>
+                <Input
+                  id="timeoutMs"
+                  type="number"
+                  min={1000}
+                  max={30000}
+                  step={500}
+                  value={timeoutMs}
+                  onChange={e => setTimeoutMs(Number(e.target.value))}
+                  className="h-9"
+                />
+              </div>
+
+              {/* Rate Limit */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-sm">Rate Limit</Label>
+                  <span className="text-sm font-mono text-primary">{rateLimit} req/sec</span>
+                </div>
+                <input type="range" min={1} max={50} value={rateLimit} onChange={e => setRateLimit(Number(e.target.value))} className="w-full accent-primary" />
+              </div>
+
+              {/* Excluded Paths */}
+              <div className="space-y-2">
+                <Label className="text-sm">Excluded Paths</Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="/admin, /logout"
+                    value={excludedPathInput}
+                    onChange={e => setExcludedPathInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        const val = excludedPathInput.trim();
+                        if (val && !excludedPaths.includes(val)) setExcludedPaths(prev => [...prev, val]);
+                        setExcludedPathInput("");
+                      }
+                    }}
+                    className="h-9 text-sm"
+                  />
+                </div>
+                {excludedPaths.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {excludedPaths.map(p => (
+                      <Badge key={p} variant="secondary" className="gap-1 text-xs pr-1">
+                        {p}
+                        <button type="button" onClick={() => setExcludedPaths(prev => prev.filter(x => x !== p))}>
+                          <XIcon className="w-3 h-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">Press Enter to add a path</p>
+              </div>
+
+              {/* Custom Headers */}
+              <div className="space-y-2">
+                <Label className="text-sm">Custom Headers</Label>
+                {customHeaders.length > 0 && (
+                  <div className="border rounded-md overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50 text-xs">
+                        <tr>
+                          <th className="px-3 py-1.5 text-left">Key</th>
+                          <th className="px-3 py-1.5 text-left">Value</th>
+                          <th className="w-8" />
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {customHeaders.map((h, i) => (
+                          <tr key={i}>
+                            <td className="px-3 py-1">
+                              <Input
+                                value={h.key}
+                                onChange={e => setCustomHeaders(prev => prev.map((x, idx) => idx === i ? { ...x, key: e.target.value } : x))}
+                                className="h-7 text-xs font-mono border-0 p-0 bg-transparent focus-visible:ring-0"
+                              />
+                            </td>
+                            <td className="px-3 py-1">
+                              <Input
+                                value={h.value}
+                                onChange={e => setCustomHeaders(prev => prev.map((x, idx) => idx === i ? { ...x, value: e.target.value } : x))}
+                                className="h-7 text-xs font-mono border-0 p-0 bg-transparent focus-visible:ring-0"
+                              />
+                            </td>
+                            <td className="px-2 py-1">
+                              <button type="button" onClick={() => setCustomHeaders(prev => prev.filter((_, idx) => idx !== i))} className="text-muted-foreground hover:text-destructive">
+                                <XIcon className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <Button type="button" size="sm" variant="outline" className="h-8 text-xs" onClick={() => setCustomHeaders(prev => [...prev, { key: "", value: "" }])}>
+                  + Add Header
+                </Button>
+              </div>
+
+              {/* User Agent */}
+              <div className="space-y-2">
+                <Label htmlFor="userAgent" className="text-sm">User-Agent</Label>
+                <Input
+                  id="userAgent"
+                  placeholder="Default (Bug Finder Pro/1.0)"
+                  value={userAgent}
+                  onChange={e => setUserAgent(e.target.value)}
+                  className="h-9 text-sm font-mono"
+                />
+              </div>
+
+              {/* Auth Credential */}
+              {credentials.length > 0 && (
+                <div className="space-y-2">
+                  <Label className="text-sm">Auth Credential</Label>
+                  <Select value={credentialId} onValueChange={setCredentialId}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select a saved credential..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {credentials.map(c => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </CardContent>
+          )}
         </Card>
 
         <Card>

@@ -7,7 +7,7 @@ import { requireAuth } from "../middlewares/rbac";
 import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
 import { getComplianceTags } from "../lib/compliance-map";
 import { engagementScopeFilter } from "../middlewares/resource-rbac";
-import { logAudit } from "../lib/audit";
+import { logAudit, auditFromReq } from "../lib/audit";
 
 const router = Router();
 
@@ -832,4 +832,239 @@ router.post("/findings/:id/assign", requireAuth, async (req, res) => {
   } catch(err) { logger.error({err},"assign error"); res.status(500).json({ error: "Internal server error" }); }
 });
 
+// ── Enterprise: Bulk operations (PATCH) ──────────────────────────────────────
+router.patch("/findings/bulk", requireAuth, async (req, res) => {
+  try {
+    const { ids, action, assignee_id, status, risk_accepted, risk_reason } = req.body as {
+      ids?: string[];
+      action?: string;
+      assignee_id?: string;
+      status?: string;
+      risk_accepted?: boolean;
+      risk_reason?: string;
+    };
+    if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids array is required" });
+    if (ids.length > 100) return res.status(400).json({ error: "Cannot bulk-update more than 100 findings at once" });
+
+    const objectIds = ids.map(id => new ObjectId(id));
+    const update: Record<string, unknown> = { updated_at: new Date() };
+
+    if (action === "assign" && assignee_id) {
+      update["assignee_id"] = assignee_id;
+    } else if (action === "status" && status) {
+      update["status"] = status;
+    } else if (action === "accept_risk") {
+      update["risk_accepted"] = true;
+      update["risk_accepted_at"] = new Date();
+      update["risk_reason"] = risk_reason ?? "Risk accepted via bulk operation";
+      update["triage_status"] = "accepted";
+    } else if (action === "retest") {
+      update["retest_status"] = "pending";
+    } else if (action === "delete") {
+      // Soft delete
+      await col("findings").updateMany(
+        { _id: { $in: objectIds } } as Record<string, unknown>,
+        { $set: { deleted: true, deleted_at: new Date() } }
+      );
+      await auditFromReq(req, "finding.bulk_delete", "findings", ids.join(","), { count: ids.length });
+      return res.json({ ok: true, affected: ids.length });
+    } else {
+      return res.status(400).json({ error: "action must be assign, status, accept_risk, retest, or delete" });
+    }
+
+    await col("findings").updateMany(
+      { _id: { $in: objectIds } } as Record<string, unknown>,
+      { $set: update }
+    );
+    await auditFromReq(req, `finding.bulk_${action}`, "findings", ids.join(","), { count: ids.length, action });
+    res.json({ ok: true, affected: ids.length });
+  } catch (err) {
+    logger.error({ err }, "Bulk findings update error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Enterprise: Assign finding to a user ─────────────────────────────────────
+router.patch("/findings/:id/assign", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { assignee_id } = req.body as { assignee_id?: string };
+    if (!assignee_id) return res.status(400).json({ error: "assignee_id is required" });
+    // Verify assignee exists
+    const assignee = await col("users").findOne({ _id: new ObjectId(assignee_id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!assignee) return res.status(404).json({ error: "Assignee user not found" });
+    const before = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    await col("findings").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: { assignee_id, assignee_name: String(assignee["username"] ?? assignee["email"] ?? ""), assigned_at: new Date(), updated_at: new Date() } }
+    );
+    await auditFromReq(req, "finding.assign", "findings", id, { assignee_id }, before ?? undefined, { assignee_id });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Enterprise: Formal risk acceptance ───────────────────────────────────────
+router.post("/findings/:id/accept-risk", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { justification, owner_name, review_date } = req.body as {
+      justification?: string;
+      owner_name?: string;
+      review_date?: string;
+    };
+    if (!justification) return res.status(400).json({ error: "justification is required" });
+    const sess = req.session as unknown as { userId?: string; username?: string };
+    await col("findings").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: {
+        risk_accepted: true,
+        risk_accepted_at: new Date(),
+        risk_accepted_by: sess.userId,
+        risk_accepted_by_name: sess.username,
+        risk_justification: justification,
+        risk_owner: owner_name ?? sess.username ?? "unknown",
+        risk_review_date: review_date ? new Date(review_date) : new Date(Date.now() + 90 * 86400000),
+        triage_status: "accepted",
+        updated_at: new Date(),
+      }}
+    );
+    await auditFromReq(req, "finding.risk_accepted", "findings", id, { justification, owner_name });
+    res.json({ ok: true, message: "Risk acceptance recorded" });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Enterprise: Mark as verified false negative ───────────────────────────────
+router.post("/findings/:id/false-negative", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body as { reason?: string };
+    const sess = req.session as unknown as { userId?: string; username?: string };
+    await col("findings").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: {
+        fn_verified: true,
+        fn_verified_at: new Date(),
+        fn_verified_by: sess.userId,
+        fn_reason: reason ?? "Verified real vulnerability missed by scanner",
+        triage_status: "confirmed",
+        updated_at: new Date(),
+      }, $inc: { fn_count: 1 } as Record<string, unknown> }
+    );
+    await auditFromReq(req, "finding.false_negative", "findings", id, { reason });
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Enterprise: Upload evidence file (base64) ─────────────────────────────────
+router.post("/findings/:id/evidence", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { filename, content_type, data, description } = req.body as {
+      filename?: string;
+      content_type?: string;
+      data?: string; // base64 encoded
+      description?: string;
+    };
+    if (!filename || !data) return res.status(400).json({ error: "filename and data (base64) are required" });
+    const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "application/json", "text/plain", "application/octet-stream", "application/har+json"];
+    const ct = content_type ?? "application/octet-stream";
+    if (!ALLOWED_TYPES.includes(ct)) return res.status(400).json({ error: "File type not allowed" });
+    const buf = Buffer.from(data, "base64");
+    if (buf.length > 10 * 1024 * 1024) return res.status(400).json({ error: "File too large (max 10MB)" });
+
+    const insert = await col("evidence_files").insertOne({
+      finding_id: id,
+      filename,
+      content_type: ct,
+      data: data, // store base64 in DB (for small files; production would use S3)
+      size_bytes: buf.length,
+      description: description ?? null,
+      created_at: new Date(),
+    });
+    await auditFromReq(req, "finding.evidence_upload", "findings", id, { filename, size: buf.length });
+    res.status(201).json({ id: String(insert.insertedId), filename, size_bytes: buf.length });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Enterprise: List evidence files for a finding ─────────────────────────────
+router.get("/findings/:id/evidence", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const files = await col("evidence_files").find({ finding_id: id } as Record<string, unknown>).sort({ created_at: -1 }).toArray();
+    res.json(files.map(f => ({ id: String(f["_id"]), filename: f["filename"], content_type: f["content_type"], size_bytes: f["size_bytes"], description: f["description"], created_at: f["created_at"] })));
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Enterprise: Saved filter presets ─────────────────────────────────────────
+router.get("/findings/saved-filters", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string };
+    const filters = await col("saved_filters").find({ user_id: sess.userId, resource: "findings" } as Record<string, unknown>).sort({ created_at: -1 }).toArray();
+    res.json(filters.map(f => ({ id: String(f["_id"]), name: f["name"], filters: f["filters"], created_at: f["created_at"] })));
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/findings/saved-filters", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string };
+    const { name, filters } = req.body as { name?: string; filters?: Record<string, unknown> };
+    if (!name || !filters) return res.status(400).json({ error: "name and filters are required" });
+    const insert = await col("saved_filters").insertOne({ user_id: sess.userId, resource: "findings", name, filters, created_at: new Date() });
+    res.status(201).json({ id: String(insert.insertedId), name, filters });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/findings/saved-filters/:id", requireAuth, async (req, res) => {
+  try {
+    await col("saved_filters").deleteOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Vulnerability intelligence (cached enrichment data) ───────────────────────
+router.get("/findings/:id/vuln-intel", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const finding = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Not found" });
+    const cached = await col("vuln_intel").findOne({ finding_id: id } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (cached) return res.json(cached);
+    res.json({ cve_id: finding["cve_id"] ?? null, description: null, cvss_v3_score: finding["cvss_score"] ?? null, cvss_v4_score: null, epss_score: null, epss_percentile: null, patch_available: null, public_exploits: [], first_seen: null, last_modified: null, affected_products: [] });
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
+// ── CVSS v4 inline calculator ─────────────────────────────────────────────────
+router.post("/cvss/calculate", requireAuth, async (req, res) => {
+  const { metrics } = req.body as { metrics: Record<string, string> };
+  const avScore = ({ N: 0, A: 0.85, L: 0.55, P: 0.2 } as Record<string, number>)[metrics.AV ?? "N"] ?? 0;
+  const acScore = ({ L: 0, H: 0.44 } as Record<string, number>)[metrics.AC ?? "L"] ?? 0;
+  const vcScore = ({ N: 0, L: 0.22, H: 0.56 } as Record<string, number>)[metrics.VC ?? "N"] ?? 0;
+  const viScore = ({ N: 0, L: 0.22, H: 0.56 } as Record<string, number>)[metrics.VI ?? "N"] ?? 0;
+  const vaScore = ({ N: 0, L: 0.22, H: 0.56 } as Record<string, number>)[metrics.VA ?? "N"] ?? 0;
+  const impact = Math.min(1 - (1 - vcScore) * (1 - viScore) * (1 - vaScore), 1);
+  const base = Math.round((10 - (1 - impact) * (1 - avScore) * (1 - acScore) * 10) * 10) / 10;
+  const score = Math.max(0, Math.min(10, base));
+  const severity = score === 0 ? "none" : score < 4 ? "low" : score < 7 ? "medium" : score < 9 ? "high" : "critical";
+  const vector = `CVSS:4.0/AV:${metrics.AV ?? "N"}/AC:${metrics.AC ?? "L"}/AT:${metrics.AT ?? "N"}/PR:${metrics.PR ?? "N"}/UI:${metrics.UI ?? "N"}/VC:${metrics.VC ?? "N"}/VI:${metrics.VI ?? "N"}/VA:${metrics.VA ?? "N"}`;
+  res.json({ score, severity, vector });
+});
+
 export default router;
+

@@ -154,6 +154,37 @@ app.use("/api", globalLimiter);
 app.use("/api", tenantMiddleware);
 app.use("/api", router);
 
+// SLA breach enforcement — hourly background job
+setInterval(async () => {
+  try {
+    const { col } = await import("./lib/db");
+    const { SLA_DAYS } = await import("./routes/sla-enforcement");
+    const now = new Date();
+    let totalBreached = 0;
+    for (const [severity, days] of Object.entries(SLA_DAYS)) {
+      const deadline = new Date(now.getTime() - (days as number) * 86400000);
+      const breached = await col("findings").find({
+        severity, status: { $nin: ["resolved", "false_positive"] },
+        created_at: { $lte: deadline }, sla_notified: { $ne: true },
+      } as Record<string, unknown>).limit(50).toArray() as Array<Record<string, unknown>>;
+      if (breached.length > 0) {
+        await col("findings").updateMany(
+          { _id: { $in: breached.map(f => f["_id"]) } } as Record<string, unknown>,
+          { $set: { sla_notified: true, sla_breached_at: now } }
+        );
+        totalBreached += breached.length;
+      }
+    }
+    if (totalBreached > 0) {
+      const adminEmail = process.env["ADMIN_EMAIL"] ?? "";
+      if (adminEmail) {
+        const { sendEmail } = await import("./services/email");
+        sendEmail({ to: adminEmail, subject: `[SLA Alert] ${totalBreached} finding(s) breached SLA`, html: `<p>${totalBreached} finding(s) have exceeded their SLA deadline. Log in to review them.</p>` }).catch(() => {});
+      }
+    }
+  } catch { /* non-fatal */ }
+}, 60 * 60 * 1000);
+
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });
 });

@@ -3,11 +3,14 @@ import { useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Shield, Users, ScrollText, Webhook, Settings, ArrowRight,
   Activity, Lock, AlertTriangle, BarChart3,
   Play, RefreshCw, CheckCircle2, XCircle, Clock,
   Terminal, FlaskConical, ChevronDown, ChevronRight,
+  ShieldOff,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -57,6 +60,145 @@ interface TestSuiteInfo {
 const STATUS_COLORS: Record<string, string> = {
   pass: "#22c55e", fail: "#ef4444", warn: "#facc15", error: "#f87171", skipped: "#9ca3af",
 };
+
+// ── Rate Limit Events Panel ───────────────────────────────────────────────
+
+interface RateLimitEvent {
+  ip: string;
+  endpoint: string;
+  count: number;
+  window_start: string;
+  blocked: boolean;
+}
+
+function RateLimitEventsPanel() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [ipFilter, setIpFilter] = useState("");
+
+  const { data: events = [] } = useQuery<RateLimitEvent[]>({
+    queryKey: ["/api/admin/rate-limit-events"],
+    queryFn: () => fetch("/api/admin/rate-limit-events?limit=100", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
+
+  const blockIp = useMutation({
+    mutationFn: (ip: string) =>
+      fetch("/api/admin/block-ip", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip }),
+      }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/rate-limit-events"] }); toast({ title: "IP blocked" }); },
+    onError: () => toast({ title: "Failed to block IP", variant: "destructive" }),
+  });
+
+  const whitelistIp = useMutation({
+    mutationFn: (ip: string) =>
+      fetch("/api/admin/whitelist-ip", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ip }),
+      }).then(r => r.json()),
+    onSuccess: () => toast({ title: "IP whitelisted" }),
+    onError: () => toast({ title: "Failed to whitelist IP", variant: "destructive" }),
+  });
+
+  const filtered = events.filter(e => !ipFilter || e.ip.includes(ipFilter));
+  const uniqueIps = new Set(events.map(e => e.ip)).size;
+  const blockedToday = events.filter(e => e.blocked).length;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <ShieldOff className="w-5 h-5 text-orange-400" />
+          Rate Limit Events
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">Monitor and manage IP addresses hitting rate limits.</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Stats bar */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: "Total Events", value: events.length, color: "#f97316" },
+            { label: "Unique IPs", value: uniqueIps, color: "#60a5fa" },
+            { label: "Blocked Today", value: blockedToday, color: "#ef4444" },
+          ].map(s => (
+            <div key={s.label} className="rounded-lg border border-border p-3 text-center">
+              <p className="text-xl font-bold" style={{ color: s.color }}>{s.value}</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Filter */}
+        <Input
+          placeholder="Filter by IP address..."
+          value={ipFilter}
+          onChange={e => setIpFilter(e.target.value)}
+          className="h-8 text-sm"
+        />
+
+        {/* Table */}
+        {filtered.length === 0 ? (
+          <div className="py-10 text-center text-muted-foreground text-sm">
+            <ShieldOff className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            No rate limit events — all traffic is within limits
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">IP</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Endpoint</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Hits</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Window Start</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Status</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {filtered.map((ev, i) => (
+                  <tr key={i} className="hover:bg-accent/20 transition-colors">
+                    <td className="px-3 py-2 font-mono">{ev.ip}</td>
+                    <td className="px-3 py-2 font-mono text-muted-foreground truncate max-w-[180px]">{ev.endpoint}</td>
+                    <td className="px-3 py-2 font-bold">{ev.count}</td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {new Date(ev.window_start).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2">
+                      {ev.blocked ? (
+                        <Badge className="bg-red-500/15 text-red-500 border-red-500/30 text-[10px]">Blocked</Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-green-500 border-green-500/30 text-[10px]">Active</Badge>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <Button size="sm" variant="destructive" className="h-6 text-[10px] px-2"
+                          onClick={() => blockIp.mutate(ev.ip)}
+                          disabled={blockIp.isPending}>
+                          Block IP
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-6 text-[10px] px-2"
+                          onClick={() => whitelistIp.mutate(ev.ip)}
+                          disabled={whitelistIp.isPending}>
+                          Whitelist
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function AdminPanel() {
   const [, setLocation] = useLocation();
@@ -360,6 +502,9 @@ export default function AdminPanel() {
           </CardContent>
         </Card>
       )}
+
+      {/* Rate Limit Events */}
+      <RateLimitEventsPanel />
 
       {/* Security Notice */}
       <div className="flex items-start gap-3 rounded-xl px-4 py-3 text-xs"

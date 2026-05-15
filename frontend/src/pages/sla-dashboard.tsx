@@ -14,7 +14,7 @@ import {
 import {
   CheckCircle2, AlertTriangle, XCircle, Clock, RefreshCw,
   ExternalLink, Timer, TrendingDown, BarChart2, CalendarDays,
-  Plus, ChevronDown, ChevronRight,
+  Plus, ChevronDown, ChevronRight, Download, Zap, MoreVertical,
 } from "lucide-react";
 import { format, parseISO, isValid } from "date-fns";
 
@@ -186,6 +186,69 @@ function ExceptionDialog({
   );
 }
 
+// ── SLA Extension dialog for individual findings ──────────────────────────────
+
+function SlaExtendDialog({
+  finding,
+  onClose,
+  onSubmit,
+  submitting,
+}: {
+  finding: SlaFinding;
+  onClose: () => void;
+  onSubmit: (days: number, reason: string) => void;
+  submitting: boolean;
+}) {
+  const [days, setDays] = useState<7 | 14 | 30>(7);
+  const [justification, setJustification] = useState("");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl shadow-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <h3 className="font-semibold mb-1">Extend SLA Deadline</h3>
+        <p className="text-xs text-muted-foreground mb-4 font-medium">{finding.title}</p>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs mb-2 block">Extend by</Label>
+            <div className="flex gap-2">
+              {([7, 14, 30] as const).map(d => (
+                <button
+                  key={d}
+                  onClick={() => setDays(d)}
+                  className={`flex-1 py-2 rounded-md text-sm border transition-colors ${days === d
+                    ? "border-primary bg-primary/10 text-primary font-semibold"
+                    : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {d} days
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs mb-1 block">Justification</Label>
+            <textarea
+              value={justification}
+              onChange={e => setJustification(e.target.value)}
+              placeholder="Explain why additional time is needed…"
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none h-20"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button
+            size="sm"
+            disabled={!justification.trim() || submitting}
+            onClick={() => onSubmit(days, justification)}
+          >
+            {submitting ? "Saving…" : "Extend SLA"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────
 
 export default function SlaDashboard() {
@@ -198,6 +261,7 @@ export default function SlaDashboard() {
   const [showExceptions, setShowExceptions] = useState(false);
   const [exceptionTarget, setExceptionTarget] = useState<SlaFinding | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
+  const [extendTarget, setExtendTarget] = useState<SlaFinding | null>(null);
 
   const { data, isLoading, refetch } = useQuery<SlaSummary>({
     queryKey: ["/api/sla/summary"],
@@ -252,6 +316,55 @@ export default function SlaDashboard() {
     },
   });
 
+  // A. Enforce Now
+  const enforce = useMutation({
+    mutationFn: () =>
+      fetch("/api/sla/enforce", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }).then(r => r.json()),
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ["/api/sla/summary"] });
+      toast({ title: `SLA enforcement complete — ${result.breached ?? 0} findings marked` });
+    },
+    onError: () => {
+      toast({ title: "Enforcement failed", variant: "destructive" });
+    },
+  });
+
+  // B. Export SLA Report
+  async function exportSlaReport() {
+    const res = await fetch("/api/sla/report", { credentials: "include" });
+    const report: Array<{ severity: string; total: number; breached: number; at_risk: number; compliant: number }> = await res.json();
+    const header = "Severity,Total,Breached,At Risk,Compliant";
+    const rows = report.map(r => `${r.severity},${r.total},${r.breached},${r.at_risk},${r.compliant}`);
+    const csvContent = [header, ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "sla-report.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // C. SLA Extension for individual findings
+  const extendSla = useMutation({
+    mutationFn: ({ id, days, reason }: { id: string; days: number; reason: string }) =>
+      fetch(`/api/findings/${id}`, {
+        method: "PATCH", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sla_extended_days: days, sla_extension_reason: reason }),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/sla/summary"] });
+      setExtendTarget(null);
+      toast({ title: "SLA deadline extended" });
+    },
+    onError: () => {
+      toast({ title: "Failed to extend SLA", variant: "destructive" });
+    },
+  });
+
   const handleResolve = async (id: string) => {
     setResolving(id);
     try {
@@ -297,6 +410,15 @@ export default function SlaDashboard() {
               <AlertTriangle className="w-4 h-4 mr-1.5" />{pendingExceptions.length} Pending Exception{pendingExceptions.length !== 1 ? "s" : ""}
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={exportSlaReport}>
+            <Download className="w-4 h-4 mr-1.5" />Export SLA Report
+          </Button>
+          <Button variant="outline" size="sm"
+            disabled={enforce.isPending}
+            onClick={() => enforce.mutate()}>
+            <Zap className="w-4 h-4 mr-1.5" />
+            {enforce.isPending ? "Enforcing…" : "Enforce Now"}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => refetch()}>
             <RefreshCw className="w-4 h-4 mr-1.5" />Refresh
           </Button>
@@ -599,6 +721,13 @@ export default function SlaDashboard() {
                           {resolving === f.id ? "…" : "Resolve"}
                         </Button>
                       )}
+                      {/* 3-dot menu with Extend SLA */}
+                      <div className="relative group">
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                          onClick={() => setExtendTarget(extendTarget?.id === f.id ? null : f)}>
+                          <MoreVertical className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -614,6 +743,18 @@ export default function SlaDashboard() {
           finding={exceptionTarget}
           onClose={() => setExceptionTarget(null)}
           onSubmit={(data) => createException.mutate(data)}
+        />
+      )}
+
+      {/* SLA Extension dialog */}
+      {extendTarget && (
+        <SlaExtendDialog
+          finding={extendTarget}
+          onClose={() => setExtendTarget(null)}
+          submitting={extendSla.isPending}
+          onSubmit={(days, reason) =>
+            extendSla.mutate({ id: extendTarget.id, days, reason })
+          }
         />
       )}
     </div>

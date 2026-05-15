@@ -133,6 +133,37 @@ router.post("/notifications/mark-all-read", requireAuth, async (req, res) => {
   }
 });
 
+// PATCH /notifications/:id/read — mark a single notification as read
+router.patch("/notifications/:id/read", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    await col("notifications").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: { read: true, read_at: new Date() } }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Mark read error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /notifications/read-all — alias for mark-all-read (used by notification bell)
+router.post("/notifications/read-all", requireAuth, async (req, res) => {
+  try {
+    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const userId = (session["userId"] as string) ?? null;
+    const query: Record<string, unknown> = { read: { $ne: true } };
+    if (userId) query["$or"] = [{ user_id: userId }, { user_id: { $exists: false } }];
+    await col("notifications").updateMany(query, { $set: { read: true, read_at: new Date() } });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Read-all error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // DELETE /notifications/:id — delete a single notification
 router.delete("/notifications/:id", requireAuth, async (req, res) => {
   try {

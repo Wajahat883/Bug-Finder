@@ -10,6 +10,7 @@ import { format } from "date-fns";
 import {
   Github, Slack, Link, Plug, Plus, Trash2, Play, Pause,
   Mail, Calendar, Send, CheckCircle2, XCircle, AlertTriangle, Globe,
+  Activity, Clock, BarChart2,
 } from "lucide-react";
 
 // ── helpers ───────────────────────────────────────────────────────────────
@@ -432,6 +433,244 @@ function WebhookManagerPanel() {
   );
 }
 
+// ── Integration Health Dashboard ──────────────────────────────────────────
+
+interface WebhookHealth {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  delivery_count: number;
+  last_triggered: string | null;
+  last_status: number | null;
+  last_ok: boolean | null;
+  status: "healthy" | "failing" | "untested";
+}
+
+interface HealthData {
+  webhooks: WebhookHealth[];
+  summary: { total: number; healthy: number; failing: number; untested: number };
+}
+
+function WebhookHealthPanel() {
+  const { data, isLoading } = useQuery<HealthData>({
+    queryKey: ["/api/integrations/health"],
+    queryFn: () => fetch("/api/integrations/health", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30000,
+  });
+
+  const statusColors: Record<string, string> = {
+    healthy: "text-green-500 border-green-500/30 bg-green-500/10",
+    failing: "text-red-500 border-red-500/30 bg-red-500/10",
+    untested: "text-muted-foreground border-border bg-muted/20",
+  };
+
+  if (isLoading) return null;
+  if (!data || data.webhooks.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Activity className="w-5 h-5 text-primary" />
+            Webhook Delivery Health
+          </CardTitle>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500 inline-block" />{data.summary.healthy} healthy</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500 inline-block" />{data.summary.failing} failing</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-muted-foreground/40 inline-block" />{data.summary.untested} untested</span>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">Real-time delivery status for all enabled webhooks.</p>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {data.webhooks.map(hook => (
+          <div key={hook.id} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-accent/20 transition-colors">
+            <Badge className={`text-[10px] px-1.5 py-0 border capitalize shrink-0 ${statusColors[hook.status]}`}>
+              {hook.status}
+            </Badge>
+            <div className="flex-1 min-w-0">
+              <div className="font-medium text-sm truncate">{String(hook.name)}</div>
+              <div className="text-[11px] text-muted-foreground font-mono truncate">{hook.url}</div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1" title="Delivery count">
+                <BarChart2 className="w-3.5 h-3.5" />
+                {hook.delivery_count}
+              </span>
+              {hook.last_triggered && (
+                <span className="flex items-center gap-1" title="Last triggered">
+                  <Clock className="w-3.5 h-3.5" />
+                  {format(new Date(hook.last_triggered), "MMM d, HH:mm")}
+                </span>
+              )}
+              {hook.last_status != null && (
+                <Badge variant="outline" className={`text-[10px] px-1.5 py-0 font-mono ${hook.last_ok ? "text-green-500 border-green-500/30" : "text-red-400 border-red-500/30"}`}>
+                  {hook.last_status}
+                </Badge>
+              )}
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── OAuth Integrations ────────────────────────────────────────────────────
+
+const OAUTH_INTEGRATIONS = [
+  { id: "jira", name: "Jira", icon: "🎫", description: "Create and sync Jira tickets from findings", connectUrl: "/api/integrations/oauth/jira/begin" },
+  { id: "github", name: "GitHub", icon: "🐙", description: "Create GitHub issues from findings", connectUrl: "/api/integrations/oauth/github/begin" },
+  { id: "slack", name: "Slack", icon: "💬", description: "Send alerts to Slack channels", connectUrl: "/api/integrations/oauth/slack/begin" },
+  { id: "pagerduty", name: "PagerDuty", icon: "🚨", description: "Trigger PagerDuty incidents for critical findings", connectUrl: "/api/integrations/oauth/pagerduty/begin" },
+  { id: "linear", name: "Linear", icon: "📐", description: "Create Linear issues from findings", connectUrl: "/api/integrations/oauth/linear/begin" },
+];
+
+interface OAuthConnection {
+  id: string;
+  integration_id: string;
+  account_name: string;
+  permissions: string[];
+  connected_at: string;
+  last_sync: string | null;
+}
+
+function OAuthIntegrationsPanel() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
+
+  const { data: connections = [] } = useQuery<OAuthConnection[]>({
+    queryKey: ["/api/integrations/connections"],
+    queryFn: () => fetch("/api/integrations/connections", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const disconnect = useMutation({
+    mutationFn: (connectionId: string) =>
+      fetch(`/api/integrations/connections/${connectionId}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/integrations/connections"] });
+      toast({ title: "Integration disconnected" });
+      setConfirmDisconnect(null);
+    },
+    onError: () => toast({ title: "Failed to disconnect", variant: "destructive" }),
+  });
+
+  const testConnection = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/integrations/${id}/test`, { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: (d) => toast({ title: d.ok ? d.message : "Test failed", variant: d.ok ? "default" : "destructive" }),
+    onError: () => toast({ title: "Test failed", variant: "destructive" }),
+  });
+
+  const syncNow = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/integrations/${id}/sync`, { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/integrations/connections"] });
+      toast({ title: "Sync initiated" });
+    },
+    onError: () => toast({ title: "Sync failed", variant: "destructive" }),
+  });
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Globe className="w-5 h-5 text-primary" />
+          Connected Integrations
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">Connect third-party services via OAuth for seamless workflow integration.</p>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {OAUTH_INTEGRATIONS.map(intg => {
+            const conn = connections.find(c => c.integration_id === intg.id);
+            return (
+              <div key={intg.id} className="rounded-lg border border-border p-4 flex flex-col gap-3">
+                <div className="flex items-start gap-3">
+                  <span className="text-2xl leading-none mt-0.5">{intg.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm">{intg.name}</span>
+                      {conn ? (
+                        <Badge className="bg-green-500/15 text-green-500 border-green-500/30 gap-1 text-[10px]">
+                          <CheckCircle2 className="w-3 h-3" /> Connected
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-muted-foreground text-[10px]">
+                          <XCircle className="w-3 h-3 mr-1" /> Not Connected
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{intg.description}</p>
+                  </div>
+                </div>
+
+                {conn ? (
+                  <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground space-y-0.5">
+                      <p><span className="font-medium">Account:</span> {conn.account_name}</p>
+                      <p><span className="font-medium">Connected:</span> {format(new Date(conn.connected_at), "MMM d, yyyy")}</p>
+                      {conn.last_sync && (
+                        <p><span className="font-medium">Last sync:</span> {format(new Date(conn.last_sync), "MMM d, HH:mm")}</p>
+                      )}
+                      {conn.permissions.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {conn.permissions.map(p => (
+                            <Badge key={p} variant="outline" className="text-[9px] px-1.5 py-0 font-mono">{p}</Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <Button size="sm" variant="outline" className="h-7 text-xs"
+                        onClick={() => testConnection.mutate(intg.id)}
+                        disabled={testConnection.isPending}>
+                        Test Connection
+                      </Button>
+                      <Button size="sm" variant="outline" className="h-7 text-xs"
+                        onClick={() => syncNow.mutate(intg.id)}
+                        disabled={syncNow.isPending}>
+                        Sync Now
+                      </Button>
+                      {confirmDisconnect === conn.id ? (
+                        <>
+                          <Button size="sm" variant="destructive" className="h-7 text-xs"
+                            onClick={() => disconnect.mutate(conn.id)}
+                            disabled={disconnect.isPending}>
+                            Confirm
+                          </Button>
+                          <Button size="sm" variant="ghost" className="h-7 text-xs"
+                            onClick={() => setConfirmDisconnect(null)}>
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive"
+                          onClick={() => setConfirmDisconnect(conn.id)}>
+                          Disconnect
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <Button size="sm" variant="outline" className="self-start"
+                    onClick={() => { window.location.href = intg.connectUrl; }}>
+                    Connect {intg.name}
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────
 
 export default function Integrations() {
@@ -520,11 +759,17 @@ export default function Integrations() {
       {/* Jira */}
       <JiraPanel jira={data?.["jira"]} />
 
+      {/* OAuth Integrations */}
+      <OAuthIntegrationsPanel />
+
       {/* Scheduled email reports */}
       <ReportSchedulesPanel />
 
       {/* Webhooks */}
       <WebhookManagerPanel />
+
+      {/* Webhook delivery health */}
+      <WebhookHealthPanel />
 
       {/* Status note */}
       {!process.env["NODE_ENV"] && (

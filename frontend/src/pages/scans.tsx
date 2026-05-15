@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   Search, Plus, Trash2, Eye, MoreHorizontal, Download, StopCircle,
   ChevronLeft, ChevronRight, Activity, Sparkles, CheckSquare, Square,
-  AlertCircle, Shield,
+  AlertCircle, Shield, GitCompare,
 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -56,44 +56,42 @@ function SeverityPill({ label, count }: { label: string; count: number }) {
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 
-function EmptyState({ hasFilters, onNewScan }: { hasFilters: boolean; onNewScan: () => void }) {
-  if (hasFilters) {
-    return (
-      <tr>
-        <td colSpan={8} className="px-4 py-16 text-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-12 h-12 rounded-full flex items-center justify-center"
-              style={{ background: "hsl(var(--muted))" }}>
-              <Search className="w-6 h-6" style={{ color: "hsl(var(--muted-foreground))" }} />
-            </div>
-            <p className="text-sm font-medium" style={{ color: "hsl(var(--foreground))" }}>No scans match your filters</p>
-            <p className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>Try adjusting the search or status filter</p>
-          </div>
-        </td>
-      </tr>
-    );
-  }
+function FilterEmptyState() {
   return (
     <tr>
       <td colSpan={8} className="px-4 py-16 text-center">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.2), rgba(168,85,247,0.1))", border: "1px solid rgba(124,58,237,0.3)" }}>
-            <Shield className="w-8 h-8" style={{ color: "#a855f7" }} />
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 rounded-full flex items-center justify-center"
+            style={{ background: "hsl(var(--muted))" }}>
+            <Search className="w-6 h-6" style={{ color: "hsl(var(--muted-foreground))" }} />
           </div>
-          <div className="space-y-1">
-            <p className="text-sm font-semibold" style={{ color: "hsl(var(--foreground))" }}>No scans yet</p>
-            <p className="text-xs max-w-[260px]" style={{ color: "hsl(var(--muted-foreground))" }}>
-              Start your first vulnerability scan to discover security issues in your targets.
-            </p>
-          </div>
-          <Button onClick={onNewScan} size="sm"
-            style={{ background: "linear-gradient(135deg, #7c3aed, #a855f7)", color: "white", border: "none" }}>
-            <Plus className="w-4 h-4 mr-1.5" />Start First Scan
-          </Button>
+          <p className="text-sm font-medium" style={{ color: "hsl(var(--foreground))" }}>
+            No scans match your filter — try clearing filters
+          </p>
         </div>
       </td>
     </tr>
+  );
+}
+
+function NoScansEmptyState({ onNewScan }: { onNewScan: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-24 text-center">
+      <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+        style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.2), rgba(168,85,247,0.1))", border: "1px solid rgba(124,58,237,0.3)" }}>
+        <Activity className="w-8 h-8" style={{ color: "#a855f7" }} />
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-semibold" style={{ color: "hsl(var(--foreground))" }}>No scans yet</p>
+        <p className="text-xs max-w-[260px]" style={{ color: "hsl(var(--muted-foreground))" }}>
+          Start your first security scan to discover vulnerabilities
+        </p>
+      </div>
+      <Button onClick={onNewScan} size="sm"
+        style={{ background: "linear-gradient(135deg, #7c3aed, #a855f7)", color: "white", border: "none" }}>
+        <Plus className="w-4 h-4 mr-1.5" />New Scan
+      </Button>
+    </div>
   );
 }
 
@@ -223,6 +221,28 @@ export default function Scans() {
   function exportCSV() { window.open(`/api/scan-jobs/export/csv?${params}`, "_blank"); }
   function exportJSON() { window.open(`/api/scan-jobs/export/json?${params}`, "_blank"); }
 
+  async function compareWithPrevious(scan: any) {
+    try {
+      const res = await fetch(
+        `/api/scan-jobs?target_url=${encodeURIComponent(scan.target_url)}&page_size=20`,
+        { credentials: "include" }
+      );
+      const data = await res.json();
+      const others: any[] = (data?.items ?? []).filter((s: any) => s.id !== scan.id);
+      if (others.length === 0) {
+        toast({ title: "No previous scan found for this target" });
+        return;
+      }
+      // Most recent previous scan
+      const prev = others.sort((a: any, b: any) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      )[0];
+      setLocation(`/scans/compare?a=${prev.id}&b=${scan.id}`);
+    } catch {
+      toast({ title: "Failed to fetch scans", variant: "destructive" });
+    }
+  }
+
   function handleSearch(v: string) { setSearch(v); setPage(1); setSelectedIds(new Set()); }
   function handleStatus(v: string) { setStatusFilter(v); setPage(1); setSelectedIds(new Set()); }
 
@@ -316,6 +336,8 @@ export default function Scans() {
       {/* Table */}
       {isLoading ? (
         <TableSkeleton rows={8} cols={7} />
+      ) : scans.length === 0 && !hasFilters ? (
+        <NoScansEmptyState onNewScan={() => setLocation("/scans/new")} />
       ) : (
         <div className="rounded-lg border overflow-x-auto"
           style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
@@ -348,7 +370,7 @@ export default function Scans() {
             </thead>
             <tbody className="divide-y" style={{ borderColor: "hsl(var(--border))" }}>
               {scans.length === 0 ? (
-                <EmptyState hasFilters={hasFilters} onNewScan={() => setLocation("/scans/new")} />
+                <FilterEmptyState />
               ) : (
                 scans.map((scan) => {
                   const isSelected = selectedIds.has(scan.id);
@@ -414,6 +436,9 @@ export default function Scans() {
                                 <Sparkles className="mr-2 h-4 w-4" />AI Triage
                               </DropdownMenuItem>
                             )}
+                            <DropdownMenuItem onClick={() => compareWithPrevious(scan)}>
+                              <GitCompare className="mr-2 h-4 w-4" />Compare with Previous
+                            </DropdownMenuItem>
                             {(scan.status === "running" || scan.status === "queued") && (
                               <DropdownMenuItem
                                 className="text-orange-400 focus:text-orange-400"

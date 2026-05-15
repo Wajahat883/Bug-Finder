@@ -4,8 +4,15 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Shield, KeyRound, CheckCircle2, XCircle, Loader2, Copy, QrCode, RefreshCw, Fingerprint, Trash2 } from "lucide-react";
+import { Shield, KeyRound, CheckCircle2, XCircle, Loader2, Copy, QrCode, RefreshCw, Fingerprint, Trash2, UsbIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+interface SecurityKey {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used?: string | null;
+}
 
 export default function TwoFactorSetup() {
   const [step, setStep] = useState<"idle" | "setup" | "verify">("idle");
@@ -13,6 +20,7 @@ export default function TwoFactorSetup() {
   const [secret, setSecret] = useState("");
   const [otpauthUrl, setOtpAuthUrl] = useState("");
   const [registeringPasskey, setRegisteringPasskey] = useState(false);
+  const [registeringSecurityKey, setRegisteringSecurityKey] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -27,6 +35,96 @@ export default function TwoFactorSetup() {
     queryFn: () => fetch("/api/webauthn/credentials", { credentials: "include" }).then(r => r.json()),
     staleTime: 30000,
   });
+
+  const { data: securityKeys, refetch: refetchSecurityKeys } = useQuery<SecurityKey[]>({
+    queryKey: ["/api/webauthn/credentials/security-keys"],
+    queryFn: () =>
+      fetch("/api/webauthn/credentials", { credentials: "include" })
+        .then(r => r.json())
+        .then((items: unknown[]) =>
+          (items as Array<Record<string, unknown>>).map(item => ({
+            id: String(item["id"] ?? item["_id"] ?? ""),
+            name: String(item["name"] ?? item["device_type"] ?? "Security Key"),
+            created_at: String(item["created_at"] ?? ""),
+            last_used: item["last_used"] ? String(item["last_used"]) : null,
+          }))
+        ),
+    staleTime: 30000,
+  });
+
+  const removeSecurityKeyMutation = useMutation({
+    mutationFn: (id: string) =>
+      fetch(`/api/webauthn/credentials/${id}`, { method: "DELETE", credentials: "include" }).then(r => r.json()),
+    onSuccess: () => { toast({ title: "Security key removed" }); refetchSecurityKeys(); refetchPasskeys(); },
+    onError: () => toast({ title: "Failed to remove security key", variant: "destructive" }),
+  });
+
+  const registerSecurityKey = async () => {
+    if (!navigator.credentials) {
+      toast({ title: "WebAuthn not supported in this browser", variant: "destructive" });
+      return;
+    }
+    setRegisteringSecurityKey(true);
+    try {
+      const beginResp = await fetch("/api/webauthn/register/begin", { method: "GET", credentials: "include" });
+      if (!beginResp.ok) {
+        toast({ title: "Server error starting security key registration", variant: "destructive" });
+        return;
+      }
+      const { options } = await beginResp.json() as { options: PublicKeyCredentialCreationOptions };
+
+      // Decode base64url challenge and user.id
+      const decode = (s: string) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+      const publicKey: PublicKeyCredentialCreationOptions = {
+        ...options,
+        challenge: decode(options.challenge as unknown as string),
+        user: { ...options.user, id: decode(options.user.id as unknown as string) },
+        excludeCredentials: options.excludeCredentials?.map(c => ({ ...c, id: decode(c.id as unknown as string) })),
+      };
+
+      const credential = await navigator.credentials.create({ publicKey });
+      if (!credential) throw new Error("Credential creation returned null");
+
+      // Encode for transport
+      const cred = credential as PublicKeyCredential;
+      const response = cred.response as AuthenticatorAttestationResponse;
+      const toBase64url = (buf: ArrayBuffer) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
+      const completeResp = await fetch("/api/webauthn/register/complete", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: cred.id,
+          rawId: toBase64url(cred.rawId),
+          type: cred.type,
+          response: {
+            attestationObject: toBase64url(response.attestationObject),
+            clientDataJSON: toBase64url(response.clientDataJSON),
+          },
+        }),
+      });
+      const result = await completeResp.json() as { ok?: boolean; error?: string };
+      if (result.ok) {
+        toast({ title: "Security key registered successfully" });
+        refetchSecurityKeys();
+        refetchPasskeys();
+      } else {
+        toast({ title: result.error ?? "Registration failed", variant: "destructive" });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Registration cancelled or failed";
+      toast({ title: msg, variant: "destructive" });
+    } finally {
+      setRegisteringSecurityKey(false);
+    }
+  };
+
+  const daysSince = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return "Never";
+    const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+    return diff === 0 ? "Today" : `${diff} day${diff !== 1 ? "s" : ""} ago`;
+  };
 
   const setupMutation = useMutation({
     mutationFn: () => fetch("/api/auth/2fa/setup", { method: "POST", credentials: "include" }).then(r => r.json()),
@@ -184,9 +282,75 @@ export default function TwoFactorSetup() {
     );
   })();
 
+  const securityKeyList = Array.isArray(securityKeys) ? securityKeys : [];
+
   return (
     <div className="space-y-4">
       {totpCard}
+
+      {/* Security Keys & Passkeys — WebAuthn (navigator.credentials) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <UsbIcon className="w-5 h-5 text-amber-400" /> Security Keys &amp; Passkeys
+          </CardTitle>
+          <CardDescription>
+            Register hardware security keys (YubiKey, etc.) or device passkeys for phishing-resistant authentication.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {securityKeyList.length > 0 ? (
+            <div className="space-y-2">
+              {securityKeyList.map(key => (
+                <div
+                  key={key.id}
+                  className="flex items-center justify-between px-3 py-2 rounded-lg border text-sm"
+                  style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }}
+                >
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium">{key.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      Registered {new Date(key.created_at).toLocaleDateString()} &middot; Last used: {daysSince(key.last_used)}
+                    </span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-red-400 hover:text-red-300 h-7 px-2"
+                    disabled={removeSecurityKeyMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm(`Remove security key "${key.name}"?`)) {
+                        removeSecurityKeyMutation.mutate(key.id);
+                      }
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No security keys or passkeys registered yet.</p>
+          )}
+
+          <Button
+            onClick={registerSecurityKey}
+            disabled={registeringSecurityKey}
+            variant="outline"
+            className="w-full"
+          >
+            {registeringSecurityKey ? (
+              <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Waiting for security key…</>
+            ) : (
+              <><UsbIcon className="w-4 h-4 mr-2" /> Register New Security Key / Passkey</>
+            )}
+          </Button>
+
+          <p className="text-xs text-muted-foreground text-center">
+            Passkeys are stored in your device&apos;s secure enclave or password manager.
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Passkeys / WebAuthn */}
       <Card>

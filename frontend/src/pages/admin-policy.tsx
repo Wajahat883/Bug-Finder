@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Lock, Save, Loader2, Shield } from "lucide-react";
+import { Lock, Save, Loader2, Shield, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Policy {
@@ -15,9 +15,56 @@ interface Policy {
   password_min_length: number;
 }
 
+interface MfaPolicy {
+  require_mfa_roles: string[];
+  mfa_grace_days: number;
+}
+
+const MFA_ROLES = ["viewer", "analyst", "senior", "admin"] as const;
+
 export default function AdminPolicy() {
   const { toast } = useToast();
   const qc = useQueryClient();
+
+  // MFA Policy state
+  const [mfaForm, setMfaForm] = useState<MfaPolicy>({ require_mfa_roles: [], mfa_grace_days: 7 });
+
+  const { data: mfaPolicy } = useQuery<MfaPolicy>({
+    queryKey: ["/api/admin/policy", "mfa"],
+    queryFn: () =>
+      fetch("/api/admin/policy", { credentials: "include" })
+        .then(r => r.json())
+        .then((d: Record<string, unknown>) => ({
+          require_mfa_roles: (d["require_mfa_roles"] as string[]) ?? [],
+          mfa_grace_days: (d["mfa_grace_days"] as number) ?? 7,
+        })),
+  });
+
+  useEffect(() => { if (mfaPolicy) setMfaForm(mfaPolicy); }, [mfaPolicy]);
+
+  const saveMfaMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/admin/policy", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ require_mfa_roles: mfaForm.require_mfa_roles, mfa_grace_days: mfaForm.mfa_grace_days }),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/policy"] });
+      toast({ title: "MFA policy saved" });
+    },
+    onError: () => toast({ title: "Failed to save MFA policy", variant: "destructive" }),
+  });
+
+  const toggleMfaRole = (role: string) => {
+    setMfaForm(f => ({
+      ...f,
+      require_mfa_roles: f.require_mfa_roles.includes(role)
+        ? f.require_mfa_roles.filter(r => r !== role)
+        : [...f.require_mfa_roles, role],
+    }));
+  };
 
   const { data: policy, isLoading } = useQuery<Policy>({
     queryKey: ["/api/admin/policy"],
@@ -144,6 +191,70 @@ export default function AdminPolicy() {
           Save Policy
         </Button>
       </div>
+
+      {/* MFA Enforcement Policy */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-blue-400" /> Multi-Factor Authentication Policy
+          </CardTitle>
+          <CardDescription>
+            Require MFA enrollment for specific roles before they can access the platform.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="space-y-3">
+            <p className="text-sm font-medium">Roles Required to Enroll in MFA</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {MFA_ROLES.map(role => (
+                <label key={role} className="flex items-center gap-2 cursor-pointer select-none text-sm">
+                  <input
+                    type="checkbox"
+                    checked={mfaForm.require_mfa_roles.includes(role)}
+                    onChange={() => toggleMfaRole(role)}
+                    className="accent-blue-500 w-4 h-4"
+                  />
+                  <span className="capitalize">{role}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between py-2 border-t" style={{ borderColor: "hsl(var(--border))" }}>
+            <div>
+              <p className="text-sm font-medium">Grace Period (days)</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Days before MFA enforcement kicks in for newly-enrolled roles (1–30).</p>
+            </div>
+            <Input
+              type="number"
+              min={1}
+              max={30}
+              value={mfaForm.mfa_grace_days}
+              onChange={e => setMfaForm(f => ({ ...f, mfa_grace_days: Math.min(30, Math.max(1, parseInt(e.target.value) || 1)) }))}
+              className="w-24 font-mono"
+            />
+          </div>
+
+          {mfaForm.require_mfa_roles.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Currently enforced for:{" "}
+              <span className="text-foreground font-medium">{mfaForm.require_mfa_roles.join(", ")}</span>
+              {" "}({mfaForm.mfa_grace_days} day grace period)
+            </p>
+          )}
+
+          <div className="flex justify-end">
+            <Button
+              onClick={() => saveMfaMutation.mutate()}
+              disabled={saveMfaMutation.isPending}
+              variant="outline"
+            >
+              {saveMfaMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
+              Save MFA Policy
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

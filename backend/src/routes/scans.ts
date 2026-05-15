@@ -2,7 +2,8 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
-import { requireAuth } from "../middlewares/rbac";
+import { requireAuth, requireAdmin } from "../middlewares/rbac";
+import { auditFromReq } from "../lib/audit";
 import { checkSsrf } from "../lib/ssrf-guard";
 import { getComplianceTags } from "../lib/compliance-map";
 import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
@@ -359,6 +360,154 @@ router.post("/scan-jobs/:id/resume", async (req, res) => {
     );
     if (!result) return res.status(404).json({ error: "Scan not found or not paused" });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// DELETE /scan-jobs/:id — Abort/cancel a running scan
+router.delete("/scan-jobs/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!scan) return res.status(404).json({ error: "Scan not found" });
+    if (!["running", "queued", "pending"].includes(String(scan["status"] ?? ""))) {
+      return res.status(400).json({ error: "Scan is not running or queued" });
+    }
+    // Set abort flag in Redis for the scanner to pick up
+    try {
+      const { getRedis } = await import("../lib/redis");
+      await getRedis().set(`scan:abort:${id}`, "1", "EX", 300);
+    } catch { /* non-fatal if Redis unavailable */ }
+    // Update status immediately
+    await col("scan_jobs").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: { status: "cancelled", cancelled_at: new Date(), updated_at: new Date() } }
+    );
+    await auditFromReq(req, "scan.abort", "scan_jobs", id);
+    res.json({ ok: true, message: "Scan abort requested" });
+  } catch (err) {
+    logger.error({ err }, "Scan abort error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /scan-jobs/:id/progress — SSE stream for real-time scan progress
+router.get("/scan-jobs/:id/progress", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  let closed = false;
+  const send = (data: Record<string, unknown>) => {
+    if (!closed) res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  const interval = setInterval(async () => {
+    try {
+      const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+      if (!scan) { clearInterval(interval); res.end(); return; }
+      send({
+        status: scan["status"],
+        progress: scan["progress"] ?? 0,
+        modules_total: scan["modules_total"] ?? 0,
+        modules_done: scan["modules_done"] ?? 0,
+        current_module: scan["current_module"] ?? null,
+        findings_count: scan["findings_count"] ?? 0,
+        updated_at: scan["updated_at"],
+      });
+      if (["completed", "failed", "cancelled"].includes(String(scan["status"] ?? ""))) {
+        clearInterval(interval);
+        send({ done: true, status: scan["status"] });
+        res.end();
+      }
+    } catch { clearInterval(interval); res.end(); }
+  }, 2000);
+
+  req.on("close", () => { closed = true; clearInterval(interval); });
+});
+
+// PATCH /scan-jobs/:id/priority — Set scan priority (admin)
+router.patch("/scan-jobs/:id/priority", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { priority } = req.body as { priority?: number };
+    if (priority === undefined || priority < 1 || priority > 10) {
+      return res.status(400).json({ error: "priority must be 1-10 (10 = highest)" });
+    }
+    await col("scan_jobs").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: { priority, updated_at: new Date() } }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /scan-jobs/bulk — Launch scans for multiple targets at once
+router.post("/scan-jobs/bulk", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string; role?: string };
+    const { target_urls, profile, options } = req.body as {
+      target_urls?: string[];
+      profile?: string;
+      options?: Record<string, unknown>;
+    };
+    if (!target_urls || !Array.isArray(target_urls) || target_urls.length === 0) {
+      return res.status(400).json({ error: "target_urls array is required" });
+    }
+    if (target_urls.length > 20) {
+      return res.status(400).json({ error: "Cannot bulk-scan more than 20 targets at once" });
+    }
+    // Basic URL validation
+    const validUrls = target_urls.filter(u => { try { new URL(u); return true; } catch { return false; } });
+    if (validUrls.length === 0) return res.status(400).json({ error: "No valid URLs provided" });
+
+    const results: Array<{ url: string; scan_id: string }> = [];
+    for (const url of validUrls) {
+      const ins = await col("scan_jobs").insertOne({
+        target_url: url,
+        status: "queued",
+        profile: profile ?? "standard",
+        options: options ?? {},
+        user_id: sess.userId,
+        priority: 5,
+        progress: 0,
+        modules_total: 0,
+        modules_done: 0,
+        findings_count: 0,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+      results.push({ url, scan_id: String(ins.insertedId) });
+    }
+    await auditFromReq(req, "scan.bulk_launch", "scan_jobs", results.map(r => r.scan_id).join(","), { count: results.length });
+    res.status(201).json({ ok: true, scans: results });
+  } catch (err) {
+    logger.error({ err }, "Bulk scan launch error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /scan-jobs/queue — View the scan queue with priority ordering (admin)
+router.get("/scan-jobs/queue", requireAdmin, async (_req, res) => {
+  try {
+    const queued = await col("scan_jobs").find({ status: { $in: ["queued", "pending"] } } as Record<string, unknown>)
+      .sort({ priority: -1, created_at: 1 })
+      .limit(50)
+      .toArray() as Array<Record<string, unknown>>;
+    res.json(queued.map(s => ({
+      id: String(s["_id"]),
+      target_url: s["target_url"],
+      status: s["status"],
+      priority: s["priority"] ?? 5,
+      created_at: s["created_at"],
+      user_id: s["user_id"],
+    })));
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }

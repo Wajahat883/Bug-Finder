@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -14,7 +15,7 @@ import {
 import {
   Search, Globe, ShieldAlert, ChevronUp, ChevronDown, ChevronsUpDown,
   Upload, Tag, Play, Cpu, X, Plus, AlertTriangle, Target as TargetIcon,
-  Trash2,
+  Trash2, Download,
 } from "lucide-react";
 import { TableSkeleton } from "@/components/loading-skeleton";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -195,6 +196,155 @@ function TagEditorDialog({ target, onClose }: { target: Target; onClose: () => v
   );
 }
 
+// ── CSV row type ─────────────────────────────────────────────────────────────
+
+interface CsvRow { url: string; label: string; tags: string }
+
+function parseCsv(text: string): CsvRow[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length === 0) return [];
+  const firstLower = lines[0].toLowerCase();
+  const hasHeader = firstLower.includes("url") || firstLower.includes("label") || firstLower.includes("tags");
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+  return dataLines.map((line) => {
+    const [url = "", label = "", tags = ""] = line.split(",").map((s) => s.trim().replace(/^"|"$/g, ""));
+    return { url, label, tags };
+  }).filter((r) => r.url);
+}
+
+// ── CSV Import dialog ────────────────────────────────────────────────────────
+
+function CsvImportDialog({ onClose }: { onClose: () => void }) {
+  const [csvText, setCsvText] = useState("");
+  const [preview, setPreview] = useState<CsvRow[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: (csv_data: string) =>
+      fetch("/api/targets/import", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csv_data }),
+      }).then((r) => r.json()),
+    onSuccess: (data: { imported?: number; skipped?: number }) => {
+      const imported = data.imported ?? 0;
+      const skipped = data.skipped ?? 0;
+      qc.invalidateQueries({ queryKey: ["/api/targets"] });
+      toast({ title: `${imported} imported, ${skipped} skipped` });
+      onClose();
+    },
+    onError: () => toast({ title: "Import failed", variant: "destructive" }),
+  });
+
+  function handleTextChange(text: string) {
+    setCsvText(text);
+    setPreview(parseCsv(text).slice(0, 5));
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => handleTextChange(String(ev.target?.result ?? ""));
+    reader.readAsText(file);
+  }
+
+  function downloadTemplate() {
+    const content = "url,label,tags\nhttps://example.com,Example,production\nhttps://api.example.com,API,staging";
+    const blob = new Blob([content], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "targets-template.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function handleImport() {
+    if (!csvText.trim()) return;
+    const b64 = btoa(unescape(encodeURIComponent(csvText)));
+    mutation.mutate(b64);
+  }
+
+  const rows = parseCsv(csvText);
+
+  return (
+    <DialogContent className="max-w-lg">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2">
+          <Upload className="w-4 h-4" />Import CSV
+        </DialogTitle>
+      </DialogHeader>
+      <div className="space-y-4">
+        {/* File picker + download template */}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()} className="gap-1.5">
+            <Upload className="w-3.5 h-3.5" />Choose CSV File
+          </Button>
+          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={handleFile} />
+          <button
+            onClick={downloadTemplate}
+            className="text-xs text-primary hover:underline flex items-center gap-1 ml-auto"
+          >
+            <Download className="w-3 h-3" />Download Template
+          </button>
+        </div>
+
+        {/* Paste area */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground block mb-1">
+            Or paste CSV content
+          </label>
+          <textarea
+            className="w-full h-28 text-sm border rounded-md p-3 bg-background font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+            placeholder={"url,label,tags\nhttps://example.com,Example,production"}
+            value={csvText}
+            onChange={(e) => handleTextChange(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground mt-1">Columns: <code>url</code>, <code>label</code>, <code>tags</code>. First row may be a header.</p>
+        </div>
+
+        {/* Preview */}
+        {preview.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1.5">Preview (first {preview.length} rows):</p>
+            <div className="border rounded-md overflow-hidden text-xs">
+              <table className="w-full">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">URL</th>
+                    <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Label</th>
+                    <th className="px-3 py-1.5 text-left font-medium text-muted-foreground">Tags</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {preview.map((row, i) => (
+                    <tr key={i}>
+                      <td className="px-3 py-1.5 font-mono truncate max-w-[180px]">{row.url}</td>
+                      <td className="px-3 py-1.5">{row.label}</td>
+                      <td className="px-3 py-1.5">{row.tags}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {rows.length > 5 && (
+              <p className="text-xs text-muted-foreground mt-1">… and {rows.length - 5} more row{rows.length - 5 !== 1 ? "s" : ""}</p>
+            )}
+          </div>
+        )}
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={onClose}>Cancel</Button>
+        <Button onClick={handleImport} disabled={!rows.length || mutation.isPending}>
+          {mutation.isPending ? "Importing…" : `Import ${rows.length} target${rows.length !== 1 ? "s" : ""}`}
+        </Button>
+      </DialogFooter>
+    </DialogContent>
+  );
+}
+
 // ── Bulk import dialog ───────────────────────────────────────────────────────
 
 function BulkImportDialog({ onClose }: { onClose: () => void }) {
@@ -303,8 +453,11 @@ export default function Targets() {
   const [sortBy, setSortBy] = useState("risk_score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [showImport, setShowImport] = useState(false);
+  const [showCsvImport, setShowCsvImport] = useState(false);
   const [tagTarget, setTagTarget] = useState<Target | null>(null);
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<Target | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const { toast } = useToast();
   const qc = useQueryClient();
 
@@ -335,6 +488,31 @@ export default function Targets() {
   const targets = data?.items ?? [];
   const allTags = data?.all_tags ?? [];
 
+  async function bulkDelete() {
+    for (const id of Array.from(selectedIds)) {
+      await fetch(`/api/targets/${id}`, { method: "DELETE", credentials: "include" });
+    }
+    qc.invalidateQueries({ queryKey: ["/api/targets"] });
+    toast({ title: `${selectedIds.size} targets deleted` });
+    setSelectedIds(new Set());
+    setConfirmBulkDelete(false);
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size === targets.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(targets.map((t) => t.id)));
+  }
+
+  const allSelected = targets.length > 0 && selectedIds.size === targets.length;
+
   function toggleSort(field: string) {
     if (sortBy === field) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortBy(field); setSortDir("desc"); }
@@ -355,6 +533,9 @@ export default function Targets() {
           <p className="text-muted-foreground text-sm">Manage and monitor all scanned domains and infrastructure.</p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowCsvImport(true)}>
+            <Upload className="w-4 h-4 mr-1.5" />Import CSV
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setShowImport(true)}>
             <Upload className="w-4 h-4 mr-1.5" />Bulk Import
           </Button>
@@ -363,6 +544,24 @@ export default function Targets() {
           </Button>
         </div>
       </div>
+
+      {/* Bulk delete toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-destructive/10 border border-destructive/30">
+          <span className="text-sm font-semibold text-destructive">{selectedIds.size} selected</span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="ml-auto h-7 text-xs border-destructive/40 text-destructive hover:bg-destructive/10"
+            onClick={() => setConfirmBulkDelete(true)}
+          >
+            <Trash2 className="w-3.5 h-3.5 mr-1.5" />Delete Selected
+          </Button>
+          <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedIds(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
@@ -391,6 +590,29 @@ export default function Targets() {
       {/* Table */}
       {isLoading ? (
         <TableSkeleton rows={6} cols={8} />
+      ) : targets.length === 0 && !search && !tagFilter ? (
+        /* Empty state — no targets at all */
+        <Card>
+          <CardContent className="py-16 flex flex-col items-center gap-4 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center">
+              <TargetIcon className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-semibold">No targets yet</p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Import targets from CSV or add them manually by running a scan.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => setShowCsvImport(true)}>
+                <Upload className="w-4 h-4 mr-1.5" />Import CSV
+              </Button>
+              <Button size="sm" onClick={() => nav("/scans/new")}>
+                <Play className="w-4 h-4 mr-1.5" />Add Target
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       ) : (
       <Card className="overflow-hidden">
         <CardContent className="p-0">
@@ -398,6 +620,13 @@ export default function Targets() {
             <table className="w-full text-sm text-left">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
+                  <th className="px-4 py-3 w-8">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Select all"
+                    />
+                  </th>
                   <SortTh label="Domain" field="domain" current={sortBy} dir={sortDir} onClick={toggleSort} />
                   <th className="px-4 py-3 text-xs text-muted-foreground uppercase font-semibold">Tags / Tech</th>
                   <SortTh label="Risk" field="risk_score" current={sortBy} dir={sortDir} onClick={toggleSort} />
@@ -411,43 +640,31 @@ export default function Targets() {
               </thead>
               <tbody className="divide-y divide-border">
                 {targets.length === 0 ? (
+                  /* Filter empty state */
                   <tr>
-                    <td colSpan={9} className="px-4 py-16 text-center">
-                      {search || tagFilter ? (
-                        <div className="flex flex-col items-center gap-3">
-                          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-muted">
-                            <Search className="w-6 h-6 text-muted-foreground" />
-                          </div>
-                          <p className="text-sm font-medium">No targets match your filters</p>
-                          <p className="text-xs text-muted-foreground">Try clearing the search or tag filter</p>
+                    <td colSpan={10} className="px-4 py-16 text-center">
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 rounded-full flex items-center justify-center bg-muted">
+                          <Search className="w-6 h-6 text-muted-foreground" />
                         </div>
-                      ) : (
-                        <div className="flex flex-col items-center gap-4">
-                          <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                            style={{ background: "linear-gradient(135deg, rgba(124,58,237,0.2), rgba(168,85,247,0.1))", border: "1px solid rgba(124,58,237,0.3)" }}>
-                            <TargetIcon className="w-8 h-8" style={{ color: "#a855f7" }} />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm font-semibold">No targets yet</p>
-                            <p className="text-xs text-muted-foreground max-w-[260px]">
-                              Add domains to monitor by running a scan or using Bulk Import.
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Button size="sm" onClick={() => setShowImport(true)} variant="outline">
-                              <Upload className="w-4 h-4 mr-1.5" />Bulk Import
-                            </Button>
-                            <Button size="sm" onClick={() => nav("/scans/new")}
-                              style={{ background: "linear-gradient(135deg, #7c3aed, #a855f7)", color: "white", border: "none" }}>
-                              <Play className="w-4 h-4 mr-1.5" />Run First Scan
-                            </Button>
-                          </div>
-                        </div>
-                      )}
+                        <p className="text-sm font-medium">No targets match your filters</p>
+                        <p className="text-xs text-muted-foreground">Try clearing the search or tag filter</p>
+                      </div>
                     </td>
                   </tr>
-                ) : targets.map((target) => (
+                ) : targets.map((target) => {
+                  const isSelected = selectedIds.has(target.id);
+                  return (
                   <tr key={target.id} className="hover:bg-muted/20 transition-colors group">
+                    {/* Checkbox */}
+                    <td className="px-4 py-3 w-8" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={() => toggleSelect(target.id)}
+                        aria-label={`Select ${target.domain}`}
+                      />
+                    </td>
+
                     {/* Domain */}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
@@ -529,7 +746,7 @@ export default function Targets() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>
@@ -538,6 +755,10 @@ export default function Targets() {
       )}
 
       {/* Dialogs */}
+      <Dialog open={showCsvImport} onOpenChange={setShowCsvImport}>
+        <CsvImportDialog onClose={() => setShowCsvImport(false)} />
+      </Dialog>
+
       <Dialog open={showImport} onOpenChange={setShowImport}>
         <BulkImportDialog onClose={() => setShowImport(false)} />
       </Dialog>
@@ -555,6 +776,16 @@ export default function Targets() {
         variant="destructive"
         loading={deleteTarget.isPending}
         onConfirm={() => { if (confirmDeleteTarget) deleteTarget.mutate(confirmDeleteTarget.id); }}
+      />
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onOpenChange={setConfirmBulkDelete}
+        title={`Delete ${selectedIds.size} Targets`}
+        description={`This will remove ${selectedIds.size} target${selectedIds.size !== 1 ? "s" : ""} from your inventory. This action cannot be undone.`}
+        confirmLabel={`Delete ${selectedIds.size} Targets`}
+        variant="destructive"
+        onConfirm={bulkDelete}
       />
     </div>
   );

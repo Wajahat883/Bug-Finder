@@ -7,6 +7,7 @@ import { auditFromReq } from "../lib/audit";
 import { requireAdmin } from "../middlewares/rbac";
 import { authLimiter } from "../middlewares/rate-limit";
 import { sendPasswordResetEmail, sendEmail } from "../services/email";
+import { redisGet, redisSet, redisDel } from "../lib/redis";
 
 const router = Router();
 
@@ -75,6 +76,13 @@ router.post("/auth/login", authLimiter, async (req, res) => {
       return res.status(400).json({ error: "email and password are required" });
     }
 
+    // Account lockout check
+    const lockoutKey = `lockout:${email}`;
+    const lockoutVal = await redisGet(lockoutKey);
+    if (lockoutVal !== null && parseInt(lockoutVal, 10) >= 5) {
+      return res.status(429).json({ error: "Account locked. Too many failed attempts. Try again in 15 minutes." });
+    }
+
     let user = await col("users").findOne({ email }) as {
       _id: ObjectId; username: string; email: string; password: string; role: string;
     } | null;
@@ -93,10 +101,46 @@ router.post("/auth/login", authLimiter, async (req, res) => {
     }
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
+      // Increment failed attempts counter
+      const currentVal = await redisGet(lockoutKey);
+      const attempts = currentVal !== null ? parseInt(currentVal, 10) + 1 : 1;
+      await redisSet(lockoutKey, String(attempts), 15 * 60); // 15-minute TTL
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
     const id = user._id.toHexString();
+
+    // Clear lockout key on successful login
+    await redisDel(lockoutKey);
+
+    // Max 3 concurrent sessions — evict oldest if at limit
+    const sessionCount = await col("sessions").countDocuments({ "session.userId": id } as Record<string, unknown>);
+    if (sessionCount >= 3) {
+      const oldest = await col("sessions").findOne({ "session.userId": id }, { sort: { expires: 1 } } as any);
+      if (oldest) await col("sessions").deleteOne({ _id: oldest._id } as any);
+    }
+
+    // Check MFA enforcement policy
+    const policy = await col("platform_policy").findOne({}) as Record<string, unknown> | null;
+    const requireMfaRoles: string[] = (policy?.["require_mfa_roles"] as string[]) ?? [];
+    const graceDays: number = (policy?.["mfa_grace_days"] as number) ?? 7;
+
+    if (requireMfaRoles.includes(user["role"] as string)) {
+      const fullUser = await col("users").findOne({ _id: user._id }) as Record<string, unknown> | null;
+      const hasMfa = !!(fullUser?.["totp_secret"] || (fullUser?.["webauthn_credentials"] as unknown[])?.length);
+      if (!hasMfa) {
+        const createdAt = fullUser?.["created_at"] ? new Date(fullUser["created_at"] as string) : new Date();
+        const graceExpiry = new Date(createdAt.getTime() + graceDays * 86400000);
+        if (new Date() > graceExpiry) {
+          return res.status(403).json({
+            error: "MFA_REQUIRED",
+            message: "Your role requires multi-factor authentication. Please enroll at /security.",
+            redirect: "/security",
+          });
+        }
+      }
+    }
+
     const session = (req as unknown as { session: SessionData }).session;
     session.userId = id; session.username = user.username; session.role = user.role;
 
@@ -317,9 +361,84 @@ router.post("/auth/reset-password", async (req, res) => {
       { $set: { used: true } }
     );
 
+    // Invalidate all sessions for this user
+    await col("sessions").deleteMany({ "session.userId": reset.user_id.toHexString() } as Record<string, unknown>);
+
     res.json({ message: "Password has been reset successfully." });
   } catch (err) {
     logger.error({ err }, "Reset password error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Magic Link Login ────────────────────────────────────────────────────────
+
+router.post("/auth/magic-link/request", authLimiter, async (req, res) => {
+  try {
+    const { email } = req.body as { email?: string };
+    if (!email) return res.status(400).json({ error: "email is required" });
+
+    const user = await col("users").findOne({ email }) as { _id: ObjectId; email: string } | null;
+    if (user) {
+      const token = crypto.randomBytes(32).toString("hex");
+      await col("magic_links").insertOne({
+        email,
+        token,
+        expires: new Date(Date.now() + 15 * 60 * 1000),
+        used: false,
+        created_at: new Date(),
+      });
+      const magicUrl = `${process.env["APP_URL"] ?? "http://localhost:3000"}/api/auth/magic-link/verify?token=${token}`;
+      sendEmail({
+        to: email,
+        subject: "Your Bug Finder Pro login link",
+        html: `<p>Click the link below to log in to Bug Finder Pro. This link expires in 15 minutes.</p><p><a href="${magicUrl}">${magicUrl}</a></p><p>If you did not request this, you can safely ignore this email.</p>`,
+      }).catch(() => {});
+    }
+
+    // Always return 200 to avoid user enumeration
+    res.json({ message: "If that email exists, a magic link has been sent." });
+  } catch (err) {
+    logger.error({ err }, "Magic link request error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.get("/auth/magic-link/verify", async (req, res) => {
+  try {
+    const { token } = req.query as { token?: string };
+    if (!token) return res.status(400).json({ error: "token is required" });
+
+    const link = await col("magic_links").findOne({ token, used: false }) as {
+      _id: ObjectId; email: string; expires: Date; used: boolean;
+    } | null;
+
+    if (!link || new Date() > link.expires) {
+      return res.status(400).json({ error: "Magic link is invalid or expired" });
+    }
+
+    // Mark as used
+    await col("magic_links").updateOne(
+      { _id: link._id } as Record<string, unknown>,
+      { $set: { used: true } }
+    );
+
+    const user = await col("users").findOne({ email: link.email }) as {
+      _id: ObjectId; username: string; email: string; role: string;
+    } | null;
+
+    if (!user) {
+      return res.status(400).json({ error: "Magic link is invalid or expired" });
+    }
+
+    const id = user._id.toHexString();
+    const session = (req as unknown as { session: SessionData }).session;
+    session.userId = id; session.username = user.username; session.role = user.role;
+
+    await auditFromReq(req, "user.magic_link_login", "users", id);
+    res.redirect("/dashboard");
+  } catch (err) {
+    logger.error({ err }, "Magic link verify error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -366,6 +485,13 @@ router.patch("/admin/users/:id", requireAdmin, async (req, res) => {
       { $set: { role, updated_at: new Date() } }
     );
     await auditFromReq(req, "user.role_change", "users", id, { role });
+
+    // Privilege escalation alert — notify the affected user by email
+    const targetUser = await col("users").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (targetUser) {
+      sendEmail({ to: String(targetUser["email"] ?? ""), subject: "Bug Finder Pro — Your role has been changed", html: `<p>Your account role has been changed to <strong>${role}</strong> by an administrator.</p>` }).catch(() => {});
+    }
+
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err }, "Update user role error");
@@ -505,7 +631,18 @@ router.get("/auth/oauth/google/callback", async (req, res) => {
     const profile = await userResp.json() as Record<string,unknown>;
     let user = await col("users").findOne({ email: profile["email"] }) as Record<string,unknown> | null;
     if (!user) {
-      const ins = await col("users").insertOne({ email: profile["email"], name: profile["name"], avatar: profile["picture"], oauth_provider: "google", oauth_id: profile["id"], role: "analyst", created_at: new Date() });
+      const ins = await col("users").insertOne({
+        email: profile["email"],
+        name: profile["name"],
+        avatar: profile["picture"],
+        oauth_provider: "google",
+        oauth_id: profile["id"],
+        role: "analyst",
+        created_at: new Date(),
+        username: String((profile["email"] as string ?? "").split("@")[0]),
+        first_name: String(profile["given_name"] ?? (profile["name"] as string ?? "").split(" ")[0] ?? ""),
+        last_name: String(profile["family_name"] ?? (profile["name"] as string ?? "").split(" ").slice(1).join(" ") ?? ""),
+      });
       user = await col("users").findOne({ _id: ins.insertedId }) as Record<string,unknown>;
     }
     const sess = req.session as SessionData;
@@ -536,7 +673,20 @@ router.get("/auth/oauth/github/callback", async (req, res) => {
     const primaryEmail = emails.find(e => e["primary"])?.["email"] ?? profile["email"];
     let user = await col("users").findOne({ email: primaryEmail }) as Record<string,unknown> | null;
     if (!user) {
-      const ins = await col("users").insertOne({ email: primaryEmail, name: profile["name"] ?? profile["login"], avatar: profile["avatar_url"], oauth_provider: "github", oauth_id: profile["id"], role: "analyst", created_at: new Date() });
+      const githubFullName = String(profile["name"] ?? profile["login"] ?? "");
+      const githubNameParts = githubFullName.split(" ");
+      const ins = await col("users").insertOne({
+        email: primaryEmail,
+        name: githubFullName,
+        avatar: profile["avatar_url"],
+        oauth_provider: "github",
+        oauth_id: profile["id"],
+        role: "analyst",
+        created_at: new Date(),
+        username: String(profile["login"] ?? (profile["email"] as string ?? "").split("@")[0]),
+        first_name: String(githubNameParts[0] ?? ""),
+        last_name: String(githubNameParts.slice(1).join(" ") ?? ""),
+      });
       user = await col("users").findOne({ _id: ins.insertedId }) as Record<string,unknown>;
     }
     const sess = req.session as SessionData;

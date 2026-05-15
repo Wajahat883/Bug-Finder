@@ -33,6 +33,12 @@ import {
   Send,
   Shield,
   HelpCircle,
+  ThumbsUp,
+  ThumbsDown,
+  Paperclip,
+  Radio,
+  Upload,
+  Download,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useState, useCallback, useRef } from "react";
@@ -69,6 +75,45 @@ function CopyButton({ text }: { text: string }) {
       {copied ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
       {copied ? "Copied!" : "Copy"}
     </button>
+  );
+}
+
+function AiFeedbackButtons({ endpoint }: { endpoint: string }) {
+  const [voted, setVoted] = useState<"positive" | "negative" | null>(null);
+  const { toast } = useToast();
+
+  async function vote(rating: "positive" | "negative") {
+    if (voted) return;
+    setVoted(rating);
+    try {
+      await fetch("/api/ai/feedback", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint, rating }),
+      });
+    } catch {
+      toast({ title: "Failed to submit feedback", variant: "destructive" });
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-xs text-muted-foreground mr-1">Helpful?</span>
+      <button
+        onClick={() => vote("positive")}
+        disabled={!!voted}
+        className={`p-1 rounded transition-colors ${voted === "positive" ? "text-green-400" : "text-muted-foreground hover:text-green-400"}`}
+        title="Helpful">
+        <ThumbsUp className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => vote("negative")}
+        disabled={!!voted}
+        className={`p-1 rounded transition-colors ${voted === "negative" ? "text-red-400" : "text-muted-foreground hover:text-red-400"}`}
+        title="Not helpful">
+        <ThumbsDown className="w-3.5 h-3.5" />
+      </button>
+    </div>
   );
 }
 
@@ -247,7 +292,10 @@ function AiStreamPanel({
         )}
         {done && (
           <div className="mt-4 pt-3 border-t border-border space-y-2">
-            <p className="text-xs text-muted-foreground">AI Security Engine · Ask a follow-up below</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">AI Security Engine · Ask a follow-up below</p>
+              <AiFeedbackButtons endpoint={endpoint} />
+            </div>
             <div className="flex gap-2">
               <Input
                 placeholder="Ask a follow-up question about this analysis..."
@@ -263,6 +311,244 @@ function AiStreamPanel({
             </div>
           </div>
         )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EvidenceTab({ findingId }: { findingId: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [uploading, setUploading] = useState(false);
+  const [label, setLabel] = useState("Screenshot");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: evidenceList = [] } = useQuery<Array<{
+    id: string; filename: string; content_type: string;
+    label: string; size_bytes: number; created_at: string; base64_data: string;
+  }>>({
+    queryKey: ["/api/findings", findingId, "evidence"],
+    queryFn: () => fetch(`/api/findings/${findingId}/evidence`, { credentials: "include" }).then(r => r.json()),
+  });
+
+  async function handleFileUpload(file: File) {
+    if (file.size > 10 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Max 10MB", variant: "destructive" });
+      return;
+    }
+    setUploading(true);
+    try {
+      const base64_data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      await fetch(`/api/findings/${findingId}/evidence`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: file.name, content_type: file.type, base64_data, label }),
+      });
+      await qc.invalidateQueries({ queryKey: ["/api/findings", findingId, "evidence"] });
+      toast({ title: "Evidence uploaded" });
+    } catch { toast({ title: "Upload failed", variant: "destructive" }); }
+    finally { setUploading(false); }
+  }
+
+  function downloadEvidence(ev: { filename: string; content_type: string; base64_data: string }) {
+    const blob = new Blob([Uint8Array.from(atob(ev.base64_data), c => c.charCodeAt(0))], { type: ev.content_type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = ev.filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function deleteEvidence(evidenceId: string) {
+    await fetch(`/api/findings/${findingId}/evidence/${evidenceId}`, { method: "DELETE", credentials: "include" });
+    qc.invalidateQueries({ queryKey: ["/api/findings", findingId, "evidence"] });
+    toast({ title: "Evidence deleted" });
+  }
+
+  const LABELS = ["Screenshot", "Request", "Response", "PoC", "Other"];
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><Paperclip className="w-4 h-4" />Evidence & Attachments</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        {/* Upload area */}
+        <div
+          className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+          onClick={() => fileInputRef.current?.click()}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFileUpload(f); }}
+        >
+          <Upload className="w-6 h-6 mx-auto mb-2 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Drop files here or click to upload</p>
+          <p className="text-xs text-muted-foreground mt-1">Images, text, HAR, JSON — max 10MB</p>
+          <input ref={fileInputRef} type="file" className="hidden" accept="image/*,text/*,.har,.json,.txt,.pdf"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); }} />
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Label:</span>
+          {LABELS.map(l => (
+            <button key={l} onClick={() => setLabel(l)}
+              className={`text-xs px-2 py-1 rounded border transition-colors ${label === l ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
+              {l}
+            </button>
+          ))}
+        </div>
+        {uploading && <p className="text-xs text-muted-foreground animate-pulse">Uploading...</p>}
+
+        {/* Evidence list */}
+        {evidenceList.length === 0 && !uploading && (
+          <p className="text-sm text-muted-foreground text-center py-4">No evidence attached yet</p>
+        )}
+        <div className="space-y-3">
+          {evidenceList.map(ev => (
+            <div key={ev.id} className="border border-border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="text-xs">{ev.label}</Badge>
+                  <span className="text-sm font-medium">{ev.filename}</span>
+                  <span className="text-xs text-muted-foreground">{(ev.size_bytes / 1024).toFixed(1)}KB</span>
+                </div>
+                <div className="flex gap-1">
+                  <Button size="sm" variant="outline" className="h-7 px-2" onClick={() => downloadEvidence(ev)}>
+                    <Download className="w-3 h-3" />
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 px-2 text-destructive hover:bg-destructive/10"
+                    onClick={() => deleteEvidence(ev.id)}>
+                    <X className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+              {ev.content_type.startsWith("image/") && ev.base64_data && (
+                <img src={`data:${ev.content_type};base64,${ev.base64_data}`} alt={ev.filename}
+                  className="max-h-64 rounded border border-border object-contain" />
+              )}
+              {(ev.content_type.startsWith("text/") || ev.filename.endsWith(".json") || ev.filename.endsWith(".har")) && ev.base64_data && (
+                <pre className="text-xs font-mono bg-muted rounded p-3 overflow-auto max-h-48">
+                  {atob(ev.base64_data)}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function IntelTab({ findingId, cveId }: { findingId: string; cveId?: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: intel, isLoading, refetch } = useQuery<{
+    cve_id: string | null; description: string | null;
+    cvss_v3_score: number | null; cvss_v4_score: number | null;
+    epss_score: number | null; epss_percentile: number | null;
+    patch_available: boolean | null;
+    public_exploits: Array<{ title: string; url: string; source: string }>;
+    affected_products: string[];
+  }>({
+    queryKey: ["/api/findings", findingId, "vuln-intel"],
+    queryFn: () => fetch(`/api/findings/${findingId}/vuln-intel`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!cveId,
+  });
+
+  async function enrich() {
+    try {
+      await fetch(`/api/findings/${findingId}/enrich`, { method: "POST", credentials: "include" });
+      toast({ title: "Enrichment queued", description: "Intel will update shortly" });
+      setTimeout(() => refetch(), 3000);
+    } catch { toast({ title: "Enrichment failed", variant: "destructive" }); }
+  }
+
+  function epssLabel(score: number | null) {
+    if (score === null) return null;
+    if (score > 0.7) return { text: "🔥 Active exploit in the wild", className: "text-red-400 bg-red-500/10 border-red-500/30" };
+    if (score > 0.3) return { text: "⚠ Exploit likely", className: "text-orange-400 bg-orange-500/10 border-orange-500/30" };
+    return { text: "Low exploit probability", className: "text-green-400 bg-green-500/10 border-green-500/30" };
+  }
+
+  const epss = epssLabel(intel?.epss_score ?? null);
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-3">
+        <CardTitle className="text-base flex items-center gap-2"><Radio className="w-4 h-4" />Vulnerability Intelligence</CardTitle>
+        <Button size="sm" variant="outline" onClick={enrich} className="h-7 text-xs">Enrich Now</Button>
+      </CardHeader>
+      <CardContent>
+        {!cveId && (
+          <p className="text-sm text-muted-foreground text-center py-6">
+            No CVE associated with this finding. Add a CVE ID in the details tab to enable enrichment.
+          </p>
+        )}
+        {cveId && isLoading && <p className="text-sm text-muted-foreground animate-pulse">Loading intel...</p>}
+        {cveId && intel && (
+          <div className="space-y-4">
+            {intel.cve_id && <div className="flex items-center gap-2"><Badge className="font-mono">{intel.cve_id}</Badge>{epss && <Badge variant="outline" className={epss.className}>{epss.text}</Badge>}</div>}
+            {intel.description && <p className="text-sm text-muted-foreground">{intel.description}</p>}
+            <div className="grid grid-cols-2 gap-4">
+              {intel.cvss_v3_score !== null && <div className="p-3 rounded-lg bg-muted text-center"><div className="text-xl font-bold">{intel.cvss_v3_score}</div><div className="text-xs text-muted-foreground">CVSS v3</div></div>}
+              {intel.cvss_v4_score !== null && <div className="p-3 rounded-lg bg-muted text-center"><div className="text-xl font-bold">{intel.cvss_v4_score}</div><div className="text-xs text-muted-foreground">CVSS v4</div></div>}
+            </div>
+            {intel.epss_score !== null && <div className="text-sm"><span className="font-medium">EPSS Score:</span> {(intel.epss_score * 100).toFixed(2)}% <span className="text-muted-foreground">({(intel.epss_percentile ?? 0) * 100}th percentile)</span></div>}
+            <div className="flex items-center gap-2 text-sm">{intel.patch_available ? <><CheckCircle2 className="w-4 h-4 text-green-400" /><span className="text-green-400">Patch available</span></> : <><XCircle className="w-4 h-4 text-red-400" /><span className="text-red-400">No patch yet</span></>}</div>
+            {intel.public_exploits.length > 0 && (
+              <div><p className="text-sm font-medium mb-2">Public Exploits ({intel.public_exploits.length})</p>
+                <div className="space-y-1">{intel.public_exploits.map((ex, i) => (
+                  <a key={i} href={ex.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-xs text-primary hover:underline">
+                    <ExternalLink className="w-3 h-3 flex-shrink-0" />{ex.title} <span className="text-muted-foreground">({ex.source})</span>
+                  </a>
+                ))}</div>
+              </div>
+            )}
+            {intel.affected_products.length > 0 && (
+              <div><p className="text-sm font-medium mb-2">Affected Products</p>
+                <div className="flex flex-wrap gap-1">{intel.affected_products.map((p, i) => <Badge key={i} variant="outline" className="text-xs">{p}</Badge>)}</div>
+              </div>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RelatedFindings({ currentId, cweId, category }: { currentId: string; cweId?: string; category?: string }) {
+  const params = new URLSearchParams({ limit: "5" });
+  if (cweId) params.set("cwe_id", cweId);
+  else if (category) params.set("category", category);
+
+  const { data } = useQuery<{ findings: any[] }>({
+    queryKey: ["/api/findings", "related", cweId, category],
+    queryFn: () => fetch(`/api/findings?${params.toString()}`, { credentials: "include" }).then(r => r.json()),
+    enabled: !!(cweId || category),
+  });
+
+  const list = (data?.findings ?? []).filter((f: any) => f.id !== currentId).slice(0, 4);
+  if (!list.length) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Related Findings</CardTitle>
+        <CardDescription>Other findings with the same {cweId ? "CWE" : "category"}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {list.map((f: any) => (
+          <Link key={f.id} href={`/findings/${f.id}`}>
+            <div className="flex items-center gap-3 p-2.5 rounded-lg border border-border hover:bg-accent/20 transition-colors cursor-pointer">
+              <SeverityBadge severity={f.severity} />
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium truncate">{f.title}</div>
+                <div className="text-xs text-muted-foreground font-mono truncate">{f.endpoint}</div>
+              </div>
+              <ExternalLink className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            </div>
+          </Link>
+        ))}
       </CardContent>
     </Card>
   );
@@ -463,7 +749,7 @@ export default function FindingDetail() {
   };
 
   const tabs = [
-    "details", "evidence", "cve", "remediation",
+    "details", "evidence", "intel", "cve", "remediation",
     "payloads", "patch", "patch-gen", "report", "narrative", "poc",
     "tools", "fp", "cvss", "reasoning", "verify",
     "comments",
@@ -472,6 +758,7 @@ export default function FindingDetail() {
   const tabLabels: Record<string, string> = {
     details: "Details",
     evidence: "Evidence",
+    intel: "Intel",
     cve: "CVE",
     remediation: "Remediation",
     payloads: "Payloads",
@@ -812,28 +1099,21 @@ export default function FindingDetail() {
               </CardContent>
             </Card>
           )}
+          <RelatedFindings
+            currentId={findingId}
+            cweId={finding.cwe_id}
+            category={(finding as Record<string, unknown>).category as string | undefined}
+          />
         </TabsContent>
 
         {/* Evidence */}
         <TabsContent value="evidence" className="pt-6">
-          <Card>
-            <CardHeader className="flex flex-row items-start justify-between">
-              <div>
-                <CardTitle>Proof of Concept / Evidence</CardTitle>
-                <CardDescription>Raw HTTP requests, responses, or scanner output</CardDescription>
-              </div>
-              {finding.evidence && <CopyButton text={finding.evidence} />}
-            </CardHeader>
-            <CardContent>
-              {finding.evidence ? (
-                <pre className="p-4 bg-black/40 text-foreground font-mono text-xs overflow-x-auto rounded-md border border-border whitespace-pre-wrap break-all">
-                  {finding.evidence}
-                </pre>
-              ) : (
-                <div className="text-center py-12 text-muted-foreground">No specific evidence payload recorded.</div>
-              )}
-            </CardContent>
-          </Card>
+          <EvidenceTab findingId={findingId} />
+        </TabsContent>
+
+        {/* Intel */}
+        <TabsContent value="intel" className="pt-6">
+          <IntelTab findingId={findingId} cveId={(finding as Record<string, unknown>)?.cve_id as string | undefined} />
         </TabsContent>
 
         {/* CVE Enrichment */}

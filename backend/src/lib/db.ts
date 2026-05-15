@@ -16,7 +16,14 @@ export async function connectDb(): Promise<Db> {
   }
 
   try {
-    client = new MongoClient(uri, { serverSelectionTimeoutMS: 5000 });
+    client = new MongoClient(uri, {
+      serverSelectionTimeoutMS: 5000,
+      maxPoolSize: 50,
+      minPoolSize: 5,
+      maxIdleTimeMS: 30000,
+      connectTimeoutMS: 10000,
+      socketTimeoutMS: 45000,
+    });
     await client.connect();
     db = client.db();
     logger.info({ uri: uri.replace(/\/\/[^@]+@/, "//***@") }, "MongoDB connected");
@@ -226,6 +233,31 @@ async function ensureIndexes(database: Db): Promise<void> {
     await database.collection("oidc_pkce_state").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
     // Baseline scan lookup
     await database.collection("scan_jobs").createIndex({ is_baseline: 1 });
+
+    // Enterprise compound indexes for high-traffic queries
+    await database.collection("findings").createIndex({ user_id: 1, severity: 1, status: 1 });
+    await database.collection("findings").createIndex({ user_id: 1, triage_status: 1, created_at: -1 });
+    await database.collection("findings").createIndex({ cwe_id: 1, severity: 1 });
+    await database.collection("findings").createIndex({ assignee_id: 1, status: 1 });
+    await database.collection("findings").createIndex({ sla_deadline: 1, status: 1 }); // SLA breach queries
+    await database.collection("scan_jobs").createIndex({ user_id: 1, status: 1, created_at: -1 });
+    await database.collection("scan_jobs").createIndex({ priority: -1, created_at: 1 }); // Priority queue
+    await database.collection("audit_log").createIndex({ user_id: 1, action: 1, created_at: -1 });
+    await database.collection("audit_log").createIndex({ ip: 1, created_at: -1 }); // IP-based lookup
+    await database.collection("audit_log").createIndex({ resource: 1, resource_id: 1, created_at: -1 });
+    await database.collection("sessions").createIndex({ "session.userId": 1 });
+    await database.collection("sessions").createIndex({ expires: 1 }, { expireAfterSeconds: 0 });
+    await database.collection("magic_links").createIndex({ token: 1 }, { unique: true });
+    await database.collection("magic_links").createIndex({ expires: 1 }, { expireAfterSeconds: 0 });
+    await database.collection("role_grants").createIndex({ user_id: 1, active: 1, expires_at: 1 });
+    await database.collection("webhook_deliveries").createIndex({ webhook_id: 1, created_at: -1 });
+    await database.collection("api_keys").createIndex({ key: 1 }, { unique: true });
+    await database.collection("login_attempts").createIndex({ email: 1, created_at: -1 });
+    await database.collection("login_attempts").createIndex({ created_at: 1 }, { expireAfterSeconds: 3600 }); // Auto-expire after 1 hour
+    await database.collection("saved_filters").createIndex({ user_id: 1, resource: 1 });
+    await database.collection("evidence_files").createIndex({ finding_id: 1 });
+    await database.collection("finding_assignments").createIndex({ assignee_id: 1, status: 1 });
+
     logger.info("Database indexes ensured");
   } catch (err) {
     logger.warn({ err }, "Index creation failed — continuing without indexes");

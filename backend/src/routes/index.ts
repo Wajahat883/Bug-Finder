@@ -47,6 +47,13 @@ import featureFlagsRouter from "./feature-flags";
 import webauthnRouter from "./webauthn";
 import samlRouter from "./saml";
 import enterpriseAdminRouter from "./enterprise-admin";
+import statusRouter from "./status";
+import siemExportRouter from "./siem-export";
+import gdprRouter from "./gdpr";
+import slaEnforcementRouter from "./sla-enforcement";
+import roleGrantsRouter from "./role-grants";
+import aiFeedbackRouter from "./ai-feedback";
+import targetsImportRouter from "./targets-import";
 
 const router: IRouter = Router();
 
@@ -98,5 +105,12 @@ router.use(featureFlagsRouter);
 router.use(webauthnRouter);
 router.use(samlRouter);
 router.use(enterpriseAdminRouter);
+router.use(statusRouter);
+router.use(siemExportRouter);
+router.use(gdprRouter);
+router.use(slaEnforcementRouter);
+router.use(roleGrantsRouter);
+router.use(aiFeedbackRouter);
+router.use(targetsImportRouter);
 
 export default router;

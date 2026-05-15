@@ -154,4 +154,44 @@ router.post("/scan-jobs/:id/start-simulation", requireAuth, async (req, res) => 
   }
 });
 
+// Dashboard SSE clients registry
+const dashboardClients = new Set<import("express").Response>();
+
+export function broadcastDashboard(type: string, payload: Record<string, unknown> = {}) {
+  const data = JSON.stringify({ type, ...payload });
+  dashboardClients.forEach(res => {
+    try { res.write(`data: ${data}\n\n`); } catch { dashboardClients.delete(res); }
+  });
+}
+
+export function broadcastNewFinding(finding: Record<string, unknown>) {
+  broadcastDashboard("new_finding", { finding });
+}
+
+export function broadcastScanComplete(scanId: string) {
+  broadcastDashboard("scan_complete", { scan_id: scanId });
+}
+
+router.get("/stream/dashboard", requireAuth, (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  dashboardClients.add(res);
+
+  // Send initial heartbeat
+  res.write(`: connected\n\n`);
+
+  const heartbeat = setInterval(() => {
+    try { res.write(`: heartbeat\n\n`); } catch { clearInterval(heartbeat); dashboardClients.delete(res); }
+  }, 20000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    dashboardClients.delete(res);
+  });
+});
+
 export default router;

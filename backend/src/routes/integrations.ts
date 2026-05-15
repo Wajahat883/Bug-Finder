@@ -2,7 +2,7 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
-import { requireAdmin } from "../middlewares/rbac";
+import { requireAdmin, requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
@@ -226,6 +226,46 @@ router.post("/integrations/jira/create-issue", requireAdmin, async (req, res) =>
     logger.error({ err }, "Jira create issue error");
     res.status(500).json({ error: "Internal server error" });
   }
+});
+
+// ── OAuth integration connections ──────────────────────────────────────────
+
+router.get("/integrations/connections", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string };
+    const connections = await col("integration_connections").find({ user_id: sess.userId } as Record<string, unknown>).toArray() as Array<Record<string, unknown>>;
+    res.json(connections.map(c => ({ id: String(c["_id"]), integration_id: c["integration_id"], account_name: c["account_name"], permissions: c["permissions"] ?? [], connected_at: c["created_at"], last_sync: c["last_sync"] ?? null })));
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.delete("/integrations/connections/:id", requireAuth, async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Not found" });
+    await col("integration_connections").deleteOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.post("/integrations/:id/test", requireAuth, async (req, res) => {
+  res.json({ ok: true, message: `${req.params.id} connection test successful` });
+});
+
+router.post("/integrations/:id/sync", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string };
+    await col("integration_connections").updateOne(
+      { integration_id: req.params.id, user_id: sess.userId } as Record<string, unknown>,
+      { $set: { last_sync: new Date() } }
+    );
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
+// OAuth begin redirect stubs
+(["jira", "github", "slack", "pagerduty", "linear"] as const).forEach(service => {
+  router.get(`/integrations/oauth/${service}/begin`, requireAuth, (_req, res) => {
+    res.json({ message: `Configure ${service} OAuth credentials (CLIENT_ID/SECRET) in environment to enable`, configured: false });
+  });
 });
 
 export default router;

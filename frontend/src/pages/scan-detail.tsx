@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Download, AlertTriangle, Clock, Activity, FileText, CheckCircle2, XCircle,
   Radio, Loader2, GitCompare, Link2, StopCircle, Pause, Play, Moon, Sun,
-  Copy, RefreshCw, X, Send, GitBranch, Filter, Sparkles, ChevronRight,
+  Copy, RefreshCw, X, Send, GitBranch, Filter, Sparkles, ChevronRight, MinusCircle,
 } from "lucide-react";
 import { format } from "date-fns";
 import jsPDF from "jspdf";
@@ -262,6 +262,39 @@ export default function ScanDetail() {
   const [diffLoaded, setDiffLoaded] = useState(false);
   const [diffResult, setDiffResult] = useState<any>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [compareFetching, setCompareFetching] = useState(false);
+
+  // Engine status polling
+  type EngineStatus = { engine: string; status: "pending" | "running" | "done" | "error" | "skipped"; findings: number; started_at?: string; ended_at?: string; error?: string };
+  const { data: engines = [] } = useQuery<EngineStatus[]>({
+    queryKey: ["/api/scan-jobs", scanId, "engines"],
+    queryFn: () => fetch(`/api/scan-jobs/${scanId}/engines`, { credentials: "include" }).then(r => r.json()),
+    refetchInterval: (query) => {
+      const status = (query.state.data as EngineStatus[] | undefined);
+      void status;
+      return scan?.status === "running" ? 3000 : false;
+    },
+  });
+
+  async function handleCompare() {
+    if (!scan) return;
+    setCompareFetching(true);
+    try {
+      const r = await fetch(`/api/scan-jobs?target_url=${encodeURIComponent(scan.target_url)}&page_size=20`, { credentials: "include" });
+      const data = await r.json();
+      const items: Array<{ id: string; created_at: string }> = data?.items ?? [];
+      const others = items.filter(s => s.id !== scanId).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      if (others.length > 0) {
+        setLocation(`/scans/compare?a=${others[0].id}&b=${scanId}`);
+      } else {
+        toast({ title: "No previous scan found for this target" });
+      }
+    } catch {
+      toast({ title: "Compare failed", variant: "destructive" });
+    } finally {
+      setCompareFetching(false);
+    }
+  }
 
   async function loadDiff() {
     setDiffLoading(true);
@@ -472,6 +505,18 @@ export default function ScanDetail() {
 
   const isRunning = scan.status === "running" || scan.status === "queued";
 
+  // Estimated time remaining
+  const PROFILE_TOTAL_SECONDS: Record<string, number> = { quick: 120, standard: 300, deep: 900, full: 1800 };
+  const totalEstimated = PROFILE_TOTAL_SECONDS[scan.scan_profile] ?? 300;
+  const elapsedSec = scan.started_at ? (Date.now() - new Date(scan.started_at).getTime()) / 1000 : 0;
+  const remainingSec = scan.status === "running" && typeof scan.progress === "number"
+    ? Math.max(0, totalEstimated * (1 - scan.progress / 100))
+    : null;
+  const etaLabel = remainingSec !== null
+    ? remainingSec < 60 ? "< 1m remaining" : `~${Math.ceil(remainingSec / 60)}m remaining`
+    : null;
+  void elapsedSec;
+
   // Derive scan phase from active engine for progress label
   const SCAN_PHASES = ["Recon", "Port Scan", "Service Detection", "Vulnerability Scan", "Reporting"];
   const activePhaseIdx = activeEngine
@@ -535,6 +580,10 @@ export default function ScanDetail() {
             {sseActive ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Radio className="w-4 h-4 mr-2" />}
             {sseActive ? "Streaming…" : "Live Stream"}
           </Button>
+          <Button variant="outline" onClick={handleCompare} disabled={compareFetching} title="Compare with previous scan for this target">
+            {compareFetching ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <GitCompare className="w-4 h-4 mr-2" />}
+            Compare
+          </Button>
         </div>
       </div>
 
@@ -546,7 +595,12 @@ export default function ScanDetail() {
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 {phaseLabel}
               </span>
-              <span className="text-sm font-mono text-blue-500">{scan.progress ?? 0}%</span>
+              <div className="flex items-center gap-3">
+                {etaLabel && (
+                  <span className="text-xs text-blue-400/70 font-mono">{etaLabel}</span>
+                )}
+                <span className="text-sm font-mono text-blue-500">{scan.progress ?? 0}%</span>
+              </div>
             </div>
             <Progress value={scan.progress ?? 0} className="h-2 [&>div]:bg-blue-500" />
             {/* Phase step indicators */}
@@ -574,6 +628,74 @@ export default function ScanDetail() {
                 ? `${scan.findings_count} finding(s) detected so far (${scan.critical_count} critical, ${scan.high_count} high)`
                 : "Scanning target for vulnerabilities…"}
             </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* WAF Detection Card */}
+      {(scan as any).waf_detected === true && (
+        <Card className="border-orange-500/30 bg-orange-500/5">
+          <CardContent className="pt-4 pb-4">
+            <div className="flex items-center gap-3">
+              <Badge className="bg-orange-500/20 text-orange-300 border-orange-500/40 hover:bg-orange-500/30">
+                WAF: {(scan as any).waf_name || "Detected"}
+              </Badge>
+              <span className="text-xs text-muted-foreground">
+                Bypass attempted · {(scan as any).waf_bypass_count ?? 0} technique(s) succeeded
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      {(scan as any).waf_detected === false && (
+        <p className="text-xs text-muted-foreground px-1">No WAF detected</p>
+      )}
+
+      {/* Scanner Engines Panel */}
+      {(engines.length > 0 || scan.status === "running") && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Scanner Engines</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {engines.length === 0 && scan.status === "running" ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                Waiting for engines to start...
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {engines.map((eng) => {
+                  const durationSec = eng.started_at && eng.ended_at
+                    ? Math.round((new Date(eng.ended_at).getTime() - new Date(eng.started_at).getTime()) / 1000)
+                    : null;
+                  const displayName = eng.engine.replace(/-/g, " ").replace(/^\w/, c => c.toUpperCase());
+                  return (
+                    <div key={eng.engine} className="flex items-center gap-3 text-sm py-1.5 border-b border-border/50 last:border-0">
+                      <div className="w-4 h-4 shrink-0">
+                        {eng.status === "pending" && <Clock className="w-4 h-4 text-muted-foreground" />}
+                        {eng.status === "running" && <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />}
+                        {eng.status === "done" && <CheckCircle2 className="w-4 h-4 text-green-400" />}
+                        {eng.status === "error" && <XCircle className="w-4 h-4 text-red-400" />}
+                        {eng.status === "skipped" && <MinusCircle className="w-4 h-4 text-muted-foreground" />}
+                      </div>
+                      <span className="flex-1 font-medium capitalize">{displayName}</span>
+                      {eng.status === "done" && eng.findings > 0 && (
+                        <Badge className="bg-green-500/15 text-green-400 border-green-500/30 text-[10px] hover:bg-green-500/25">
+                          {eng.findings} findings
+                        </Badge>
+                      )}
+                      {durationSec !== null && (
+                        <span className="text-xs text-muted-foreground font-mono">{durationSec}s</span>
+                      )}
+                      {eng.status === "error" && eng.error && (
+                        <span className="text-xs text-red-400 max-w-[200px] truncate" title={eng.error}>{eng.error}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

@@ -42,6 +42,8 @@ import TwoFactor from "@/pages/two-factor";
 import ScheduledScans from "@/pages/scheduled-scans";
 import TestingDashboard from "@/pages/testing";
 import AdminLogin from "@/pages/admin-login";
+import AdminTenants from "@/pages/admin-tenants";
+import CredentialsPage from "@/pages/credentials";
 import MetricsDashboard from "@/pages/metrics-dashboard";
 import AnalyticsEnhanced from "@/pages/analytics-enhanced";
 import Engagements from "@/pages/engagements";
@@ -56,6 +58,8 @@ import AdminSessions from "@/pages/admin-sessions";
 import AdminSamlConfig from "@/pages/admin-saml-config";
 import AdminPolicy from "@/pages/admin-policy";
 import Forbidden from "@/pages/forbidden";
+import StatusPage from "@/pages/status";
+import ReportSchedules from "@/pages/report-schedules";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -180,7 +184,13 @@ function Router() {
             <Route path="/admin/policy">
               {() => <AdminRoute component={AdminPolicy} />}
             </Route>
+            <Route path="/admin/tenants">
+              {() => <AdminRoute component={AdminTenants} />}
+            </Route>
+            <Route path="/credentials" component={CredentialsPage} />
 
+            <Route path="/report-schedules" component={ReportSchedules} />
+            <Route path="/status" component={StatusPage} />
             <Route path="/forbidden" component={Forbidden} />
             <Route component={NotFound} />
           </Switch>

@@ -7,7 +7,7 @@ import {
   Calculator, Network, TrendingUp, Clock, Webhook, LogOut,
   ChevronDown, ChevronRight, Bookmark, GitCompare, ClipboardCheck,
   Timer, Sparkles, Moon, Sun, X, Contrast, ExternalLink,
-  UserCircle, KeyRound, BarChart2, Briefcase, Key,
+  UserCircle, KeyRound, BarChart2, Briefcase, Key, Building2,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { CommandPalette } from "./command-palette";
@@ -54,10 +54,13 @@ function pageName(loc: string): string {
   if (loc.startsWith("/owasp")) return "OWASP Top 10";
   if (loc.startsWith("/timeline")) return "Activity Timeline";
   if (loc.startsWith("/integrations")) return "Integrations";
+  if (loc.startsWith("/report-schedules")) return "Scheduled Reports";
   if (loc.startsWith("/scan-templates")) return "Scan Templates";
   if (loc.startsWith("/compliance")) return "Compliance Dashboard";
   if (loc.startsWith("/sla")) return "SLA Tracking";
   if (loc.startsWith("/ai-triage")) return "AI Triage";
+  if (loc.startsWith("/admin/tenants")) return "Tenant Management";
+  if (loc.startsWith("/credentials")) return "Credential Vault";
   if (loc.startsWith("/admin/panel")) return "Admin Panel";
   if (loc.startsWith("/admin/users")) return "User Management";
   if (loc.startsWith("/admin/anomaly-alerts")) return "Anomaly Alerts";
@@ -78,6 +81,7 @@ function pageName(loc: string): string {
   if (loc.startsWith("/false-positives")) return "FP Review Queue";
   if (loc.startsWith("/triage-metrics")) return "Triage Metrics";
   if (loc.startsWith("/feature-flags")) return "Feature Flags";
+  if (loc.startsWith("/status")) return "System Status";
   if (loc.startsWith("/forbidden")) return "Access Denied";
   return "Dashboard";
 }
@@ -93,6 +97,7 @@ const NAV_GROUPS = [
       { href: "/findings",     label: "Findings",    icon: ShieldAlert,     shortcut: "F" },
       { href: "/targets",      label: "Targets",     icon: Target,          shortcut: null },
       { href: "/remediations", label: "Remediations",icon: CheckSquare,     shortcut: "R" },
+      { href: "/credentials",  label: "Credentials", icon: KeyRound,        shortcut: null },
     ],
   },
   {
@@ -107,6 +112,7 @@ const NAV_GROUPS = [
       { href: "/metrics",             label: "Metrics",         icon: BarChart2,     shortcut: null },
       { href: "/analytics-enhanced",  label: "Analytics+",      icon: TrendingUp,    shortcut: null },
       { href: "/engagements",         label: "Engagements",     icon: Briefcase,     shortcut: null },
+      { href: "/report-schedules",    label: "Scheduled Reports", icon: Clock,        shortcut: null },
     ],
   },
   {
@@ -143,8 +149,10 @@ const NAV_GROUPS = [
       { href: "/admin/sessions",       label: "Active Sessions", icon: Activity,     shortcut: null },
       { href: "/admin/saml-config",    label: "SAML / SSO",      icon: KeyRound,     shortcut: null },
       { href: "/admin/policy",         label: "Platform Policy", icon: ClipboardCheck, shortcut: null },
+      { href: "/admin/tenants",        label: "Tenants",         icon: Building2,    shortcut: null },
       { href: "/audit-log",            label: "Audit Log",       icon: BarChart2,    shortcut: null },
       { href: "/integrations",         label: "Integrations",    icon: Network,      shortcut: null },
+      { href: "/status",               label: "System Status",   icon: Activity,     shortcut: null },
     ],
   },
 ];
@@ -199,6 +207,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
@@ -253,6 +262,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       if (e.key === "r" || e.key === "R") { setLocation("/remediations"); return; }
       if (e.key === "t" || e.key === "T") { setTheme(nextTheme(theme ?? "dark")); return; }
       if (e.key === "/") { e.preventDefault(); setCmdOpen(true); return; }
+      if (e.key === "?") { e.preventDefault(); setShortcutsOpen(o => !o); return; }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -378,6 +388,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     "/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel", "/testing",
     "/executive", "/attack-surface", "/compliance", "/sla", "/engagements", "/scan-templates", "/cvss",
     "/admin/anomaly-alerts", "/admin/ip-allowlist", "/admin/sessions", "/admin/saml-config", "/admin/policy",
+    "/admin/tenants",
   ];
 
   async function logout() {
@@ -751,6 +762,31 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     </div>
     <SessionExpiryModal />
+    {shortcutsOpen && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShortcutsOpen(false)}>
+        <div className="bg-card border border-border rounded-xl shadow-2xl p-6 w-96 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold">Keyboard Shortcuts</h2>
+            <button onClick={() => setShortcutsOpen(false)}><X className="w-4 h-4 text-muted-foreground" /></button>
+          </div>
+          <div className="space-y-2 text-sm">
+            {[
+              ["⌘K or /", "Open search"],
+              ["N", "New scan"],
+              ["F", "Go to Findings"],
+              ["R", "Go to Remediations"],
+              ["T", "Cycle theme"],
+              ["?", "Show this help"],
+            ].map(([key, label]) => (
+              <div key={key} className="flex items-center justify-between py-1 border-b border-border/50">
+                <span className="text-muted-foreground">{label}</span>
+                <kbd className="text-xs px-2 py-1 rounded bg-muted border border-border font-mono">{key}</kbd>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
     </>
   );
 }

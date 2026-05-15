@@ -275,6 +275,9 @@ export default function Settings() {
           </CardContent>
         </Card>
 
+        {/* Per-user notification preferences */}
+        <NotificationPreferencesCard />
+
         {/* API Key */}
         <Card>
           <CardHeader>
@@ -314,6 +317,92 @@ export default function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+function NotificationPreferencesCard() {
+  const { toast } = useToast();
+  const { data, isLoading } = useQuery<Record<string, unknown>>({
+    queryKey: ["/api/notifications/preferences"],
+    queryFn: () => fetch("/api/notifications/preferences", { credentials: "include" }).then(r => r.json()),
+  });
+
+  const [channels, setChannels] = useState<string[]>([]);
+  const [notifyCritical, setNotifyCritical] = useState(true);
+  const [notifyHigh, setNotifyHigh] = useState(true);
+  const [notifyScanComplete, setNotifyScanComplete] = useState(false);
+
+  useEffect(() => {
+    if (data) {
+      setChannels((data.channels as string[]) ?? []);
+      setNotifyCritical((data.notify_critical as boolean) ?? true);
+      setNotifyHigh((data.notify_high as boolean) ?? true);
+      setNotifyScanComplete((data.notify_scan_complete as boolean) ?? false);
+    }
+  }, [data]);
+
+  const save = useMutation({
+    mutationFn: () =>
+      fetch("/api/notifications/preferences", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channels, notify_critical: notifyCritical, notify_high: notifyHigh, notify_scan_complete: notifyScanComplete }),
+      }).then(r => r.json()),
+    onSuccess: () => toast({ title: "Notification preferences saved" }),
+    onError: () => toast({ title: "Failed to save preferences", variant: "destructive" }),
+  });
+
+  function toggleChannel(ch: string) {
+    setChannels(prev => prev.includes(ch) ? prev.filter(c => c !== ch) : [...prev, ch]);
+  }
+
+  const CHANNELS = [
+    { id: "email", label: "Email" },
+    { id: "slack", label: "Slack" },
+    { id: "teams", label: "Teams" },
+    { id: "pagerduty", label: "PagerDuty" },
+  ];
+
+  if (isLoading) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center"><Bell className="w-5 h-5 mr-2 text-primary" />Notification Preferences</CardTitle>
+        <CardDescription>Choose which channels and events trigger your personal notifications</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div>
+          <Label className="text-sm font-medium mb-2 block">Alert Channels</Label>
+          <div className="flex flex-wrap gap-2">
+            {CHANNELS.map(ch => (
+              <button key={ch.id} onClick={() => toggleChannel(ch.id)}
+                className={`text-sm px-3 py-1.5 rounded-md border transition-colors ${channels.includes(ch.id) ? "border-primary/60 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-foreground/30"}`}>
+                {ch.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-3">
+          <Label className="text-sm font-medium block">Notify Me When</Label>
+          {[
+            { label: "Critical findings are discovered", value: notifyCritical, setter: setNotifyCritical },
+            { label: "High findings are discovered", value: notifyHigh, setter: setNotifyHigh },
+            { label: "A scan completes", value: notifyScanComplete, setter: setNotifyScanComplete },
+          ].map(({ label, value, setter }) => (
+            <div key={label} className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">{label}</span>
+              <Switch checked={value} onCheckedChange={setter} />
+            </div>
+          ))}
+        </div>
+        <Button size="sm" onClick={() => save.mutate()} disabled={save.isPending} className="gap-2">
+          {save.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          Save Preferences
+        </Button>
+      </CardContent>
+    </Card>
   );
 }
 
