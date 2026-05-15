@@ -206,6 +206,12 @@ async function ensureIndexes(database: Db): Promise<void> {
     await database.collection("activity_events").createIndex({ timestamp: -1 });
     await database.collection("remediations").createIndex({ created_at: -1 });
     await database.collection("audit_log").createIndex({ created_at: -1 });
+    // Data retention: audit logs auto-expire after DATA_RETENTION_DAYS (default 365)
+    const retentionDays = parseInt(process.env["DATA_RETENTION_DAYS"] ?? "365");
+    await database.collection("audit_log").createIndex(
+      { created_at: 1 },
+      { expireAfterSeconds: retentionDays * 86400, name: "audit_log_ttl" }
+    );
     await database.collection("users").createIndex({ email: 1 }, { unique: true, sparse: true });
     // raw_evidence: TTL index auto-deletes documents after expires_at
     await database.collection("raw_evidence").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });

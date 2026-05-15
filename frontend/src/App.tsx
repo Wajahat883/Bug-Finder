@@ -50,6 +50,12 @@ import ApiKeysPage from "@/pages/api-keys";
 import FalsePositivesPage from "@/pages/false-positives";
 import TriageMetricsPage from "@/pages/triage-metrics";
 import FeatureFlagsAdmin from "@/pages/feature-flags-admin";
+import AdminAnomalyAlerts from "@/pages/admin-anomaly-alerts";
+import AdminIpAllowlist from "@/pages/admin-ip-allowlist";
+import AdminSessions from "@/pages/admin-sessions";
+import AdminSamlConfig from "@/pages/admin-saml-config";
+import AdminPolicy from "@/pages/admin-policy";
+import Forbidden from "@/pages/forbidden";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -61,7 +67,7 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
   const { data: user, isLoading } = useGetMe({ query: { retry: false } });
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Loading…</div>;
   if ((user as Record<string, unknown>)?.role !== "admin") {
-    nav("/admin");
+    nav("/forbidden");
     return null;
   }
   return <Component />;
@@ -159,7 +165,23 @@ function Router() {
             <Route path="/admin/users">
               {() => <AdminRoute component={AdminUsers} />}
             </Route>
+            <Route path="/admin/anomaly-alerts">
+              {() => <AdminRoute component={AdminAnomalyAlerts} />}
+            </Route>
+            <Route path="/admin/ip-allowlist">
+              {() => <AdminRoute component={AdminIpAllowlist} />}
+            </Route>
+            <Route path="/admin/sessions">
+              {() => <AdminRoute component={AdminSessions} />}
+            </Route>
+            <Route path="/admin/saml-config">
+              {() => <AdminRoute component={AdminSamlConfig} />}
+            </Route>
+            <Route path="/admin/policy">
+              {() => <AdminRoute component={AdminPolicy} />}
+            </Route>
 
+            <Route path="/forbidden" component={Forbidden} />
             <Route component={NotFound} />
           </Switch>
         </AppLayout>

@@ -141,10 +141,16 @@ export default function AdminPanel() {
   const adminModules = [
     { title: "User Management", description: "Manage platform users, roles, and account status.", icon: Users, href: "/admin/users", color: "#8b5cf6", bg: "rgba(139,92,246,0.1)" },
     { title: "Audit Log", description: "Security audit trail with user actions and events.", icon: ScrollText, href: "/audit-log", color: "#22d3ee", bg: "rgba(34,211,238,0.1)" },
+    { title: "Anomaly Alerts", description: "Review and acknowledge security anomaly alerts.", icon: AlertTriangle, href: "/admin/anomaly-alerts", color: "#f87171", bg: "rgba(248,113,113,0.1)" },
+    { title: "Feature Flags", description: "Toggle and configure per-user/role feature rollouts.", icon: BarChart3, href: "/feature-flags", color: "#facc15", bg: "rgba(250,204,21,0.1)" },
+    { title: "SAML / SSO", description: "Configure SAML 2.0 enterprise SSO integration.", icon: Lock, href: "/admin/saml-config", color: "#60a5fa", bg: "rgba(96,165,250,0.1)" },
+    { title: "IP Allowlist", description: "Restrict platform access by IP address or CIDR range.", icon: Shield, href: "/admin/ip-allowlist", color: "#34d399", bg: "rgba(52,211,153,0.1)" },
+    { title: "Active Sessions", description: "View and revoke active user sessions.", icon: Activity, href: "/admin/sessions", color: "#a78bfa", bg: "rgba(167,139,250,0.1)" },
     { title: "Integrations", description: "Configure GitHub, Slack, webhooks, and API keys.", icon: Webhook, href: "/integrations", color: "#f97316", bg: "rgba(249,115,22,0.1)" },
     { title: "API Keys", description: "Manage system API keys for programmatic access.", icon: Terminal, href: "/api-keys", color: "#ec4899", bg: "rgba(236,72,153,0.1)" },
     { title: "Testing Suite", description: "Run full test suite — auth, API, security, performance, regression.", icon: FlaskConical, href: "/testing", color: "#a855f7", bg: "rgba(168,85,247,0.1)" },
     { title: "Platform Settings", description: "Global configuration, AI models, and SMTP.", icon: Settings, href: "/settings", color: "#34d399", bg: "rgba(52,211,153,0.1)" },
+    { title: "Platform Policy", description: "Enforce 2FA, data retention, session timeout, and password policy.", icon: Lock, href: "/admin/policy", color: "#fb923c", bg: "rgba(251,146,60,0.1)" },
   ];
 
   const quickStats = [

@@ -1,4 +1,5 @@
 import rateLimit from "express-rate-limit";
+import type { Request } from "express";
 
 let _testMode = false;
 export function enableTestMode() { _testMode = true; }
@@ -6,6 +7,12 @@ export function disableTestMode() { _testMode = false; }
 
 function skipIfTest(): (req: unknown) => boolean {
   return () => _testMode;
+}
+
+// Key generator: prefer authenticated userId over IP so VPN/proxy users get fair limits
+function userOrIpKey(req: Request): string {
+  const session = (req as unknown as { session?: { userId?: string } }).session;
+  return session?.userId ?? (req.ip ?? "unknown");
 }
 
 export const authLimiter = rateLimit({
@@ -24,6 +31,7 @@ export const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipIfTest(),
+  keyGenerator: userOrIpKey,
 });
 
 export const scanLimiter = rateLimit({
@@ -33,13 +41,15 @@ export const scanLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipIfTest(),
+  keyGenerator: userOrIpKey,
 });
 
 export const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 100,
+  max: 200,
   message: { error: "Too many requests. Please slow down." },
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipIfTest(),
+  keyGenerator: userOrIpKey,
 });

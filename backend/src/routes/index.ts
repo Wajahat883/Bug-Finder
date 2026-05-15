@@ -46,6 +46,7 @@ import triageRouter from "./triage";
 import featureFlagsRouter from "./feature-flags";
 import webauthnRouter from "./webauthn";
 import samlRouter from "./saml";
+import enterpriseAdminRouter from "./enterprise-admin";
 
 const router: IRouter = Router();
 
@@ -96,5 +97,6 @@ router.use(triageRouter);
 router.use(featureFlagsRouter);
 router.use(webauthnRouter);
 router.use(samlRouter);
+router.use(enterpriseAdminRouter);
 
 export default router;

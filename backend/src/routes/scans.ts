@@ -4,6 +4,8 @@ import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
 import { checkSsrf } from "../lib/ssrf-guard";
+import { getComplianceTags } from "../lib/compliance-map";
+import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
 
 const router = Router();
 router.use(requireAuth);
@@ -292,24 +294,39 @@ router.get("/scan-jobs/:id/attack-surface", async (req, res) => {
 
 
 function formatFinding(f: Record<string, unknown>) {
+  const redacted = redactObject(f, FINDING_SENSITIVE_FIELDS);
+  const cweId = String(redacted["cwe_id"] ?? "");
+  const complianceTags = cweId ? getComplianceTags(cweId) : (redacted["compliance_tags"] ?? []);
+  const createdAt = redacted["created_at"] as Date | string | null;
+  const daysOpen = createdAt
+    ? Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000)
+    : null;
   return {
-    id: String(f["_id"]),
-    scan_job_id: f["scan_job_id"] ? String(f["scan_job_id"]) : null,
-    title: f["title"],
-    category: f["category"],
-    severity: f["severity"],
-    validation_status: f["validation_status"],
-    confidence: f["confidence"],
-    endpoint: f["endpoint"],
-    description: f["description"],
-    evidence: f["evidence"] ?? null,
-    recommended_fix: f["recommended_fix"] ?? null,
-    cvss_score: f["cvss_score"] ?? null,
-    cwe_id: f["cwe_id"] ?? null,
-    risk_score: f["risk_score"] ?? 0,
-    scanner_name: f["scanner_name"],
-    created_at: f["created_at"],
-    target_url: f["target_url"] ?? null,
+    id: String(redacted["_id"]),
+    scan_job_id: redacted["scan_job_id"] ? String(redacted["scan_job_id"]) : null,
+    title: redacted["title"],
+    category: redacted["category"],
+    severity: redacted["severity"],
+    validation_status: redacted["validation_status"],
+    confidence: redacted["confidence"],
+    endpoint: redacted["endpoint"],
+    description: redacted["description"],
+    evidence: redacted["evidence"] ?? null,
+    recommended_fix: redacted["recommended_fix"] ?? null,
+    cvss_score: redacted["cvss_score"] ?? null,
+    cwe_id: redacted["cwe_id"] ?? null,
+    risk_score: redacted["risk_score"] ?? 0,
+    scanner_name: redacted["scanner_name"],
+    created_at: redacted["created_at"],
+    target_url: redacted["target_url"] ?? null,
+    compliance_tags: complianceTags,
+    days_open: daysOpen,
+    is_duplicate: redacted["is_duplicate"] ?? false,
+    duplicate_of: redacted["duplicate_of"] ?? null,
+    retest_status: redacted["retest_status"] ?? null,
+    assigned_to: redacted["assigned_to"] ?? null,
+    notes: redacted["notes"] ?? null,
+    fp_reason: redacted["fp_reason"] ?? null,
   };
 }
 

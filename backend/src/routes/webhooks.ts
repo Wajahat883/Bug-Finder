@@ -1,9 +1,19 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
 import crypto from "crypto";
+import { z } from "zod";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
+
+const VALID_EVENTS = ["scan.completed", "finding.created", "finding.critical", "finding.high", "remediation.created"] as const;
+const createWebhookSchema = z.object({
+  url: z.string().url("Must be a valid URL"),
+  events: z.array(z.enum(VALID_EVENTS)).min(1, "At least one event is required"),
+  secret: z.string().max(256).optional(),
+  name: z.string().max(100).optional(),
+});
+const patchWebhookSchema = z.object({ enabled: z.boolean() });
 
 const router = Router();
 
@@ -19,12 +29,23 @@ export async function triggerWebhooks(event: string, payload: Record<string,unkn
       const secret = hook["secret"] ? String(hook["secret"]) : null;
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (secret) {
-        // HMAC-SHA256 signature — receivers can verify: X-Hub-Signature-256 header
         headers["X-Hub-Signature-256"] = signWebhookPayload(secret, body);
         headers["X-Webhook-ID"] = String(hook["_id"]);
       }
       fetch(String(hook["url"]), { method: "POST", headers, body })
-        .catch(err => logger.warn({ err, url: hook["url"] }, "Webhook delivery failed"));
+        .then(async (r) => {
+          await col("webhooks").updateOne(
+            { _id: hook["_id"] } as Record<string,unknown>,
+            { $set: { last_triggered: new Date(), last_status: r.status, last_ok: r.ok }, $inc: { delivery_count: 1 } } as Record<string,unknown>
+          );
+        })
+        .catch(err => {
+          logger.warn({ err, url: hook["url"] }, "Webhook delivery failed");
+          col("webhooks").updateOne(
+            { _id: hook["_id"] } as Record<string,unknown>,
+            { $set: { last_triggered: new Date(), last_status: 0, last_ok: false } }
+          ).catch(() => {});
+        });
     }
   } catch(err) { logger.error({err}, "triggerWebhooks error"); }
 }
@@ -38,8 +59,9 @@ router.get("/webhooks", requireAuth, async (_req, res) => {
 
 router.post("/webhooks", requireAuth, async (req, res) => {
   try {
-    const { url, events, secret, name } = req.body as { url?: string; events?: string[]; secret?: string; name?: string };
-    if (!url || !events?.length) return res.status(400).json({ error: "url and events[] required" });
+    const parsed = createWebhookSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
+    const { url, events, secret, name } = parsed.data;
     const insert = await col("webhooks").insertOne({ url, events, secret: secret ?? null, name: name ?? url, enabled: true, created_at: new Date(), delivery_count: 0, last_triggered: null });
     const saved = await col("webhooks").findOne({ _id: insert.insertedId }) as Record<string,unknown>;
     res.status(201).json({ ...saved, id: String(saved["_id"]) });
@@ -49,7 +71,9 @@ router.post("/webhooks", requireAuth, async (req, res) => {
 router.patch("/webhooks/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { enabled } = req.body as { enabled?: boolean };
+    const parsed = patchWebhookSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
+    const { enabled } = parsed.data;
     await col("webhooks").updateOne({ _id: new ObjectId(id) } as Record<string,unknown>, { $set: { enabled } });
     res.json({ ok: true });
   } catch(err) { res.status(500).json({ error: "Internal server error" }); }

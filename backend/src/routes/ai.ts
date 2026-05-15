@@ -6,29 +6,37 @@ import { logger } from "../lib/logger";
 import { aiLimiter } from "../middlewares/rate-limit";
 import { requireAuth } from "../middlewares/rbac";
 
-// ── In-memory response cache (TTL: 1 hour, max 200 entries) ──────────────────
-const aiCache = new Map<string, { text: string; expires: number }>();
-const AI_CACHE_TTL = 60 * 60 * 1000;
+// ── Redis-backed response cache (TTL: 1 hour) ────────────────────────────────
+import { redisGet, redisSet } from "../lib/redis";
 
-function getCached(key: string): string | null {
-  const entry = aiCache.get(key);
-  if (!entry) return null;
-  if (Date.now() > entry.expires) { aiCache.delete(key); return null; }
-  return entry.text;
+const AI_CACHE_TTL_SECONDS = 60 * 60;
+
+async function getCached(key: string): Promise<string | null> {
+  return redisGet(`ai:cache:${key}`);
 }
 
-function setCached(key: string, text: string): void {
-  if (aiCache.size >= 200) {
-    const firstKey = aiCache.keys().next().value;
-    if (firstKey !== undefined) aiCache.delete(firstKey);
-  }
-  aiCache.set(key, { text, expires: Date.now() + AI_CACHE_TTL });
+async function setCached(key: string, text: string): Promise<void> {
+  await redisSet(`ai:cache:${key}`, text, AI_CACHE_TTL_SECONDS);
 }
 
-// ── Token usage tracking ──────────────────────────────────────────────────────
-async function logUsage(endpoint: string, resourceId: string, responseText: string): Promise<void> {
+// ── Token usage tracking + budget enforcement ─────────────────────────────────
+const AI_DAILY_TOKEN_BUDGET = parseInt(process.env["AI_DAILY_TOKEN_BUDGET"] ?? "50000");
+// Per-conversation cap: max tokens a single chat session can accumulate
+const AI_CONVERSATION_TOKEN_CAP = parseInt(process.env["AI_CONVERSATION_TOKEN_CAP"] ?? "8000");
+
+async function getUserDailyTokens(userId: string): Promise<number> {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const agg = await col("ai_usage").aggregate([
+    { $match: { user_id: userId, created_at: { $gte: start } } },
+    { $group: { _id: null, total: { $sum: "$estimated_tokens" } } },
+  ]).toArray() as Array<Record<string, unknown>>;
+  return Number((agg[0] as Record<string, unknown> | undefined)?.["total"] ?? 0);
+}
+
+async function logUsage(endpoint: string, resourceId: string, responseText: string, userId?: string): Promise<void> {
   const estimatedTokens = Math.ceil(responseText.length / 4);
-  col("ai_usage").insertOne({ endpoint, resource_id: resourceId, estimated_tokens: estimatedTokens, created_at: new Date() }).catch(() => {});
+  col("ai_usage").insertOne({ endpoint, resource_id: resourceId, estimated_tokens: estimatedTokens, user_id: userId ?? null, created_at: new Date() }).catch(() => {});
 }
 
 // ── Prompt injection sanitization ────────────────────────────────────────────
@@ -43,9 +51,12 @@ function sanitize(text: string, maxLen = 500): string {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function getOpenAI() {
+import { vault } from "../lib/vault";
+
+async function getOpenAI() {
+  const apiKey = await vault.getSecret("OPENCODE_API_KEY");
   return new OpenAI({
-    apiKey: process.env["OPENCODE_API_KEY"] ?? "",
+    apiKey: apiKey || "",
     baseURL: process.env["OPENCODE_API_BASE"] ?? "https://opencode.ai/zen/v1",
     timeout: 240000,
   });
@@ -72,7 +83,7 @@ async function streamWithRetry(
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (signal?.aborted) break;
     try {
-      const openai = getOpenAI();
+      const openai = await getOpenAI();
       const stream = await openai.chat.completions.create(
         { ...buildRequest(), stream: true },
         { signal }
@@ -188,6 +199,13 @@ function serveCachedSse(res: import("express").Response, text: string): void {
   res.end();
 }
 
+// Check Redis cache and serve SSE if hit. Returns true if served from cache.
+async function serveCacheIfHit(res: import("express").Response, cacheKey: string): Promise<boolean> {
+  const cached = await getCached(cacheKey);
+  if (cached) { serveCachedSse(res, cached); return true; }
+  return false;
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 const router = Router();
@@ -196,12 +214,48 @@ const router = Router();
 router.use(aiLimiter);
 router.use(requireAuth);
 
+// ── Token budget check middleware ─────────────────────────────────────────────
+router.use(async (req, res, next) => {
+  if (req.method !== "POST") return next();
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const userId = session.userId;
+  if (!userId) return next();
+  try {
+    const used = await getUserDailyTokens(userId);
+    if (used >= AI_DAILY_TOKEN_BUDGET) {
+      return res.status(429).json({ error: "Daily AI token budget exceeded. Resets at midnight UTC." });
+    }
+  } catch { /* non-fatal */ }
+  next();
+});
+
+// GET /api/ai/usage — current user token usage today
+router.get("/ai/usage", async (req, res) => {
+  const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+  const userId = session.userId ?? "";
+  const used = await getUserDailyTokens(userId);
+  res.json({ used, budget: AI_DAILY_TOKEN_BUDGET, remaining: Math.max(0, AI_DAILY_TOKEN_BUDGET - used) });
+});
+
+// GET /api/ai/usage/all — admin: token usage per user today
+router.get("/ai/usage/all", async (req, res) => {
+  const session = (req as unknown as { session: { role?: string } }).session;
+  if (session.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  const agg = await col("ai_usage").aggregate([
+    { $match: { created_at: { $gte: start } } },
+    { $group: { _id: "$user_id", total_tokens: { $sum: "$estimated_tokens" }, calls: { $sum: 1 } } },
+    { $sort: { total_tokens: -1 } },
+  ]).toArray();
+  res.json(agg);
+});
+
 // ── Scan Summary ──────────────────────────────────────────────────────────────
 router.post("/ai/scan-summary/:id", async (req, res) => {
   const { id } = req.params;
   const cacheKey = `scan-summary:${id}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -228,7 +282,7 @@ router.post("/ai/scan-summary/:id", async (req, res) => {
     const hb = startSseHeartbeat(res);
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 1800, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("scan-summary", id, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("scan-summary", id, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI summary error");
@@ -240,8 +294,7 @@ router.post("/ai/scan-summary/:id", async (req, res) => {
 router.post("/ai/finding-advice/:id", async (req, res) => {
   const { id } = req.params;
   const cacheKey = `finding-advice:${id}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -259,7 +312,7 @@ router.post("/ai/finding-advice/:id", async (req, res) => {
     const hb = startSseHeartbeat(res);
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 2000, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("finding-advice", id, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("finding-advice", id, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI advice error");
@@ -280,6 +333,13 @@ router.post("/ai/chat", async (req, res) => {
       context?: { target?: string; findings_count?: number; top_severity?: string };
     };
     if (!message) { res.status(400).json({ error: "message is required" }); return; }
+
+    // Per-conversation token cap: estimate tokens already used in this history
+    const conversationTokens = history.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
+    if (conversationTokens >= AI_CONVERSATION_TOKEN_CAP) {
+      res.status(429).json({ error: `Conversation token limit reached (${AI_CONVERSATION_TOKEN_CAP} estimated tokens). Start a new conversation.` });
+      return;
+    }
 
     let contextBlock = "";
     if (scan_id && context) {
@@ -309,8 +369,7 @@ router.post("/ai/chat", async (req, res) => {
 router.post("/ai/payloads/:id", async (req, res) => {
   const { id } = req.params;
   const cacheKey = `payloads:${id}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -328,7 +387,7 @@ router.post("/ai/payloads/:id", async (req, res) => {
     const hb = startSseHeartbeat(res);
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 2500, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("payloads", id, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("payloads", id, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI payloads error");
@@ -341,8 +400,7 @@ router.post("/ai/patch/:id", async (req, res) => {
   const { id } = req.params;
   const { tech_stack } = req.body as { tech_stack?: string };
   const cacheKey = `patch:${id}:${tech_stack ?? ""}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -360,7 +418,7 @@ router.post("/ai/patch/:id", async (req, res) => {
     const hb = startSseHeartbeat(res);
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 3000, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("patch", id, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("patch", id, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI patch error");
@@ -372,8 +430,7 @@ router.post("/ai/patch/:id", async (req, res) => {
 router.post("/ai/executive-narrative/:id", async (req, res) => {
   const { id } = req.params;
   const cacheKey = `exec-narrative:${id}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -396,7 +453,7 @@ router.post("/ai/executive-narrative/:id", async (req, res) => {
     const hb = startSseHeartbeat(res);
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 1800, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("exec-narrative", id, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("exec-narrative", id, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI executive narrative error");
@@ -408,8 +465,7 @@ router.post("/ai/executive-narrative/:id", async (req, res) => {
 router.post("/ai/attack-chain/:scanId", async (req, res) => {
   const { scanId } = req.params;
   const cacheKey = `attack-chain:${scanId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -428,7 +484,7 @@ router.post("/ai/attack-chain/:scanId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("attack-chain", scanId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("attack-chain", scanId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "attack-chain error");
@@ -441,8 +497,7 @@ router.post("/ai/attack-chain/:scanId", async (req, res) => {
 router.post("/ai/poc/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `poc:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -460,7 +515,7 @@ router.post("/ai/poc/:findingId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("poc", findingId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("poc", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "poc error");
@@ -474,7 +529,7 @@ router.post("/ai/scan-config", async (req, res) => {
   try {
     const { prompt: userPrompt } = req.body as { prompt?: string };
     if (!userPrompt) return res.status(400).json({ error: "prompt required" });
-    const openai = getOpenAI();
+    const openai = await getOpenAI();
     const resp = await openai.chat.completions.create({
       model: getModel(), stream: false,
       messages: [
@@ -497,8 +552,7 @@ router.post("/ai/scan-config", async (req, res) => {
 router.post("/ai/patch-diff/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `patch-diff:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -516,7 +570,7 @@ router.post("/ai/patch-diff/:findingId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1200 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("patch-diff", findingId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("patch-diff", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "patch-diff error");
@@ -529,8 +583,7 @@ router.post("/ai/patch-diff/:findingId", async (req, res) => {
 router.post("/ai/bug-bounty-report/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `bb-report:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -548,7 +601,7 @@ router.post("/ai/bug-bounty-report/:findingId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 2000 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("bb-report", findingId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("bb-report", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "bug-bounty-report error");
@@ -561,8 +614,7 @@ router.post("/ai/bug-bounty-report/:findingId", async (req, res) => {
 router.post("/ai/attack-narrative/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `attack-narrative:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -580,7 +632,7 @@ router.post("/ai/attack-narrative/:findingId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 900 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("attack-narrative", findingId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("attack-narrative", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "attack-narrative error");
@@ -593,8 +645,7 @@ router.post("/ai/attack-narrative/:findingId", async (req, res) => {
 router.post("/ai/tools/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `tools:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -612,7 +663,7 @@ router.post("/ai/tools/:findingId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("tools", findingId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("tools", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "tools error");
@@ -625,8 +676,7 @@ router.post("/ai/tools/:findingId", async (req, res) => {
 router.post("/ai/remediation-plan/:scanId", async (req, res) => {
   const { scanId } = req.params;
   const cacheKey = `remediation-plan:${scanId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -649,7 +699,7 @@ router.post("/ai/remediation-plan/:scanId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 2500 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("remediation-plan", scanId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("remediation-plan", scanId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "remediation-plan error");
@@ -662,8 +712,7 @@ router.post("/ai/remediation-plan/:scanId", async (req, res) => {
 router.post("/ai/false-positive/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `fp-analysis:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -681,7 +730,7 @@ router.post("/ai/false-positive/:findingId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1400 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("fp-analysis", findingId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("fp-analysis", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "fp-analysis error");
@@ -694,8 +743,7 @@ router.post("/ai/false-positive/:findingId", async (req, res) => {
 router.post("/ai/cvss-breakdown/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `cvss-breakdown:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -713,7 +761,7 @@ router.post("/ai/cvss-breakdown/:findingId", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1400 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("cvss-breakdown", findingId, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("cvss-breakdown", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "cvss-breakdown error");
@@ -726,8 +774,7 @@ router.post("/ai/cvss-breakdown/:findingId", async (req, res) => {
 router.post("/ai/scan-compare/:scanId1/:scanId2", async (req, res) => {
   const { scanId1, scanId2 } = req.params;
   const cacheKey = `scan-compare:${scanId1}:${scanId2}`;
-  const cached = getCached(cacheKey);
-  if (cached) { serveCachedSse(res, cached); return; }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -758,7 +805,7 @@ router.post("/ai/scan-compare/:scanId1/:scanId2", async (req, res) => {
 
     try {
       const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text); logUsage("scan-compare", scanId1, text); }
+      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("scan-compare", scanId1, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "scan-compare error");
@@ -776,7 +823,7 @@ router.post("/ai/deduplicate/:scanId", async (req, res) => {
 
     const list = findings.map((f, idx) => `[${idx}] ${sanitize(String(f["title"]), 100)} | ${f["category"]} | ${sanitize(String(f["endpoint"]), 80)} | CWE: ${f["cwe_id"] ?? "N/A"}`).join("\n");
 
-    const openai = getOpenAI();
+    const openai = await getOpenAI();
     const resp = await openai.chat.completions.create({
       model: getModel(), stream: false,
       messages: [
@@ -869,14 +916,7 @@ router.post("/ai/autonomous-pentest/:targetId", async (req, res) => {
 router.post("/ai/verify-finding/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `verify:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) {
-    setupSse(res);
-    res.write(`data: ${JSON.stringify({ content: cached })}\n\n`);
-    res.write(`data: ${JSON.stringify({ done: true, cached: true })}\n\n`);
-    res.end();
-    return;
-  }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -889,7 +929,7 @@ router.post("/ai/verify-finding/:findingId", async (req, res) => {
     const result = await verifyFinding(findingId);
 
     const text = JSON.stringify(result, null, 2);
-    setCached(cacheKey, text);
+    setCached(cacheKey, text).catch(() => {});
     logUsage("verify-finding", findingId, text);
 
     if (!res.writableEnded) {
@@ -921,14 +961,7 @@ router.post("/ai/generate-patch/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const { tech_stack } = req.body as { tech_stack?: string };
   const cacheKey = `generate-patch:${findingId}:${tech_stack ?? "auto"}`;
-  const cached = getCached(cacheKey);
-  if (cached) {
-    setupSse(res);
-    res.write(`data: ${JSON.stringify({ content: cached })}\n\n`);
-    res.write(`data: ${JSON.stringify({ done: true, cached: true })}\n\n`);
-    res.end();
-    return;
-  }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -941,7 +974,7 @@ router.post("/ai/generate-patch/:findingId", async (req, res) => {
     const result = await generatePatch(findingId, tech_stack);
 
     const text = JSON.stringify(result, null, 2);
-    setCached(cacheKey, text);
+    setCached(cacheKey, text).catch(() => {});
     logUsage("generate-patch", findingId, text);
 
     if (!res.writableEnded) {
@@ -971,14 +1004,7 @@ router.post("/ai/generate-patch/:findingId", async (req, res) => {
 router.post("/ai/reasoning-chain/:findingId", async (req, res) => {
   const { findingId } = req.params;
   const cacheKey = `reasoning:${findingId}`;
-  const cached = getCached(cacheKey);
-  if (cached) {
-    setupSse(res);
-    res.write(`data: ${JSON.stringify({ content: cached })}\n\n`);
-    res.write(`data: ${JSON.stringify({ done: true, cached: true })}\n\n`);
-    res.end();
-    return;
-  }
+  if (await serveCacheIfHit(res, cacheKey)) return;
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
@@ -991,7 +1017,7 @@ router.post("/ai/reasoning-chain/:findingId", async (req, res) => {
     const result = await generateReasoningChain(findingId);
 
     const text = JSON.stringify(result, null, 2);
-    setCached(cacheKey, text);
+    setCached(cacheKey, text).catch(() => {});
     logUsage("reasoning-chain", findingId, text);
 
     if (!res.writableEnded) {

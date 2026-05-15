@@ -60,6 +60,11 @@ function pageName(loc: string): string {
   if (loc.startsWith("/ai-triage")) return "AI Triage";
   if (loc.startsWith("/admin/panel")) return "Admin Panel";
   if (loc.startsWith("/admin/users")) return "User Management";
+  if (loc.startsWith("/admin/anomaly-alerts")) return "Anomaly Alerts";
+  if (loc.startsWith("/admin/ip-allowlist")) return "IP Allowlist";
+  if (loc.startsWith("/admin/sessions")) return "Active Sessions";
+  if (loc.startsWith("/admin/saml-config")) return "SAML / SSO Config";
+  if (loc.startsWith("/admin/policy")) return "Platform Policy";
   if (loc.startsWith("/notifications")) return "Notifications";
   if (loc.startsWith("/security")) return "2-Factor Auth";
   if (loc.startsWith("/scheduled-scans")) return "Scheduled Scans";
@@ -73,6 +78,7 @@ function pageName(loc: string): string {
   if (loc.startsWith("/false-positives")) return "FP Review Queue";
   if (loc.startsWith("/triage-metrics")) return "Triage Metrics";
   if (loc.startsWith("/feature-flags")) return "Feature Flags";
+  if (loc.startsWith("/forbidden")) return "Access Denied";
   return "Dashboard";
 }
 
@@ -125,6 +131,20 @@ const NAV_GROUPS = [
     items: [
       { href: "/scheduled-scans", label: "Scheduled",  icon: Timer,    shortcut: null },
       { href: "/testing",         label: "Testing",     icon: Activity, shortcut: null },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { href: "/admin/panel",          label: "Admin Panel",     icon: Shield,       shortcut: null },
+      { href: "/admin/users",          label: "Users",           icon: KeyRound,     shortcut: null },
+      { href: "/admin/anomaly-alerts", label: "Anomaly Alerts",  icon: ShieldAlert,  shortcut: null },
+      { href: "/admin/ip-allowlist",   label: "IP Allowlist",    icon: Shield,       shortcut: null },
+      { href: "/admin/sessions",       label: "Active Sessions", icon: Activity,     shortcut: null },
+      { href: "/admin/saml-config",    label: "SAML / SSO",      icon: KeyRound,     shortcut: null },
+      { href: "/admin/policy",         label: "Platform Policy", icon: ClipboardCheck, shortcut: null },
+      { href: "/audit-log",            label: "Audit Log",       icon: BarChart2,    shortcut: null },
+      { href: "/integrations",         label: "Integrations",    icon: Network,      shortcut: null },
     ],
   },
 ];
@@ -357,6 +377,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const ADMIN_ONLY_PATHS = [
     "/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel", "/testing",
     "/executive", "/attack-surface", "/compliance", "/sla", "/engagements", "/scan-templates", "/cvss",
+    "/admin/anomaly-alerts", "/admin/ip-allowlist", "/admin/sessions", "/admin/saml-config", "/admin/policy",
   ];
 
   async function logout() {

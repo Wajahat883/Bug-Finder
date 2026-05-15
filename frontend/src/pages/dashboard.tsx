@@ -46,15 +46,21 @@ interface KpiCardProps {
   valueColor: string;
   sparkData: number[];
   sparkColor: string;
+  onClick?: () => void;
 }
-function KpiCard({ label, value, sublabel, valueColor, sparkData, sparkColor }: KpiCardProps) {
+function KpiCard({ label, value, sublabel, valueColor, sparkData, sparkColor, onClick }: KpiCardProps) {
   return (
     <div
-      className="rounded-lg p-4 flex flex-col gap-2 border"
+      className="rounded-lg p-4 flex flex-col gap-2 border transition-all"
       style={{
         background: "hsl(var(--card))",
         borderColor: "hsl(var(--border))",
+        cursor: onClick ? "pointer" : "default",
       }}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === "Enter" || e.key === " ") onClick(); } : undefined}
     >
       <div className="flex items-start justify-between">
         <span className="text-xs font-medium" style={{ color: "hsl(var(--muted-foreground))" }}>
@@ -214,6 +220,19 @@ export default function Dashboard() {
         </Button>
       </div>
 
+      {/* SLA breach warning strip */}
+      {critical > 0 && (
+        <div
+          className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-xs font-medium cursor-pointer"
+          style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", color: "#f87171" }}
+          onClick={() => setLocation("/findings?severity=critical")}
+        >
+          <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse flex-shrink-0" />
+          <span>{critical} critical finding{critical !== 1 ? "s" : ""} require immediate attention — SLA breach risk</span>
+          <span className="ml-auto underline">View Critical →</span>
+        </div>
+      )}
+
       {/* KPI cards */}
       <div className="grid grid-cols-5 gap-3">
         <KpiCard
@@ -223,6 +242,7 @@ export default function Dashboard() {
           valueColor="hsl(var(--foreground))"
           sparkData={spTotal}
           sparkColor="#818cf8"
+          onClick={() => setLocation("/scans")}
         />
         <KpiCard
           label="Active Scans"
@@ -230,6 +250,7 @@ export default function Dashboard() {
           valueColor="#22d3ee"
           sparkData={spActive}
           sparkColor="#22d3ee"
+          onClick={() => setLocation("/scans?status=running")}
         />
         <KpiCard
           label="Critical"
@@ -237,6 +258,7 @@ export default function Dashboard() {
           valueColor="#f87171"
           sparkData={spCrit}
           sparkColor="#f87171"
+          onClick={() => setLocation("/findings?severity=critical")}
         />
         <KpiCard
           label="High"
@@ -244,6 +266,7 @@ export default function Dashboard() {
           valueColor="#fb923c"
           sparkData={spHigh}
           sparkColor="#fb923c"
+          onClick={() => setLocation("/findings?severity=high")}
         />
         <KpiCard
           label="Risk Score"
@@ -251,6 +274,7 @@ export default function Dashboard() {
           valueColor="#c084fc"
           sparkData={spRisk}
           sparkColor="#c084fc"
+          onClick={() => setLocation("/findings")}
         />
       </div>
 

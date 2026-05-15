@@ -4,6 +4,8 @@ import helmet from "helmet";
 import session from "express-session";
 import MongoStore from "connect-mongo";
 import pinoHttp from "pino-http";
+import crypto from "crypto";
+import cookieParser from "cookie-parser";
 import router from "./routes";
 import { logger } from "./lib/logger";
 import { connectDb } from "./lib/db";
@@ -114,8 +116,35 @@ app.use(
   })
 );
 
+app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
+// CSRF: double-submit cookie pattern — sets __csrf cookie, validates X-CSRF-Token header on mutating requests
+app.use("/api", (req, res, next) => {
+  const skipMethods = ["GET", "HEAD", "OPTIONS"];
+  const skipPaths = ["/api/auth/login", "/api/auth/register", "/api/auth/saml", "/api/webhooks"];
+
+  // Issue token on every request (SameSite=Lax already mitigates most CSRF, this adds defense-in-depth)
+  if (!req.cookies?.["__csrf"]) {
+    const token = crypto.randomBytes(24).toString("hex");
+    res.cookie("__csrf", token, { httpOnly: false, sameSite: "strict", secure: isProdMode });
+  }
+
+  if (skipMethods.includes(req.method) || skipPaths.some(p => req.path.startsWith(p.replace("/api", "")))) {
+    return next();
+  }
+
+  // API key requests bypass CSRF (machine-to-machine)
+  if (req.headers["x-api-key"]) return next();
+
+  const cookieToken = req.cookies?.["__csrf"];
+  const headerToken = req.headers["x-csrf-token"];
+  if (!cookieToken || !headerToken || cookieToken !== headerToken) {
+    return res.status(403).json({ type: "https://httpstatuses.com/403", title: "CSRF validation failed", status: 403 });
+  }
+  next();
+});
 
 // API key auth runs before routes — sets session if valid key provided
 app.use("/api", apiKeyAuth);

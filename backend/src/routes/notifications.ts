@@ -1,10 +1,19 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { ObjectId } from "mongodb";
+import { z } from "zod";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { sendEmail } from "../services/email";
 import { requireAuth } from "../middlewares/rbac";
+
+const digestSchema = z.object({ email: z.string().email("Must be a valid email address") });
+const prefSchema = z.object({
+  channels: z.array(z.enum(["email", "slack", "teams", "pagerduty"])).optional(),
+  notify_critical: z.boolean().optional(),
+  notify_high: z.boolean().optional(),
+  notify_scan_complete: z.boolean().optional(),
+});
 
 const router = Router();
 
@@ -16,8 +25,9 @@ const digestLimiter = rateLimit({
 
 router.post("/notifications/digest", requireAuth, digestLimiter, async (req, res) => {
   try {
-    const { email: recipient } = req.body as { email?: string };
-    if (!recipient) return res.status(400).json({ error: "email is required" });
+    const parsed = digestSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
+    const { email: recipient } = parsed.data;
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
@@ -132,6 +142,43 @@ router.delete("/notifications/:id", requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err }, "Delete notification error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /notifications/preferences — get current user's notification preferences
+router.get("/notifications/preferences", requireAuth, async (req, res) => {
+  try {
+    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const userId = session["userId"] as string;
+    const pref = await col("notification_preferences").findOne({ user_id: userId } as Record<string, unknown>) as Record<string, unknown> | null;
+    res.json({
+      channels: pref?.["channels"] ?? ["email"],
+      notify_critical: pref?.["notify_critical"] ?? true,
+      notify_high: pref?.["notify_high"] ?? true,
+      notify_scan_complete: pref?.["notify_scan_complete"] ?? false,
+    });
+  } catch (err) {
+    logger.error({ err }, "Get notification preferences error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// PUT /notifications/preferences — update current user's notification preferences
+router.put("/notifications/preferences", requireAuth, async (req, res) => {
+  try {
+    const parsed = prefSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
+    const session = (req as unknown as { session: Record<string, unknown> }).session;
+    const userId = session["userId"] as string;
+    await col("notification_preferences").updateOne(
+      { user_id: userId } as Record<string, unknown>,
+      { $set: { ...parsed.data, user_id: userId, updated_at: new Date() }, $setOnInsert: { created_at: new Date() } },
+      { upsert: true }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Update notification preferences error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

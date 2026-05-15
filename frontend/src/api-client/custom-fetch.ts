@@ -358,6 +358,13 @@ export async function customFetch<T = unknown>(
     }
   }
 
+  // CSRF double-submit: attach cookie value as X-CSRF-Token header on mutating requests
+  const isMutating = !["GET", "HEAD", "OPTIONS"].includes(method);
+  if (isMutating && !headers.has("x-csrf-token")) {
+    const csrfToken = document.cookie.split(";").find(c => c.trim().startsWith("__csrf="))?.split("=")[1];
+    if (csrfToken) headers.set("x-csrf-token", csrfToken);
+  }
+
   const requestInfo = { method, url: resolveUrl(input) };
 
   const response = await fetch(input, { credentials: "include", ...init, method, headers });

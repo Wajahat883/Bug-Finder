@@ -1,4 +1,16 @@
 import { logger } from "../lib/logger";
+import { col } from "../lib/db";
+
+async function getSettingsOverrides(): Promise<Record<string, string>> {
+  try {
+    const s = (await col("settings").find().toArray())[0] as Record<string, unknown> | undefined;
+    return {
+      slack_webhook_url: String(s?.["slack_webhook_url"] ?? ""),
+      teams_webhook_url: String(s?.["teams_webhook_url"] ?? ""),
+      pagerduty_routing_key: String(s?.["pagerduty_routing_key"] ?? ""),
+    };
+  } catch { return {}; }
+}
 
 interface NotificationPayload {
   title: string;
@@ -11,8 +23,39 @@ interface NotificationPayload {
   timestamp?: string;
 }
 
+export async function sendPagerDutyAlert(payload: NotificationPayload): Promise<boolean> {
+  const overrides = await getSettingsOverrides();
+  const routingKey = overrides["pagerduty_routing_key"] || process.env["PAGERDUTY_ROUTING_KEY"] || "";
+  if (!routingKey) return false;
+
+  const severity = payload.severity === "critical" ? "critical" : payload.severity === "high" ? "error" : "warning";
+  try {
+    const resp = await fetch("https://events.pagerduty.com/v2/enqueue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        routing_key: routingKey,
+        event_action: "trigger",
+        payload: {
+          summary: `[${payload.severity.toUpperCase()}] ${payload.title}`,
+          severity,
+          source: payload.targetUrl ?? "Bug Finder Pro",
+          custom_details: { message: payload.message, risk_score: payload.riskScore, findings_count: payload.findingsCount },
+        },
+        dedup_key: `bugfinder-${payload.scanId ?? Date.now()}`,
+      }),
+    });
+    if (resp.ok) { logger.info("PagerDuty alert sent"); return true; }
+    return false;
+  } catch (err) {
+    logger.warn({ err }, "Failed to send PagerDuty alert");
+    return false;
+  }
+}
+
 export async function sendSlackNotification(payload: NotificationPayload): Promise<boolean> {
-  const webhookUrl = process.env["SLACK_WEBHOOK_URL"];
+  const overrides = await getSettingsOverrides();
+  const webhookUrl = overrides["slack_webhook_url"] || process.env["SLACK_WEBHOOK_URL"] || "";
   if (!webhookUrl) return false;
 
   const color = payload.severity === "critical" ? "#ef4444" :
@@ -49,7 +92,8 @@ export async function sendSlackNotification(payload: NotificationPayload): Promi
 }
 
 export async function sendTeamsNotification(payload: NotificationPayload): Promise<boolean> {
-  const webhookUrl = process.env["TEAMS_WEBHOOK_URL"];
+  const overrides = await getSettingsOverrides();
+  const webhookUrl = overrides["teams_webhook_url"] || process.env["TEAMS_WEBHOOK_URL"] || "";
   if (!webhookUrl) return false;
 
   const color = payload.severity === "critical" ? "FF0000" :
@@ -137,6 +181,7 @@ export async function notifyAllChannels(payload: NotificationPayload & { descrip
     sendSlackNotification(payload),
     sendTeamsNotification(payload),
     sendJiraTicket(payload),
+    sendPagerDutyAlert(payload),
   ]);
 
   const successCount = results.filter(r => r.status === "fulfilled" && r.value).length;

@@ -6,10 +6,18 @@ import { requireAdmin } from "../middlewares/rbac";
 
 const router = Router();
 
-router.get("/integrations", requireAdmin, (_req, res) => {
+router.get("/integrations", requireAdmin, async (_req, res) => {
+  // Check settings DB for user-configured webhook URLs
+  const settings = (await col("settings").find().toArray())[0] as Record<string, unknown> | undefined;
+  const slackUrl = String(settings?.["slack_webhook_url"] ?? "") || process.env["SLACK_WEBHOOK_URL"] || "";
+  const teamsUrl = String(settings?.["teams_webhook_url"] ?? "") || process.env["TEAMS_WEBHOOK_URL"] || "";
+  const pdKey = String(settings?.["pagerduty_routing_key"] ?? "") || process.env["PAGERDUTY_ROUTING_KEY"] || "";
+
   res.json({
     github: { connected: !!process.env["GITHUB_TOKEN"], name: "GitHub" },
-    slack:  { connected: !!process.env["SLACK_WEBHOOK_URL"], name: "Slack" },
+    slack:  { connected: !!slackUrl, name: "Slack" },
+    teams:  { connected: !!teamsUrl, name: "Microsoft Teams" },
+    pagerduty: { connected: !!pdKey, name: "PagerDuty" },
     jira:   {
       connected: !!(process.env["JIRA_URL"] && process.env["JIRA_EMAIL"] && process.env["JIRA_API_TOKEN"] && process.env["JIRA_PROJECT_KEY"]),
       name: "Jira",
@@ -18,6 +26,30 @@ router.get("/integrations", requireAdmin, (_req, res) => {
       projectKey: process.env["JIRA_PROJECT_KEY"] ?? "",
     },
   });
+});
+
+// GET /integrations/health — webhook delivery health metrics
+router.get("/integrations/health", requireAdmin, async (_req, res) => {
+  try {
+    const hooks = await col("webhooks").find({ enabled: true }).toArray() as Array<Record<string, unknown>>;
+    const health = hooks.map(h => ({
+      id: String(h["_id"]),
+      name: h["name"] ?? h["url"],
+      url: h["url"],
+      enabled: h["enabled"],
+      delivery_count: h["delivery_count"] ?? 0,
+      last_triggered: h["last_triggered"] ?? null,
+      last_status: h["last_status"] ?? null,
+      last_ok: h["last_ok"] ?? null,
+      status: h["last_ok"] === true ? "healthy" : h["last_ok"] === false ? "failing" : "untested",
+    }));
+    const healthy = health.filter(h => h.status === "healthy").length;
+    const failing = health.filter(h => h.status === "failing").length;
+    res.json({ webhooks: health, summary: { total: hooks.length, healthy, failing, untested: hooks.length - healthy - failing } });
+  } catch (err) {
+    logger.error({ err }, "Integration health error");
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // ── GitHub: Create issue from finding ──────────────────────────────────────

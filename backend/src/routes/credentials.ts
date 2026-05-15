@@ -8,10 +8,19 @@
  */
 
 import { Router, type Request } from "express";
+import { z } from "zod";
 import { requireAuth } from "../middlewares/rbac";
 import { storeCredential, loadCredential, listCredentialMeta, deleteCredential } from "../lib/credential-vault";
 import { col } from "../lib/db";
 import { ObjectId } from "mongodb";
+
+const storeCredentialSchema = z.object({
+  target_id: z.string().min(1, "target_id is required"),
+  type: z.enum(["bearer", "cookie", "basic", "apikey"], { errorMap: () => ({ message: "type must be bearer, cookie, basic, or apikey" }) }),
+  value: z.string().min(1, "value is required").max(4096),
+  username: z.string().max(256).optional(),
+  label: z.string().max(100).optional(),
+});
 
 interface SessionData { userId?: string; }
 type AuthReq = Request & { session: SessionData };
@@ -22,24 +31,12 @@ const router = Router();
 // POST /credentials — store a new credential set
 router.post("/credentials", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
-    const { target_id, type, value, username, label } = req.body as {
-      target_id?: string;
-      type?: string;
-      value?: string;
-      username?: string;
-      label?: string;
-    };
-
-    if (!target_id || !type || !value) {
-      res.status(400).json({ error: "target_id, type, and value are required" });
+    const parsed = storeCredentialSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
       return;
     }
-
-    const validTypes = ["bearer", "cookie", "basic", "apikey"];
-    if (!validTypes.includes(type)) {
-      res.status(400).json({ error: `type must be one of: ${validTypes.join(", ")}` });
-      return;
-    }
+    const { target_id, type, value, username, label } = parsed.data;
 
     // Verify target belongs to this user
     const target = await col("targets").findOne({

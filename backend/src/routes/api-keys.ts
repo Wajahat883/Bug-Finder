@@ -1,9 +1,20 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
 import crypto from "crypto";
+import { z } from "zod";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAdmin } from "../middlewares/rbac";
+
+const VALID_SCOPES = ["read", "write", "scan", "admin"] as const;
+const createKeySchema = z.object({
+  name: z.string().min(1, "name is required").max(100),
+  scopes: z.array(z.enum(VALID_SCOPES)).optional(),
+});
+const patchKeySchema = z.object({
+  name: z.string().max(100).optional(),
+  active: z.boolean().optional(),
+});
 
 const router = Router();
 
@@ -34,8 +45,9 @@ router.get("/api-keys", requireAdmin, async (_req, res) => {
 // POST /api-keys — Create new API key
 router.post("/api-keys", requireAdmin, async (req, res) => {
   try {
-    const { name, scopes } = req.body as { name?: string; scopes?: string[] };
-    if (!name) return res.status(400).json({ error: "name is required" });
+    const parsed = createKeySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
+    const { name, scopes } = parsed.data;
     const key = generateKey();
     const insert = await col("api_keys").insertOne({
       name: name.trim(),
@@ -65,8 +77,10 @@ router.post("/api-keys", requireAdmin, async (req, res) => {
 router.patch("/api-keys/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, active } = req.body as { name?: string; active?: boolean };
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const parsed = patchKeySchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
+    const { name, active } = parsed.data;
     const update: Record<string, unknown> = { updated_at: new Date() };
     if (name !== undefined) update["name"] = name.trim();
     if (active !== undefined) update["active"] = active;

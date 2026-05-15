@@ -545,4 +545,40 @@ router.get("/auth/oauth/github/callback", async (req, res) => {
   } catch { res.redirect("/login?error=oauth_failed"); }
 });
 
+// ── GDPR: Right to erasure — self-deletion ────────────────────────────────────
+router.delete("/auth/me", async (req, res) => {
+  try {
+    const sess = req.session as SessionData;
+    const userId = sess.userId;
+    if (!userId) return res.status(401).json({ error: "Unauthenticated" });
+
+    // Anonymize audit log entries (keep for compliance, strip PII)
+    await col("audit_log").updateMany(
+      { user_id: userId } as Record<string, unknown>,
+      { $set: { username: "[deleted]", details: null } }
+    );
+
+    // Delete user's findings, scan jobs, targets (personal data)
+    await Promise.all([
+      col("findings").deleteMany({ user_id: userId } as Record<string, unknown>),
+      col("scan_jobs").deleteMany({ user_id: userId } as Record<string, unknown>),
+      col("targets").deleteMany({ user_id: userId } as Record<string, unknown>),
+      col("api_keys").deleteMany({ user_id: userId } as Record<string, unknown>),
+      col("notification_preferences").deleteMany({ user_id: userId } as Record<string, unknown>),
+    ]);
+
+    // Delete user account
+    await col("users").deleteOne({ _id: new ObjectId(userId) } as Record<string, unknown>);
+
+    // Destroy session
+    req.session.destroy(() => {});
+
+    logger.info({ userId }, "GDPR: user self-deletion completed");
+    res.json({ ok: true, message: "Your account and associated data have been deleted." });
+  } catch (err) {
+    logger.error({ err }, "GDPR self-deletion error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;

@@ -4,6 +4,10 @@ import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { formatFinding } from "./scans";
 import { requireAuth } from "../middlewares/rbac";
+import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
+import { getComplianceTags } from "../lib/compliance-map";
+import { engagementScopeFilter } from "../middlewares/resource-rbac";
+import { logAudit } from "../lib/audit";
 
 const router = Router();
 
@@ -22,6 +26,9 @@ router.get("/findings", requireAuth, async (req, res) => {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
     if (session.role !== "admin") query["user_id"] = session.userId ?? null;
+    // Apply engagement-level RBAC scope filter
+    const scopeFilter = engagementScopeFilter(req);
+    if (scopeFilter) Object.assign(query, scopeFilter);
     if (severity) query["severity"] = severity;
     if (valStatus) query["validation_status"] = valStatus;
     if (search) {
@@ -42,7 +49,7 @@ router.get("/findings", requireAuth, async (req, res) => {
         .skip((page - 1) * pageSize)
         .limit(pageSize)
         .toArray()
-        .then(rows => (rows as Array<Record<string, unknown>>).map(formatFinding)),
+        .then(rows => (rows as Array<Record<string, unknown>>).map(r => formatFinding(redactObject(r, FINDING_SENSITIVE_FIELDS)))),
       col("findings").countDocuments(query as Record<string, unknown>),
     ]);
 
@@ -156,6 +163,18 @@ router.patch("/findings/:id", requireAuth, async (req, res) => {
     }
 
     const updated = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown>;
+
+    // Audit log
+    logAudit({
+      userId: session["userId"] ?? "",
+      username: String(session["username"] ?? session["userId"] ?? ""),
+      action: "finding.update",
+      resource: "finding",
+      resourceId: id,
+      details: { changes: updates },
+      ip: req.ip,
+    }).catch(() => {});
+
     res.json(formatFinding(updated));
   } catch (err) {
     logger.error({ err }, "Update finding error");
@@ -232,6 +251,14 @@ router.post("/findings/bulk", requireAuth, async (req, res) => {
     if (action === "delete") {
       const result = await col("findings").deleteMany({ _id: { $in: validIds }, ...ownerFilter } as Record<string, unknown>);
       updated = (result as unknown as { deletedCount: number }).deletedCount ?? validIds.length;
+      logAudit({
+        userId: session.userId ?? "",
+        username: String((session as Record<string, unknown>)["username"] ?? session.userId ?? ""),
+        action: "finding.bulk_delete",
+        resource: "finding",
+        details: { count: updated, ids: ids.slice(0, 20) },
+        ip: req.ip,
+      }).catch(() => {});
       res.json({ ok: true, action, affected: updated });
       return;
     }

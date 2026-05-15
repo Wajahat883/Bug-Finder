@@ -2,6 +2,7 @@ import { Router } from "express";
 import OpenAI from "openai";
 import { col } from "../lib/db";
 import { getQueueStats } from "../services/queue/manager";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 const startTime = Date.now();
@@ -28,7 +29,16 @@ async function checkAiHealth(): Promise<{ status: string; latency_ms: number; mo
   }
 }
 
+// Public liveness probe — safe for load balancers / uptime monitors
 router.get(["/health", "/healthz"], async (_req, res) => {
+  let dbStatus = "healthy";
+  try { await col("settings").findOne({}); } catch { dbStatus = "unhealthy"; }
+  const ok = dbStatus === "healthy";
+  res.status(ok ? 200 : 503).json({ status: ok ? "ok" : "degraded", timestamp: new Date().toISOString() });
+});
+
+// Detailed system health — requires authentication (info-disclosure protection)
+router.get(["/health/details", "/healthz/details"], requireAuth, async (_req, res) => {
   const uptimeMs = Date.now() - startTime;
   let dbStatus = "healthy";
   let redisStatus = "unavailable";
@@ -81,10 +91,10 @@ router.get(["/health", "/healthz"], async (_req, res) => {
   });
 });
 
-router.get("/healthz/ai", async (_req, res) => {
+// AI health — requires authentication
+router.get("/healthz/ai", requireAuth, async (_req, res) => {
   const result = await checkAiHealth();
-  const statusCode = result.status === "healthy" ? 200 : 200;
-  res.status(statusCode).json({ ...result, timestamp: new Date().toISOString() });
+  res.status(200).json({ ...result, timestamp: new Date().toISOString() });
 });
 
 export default router;

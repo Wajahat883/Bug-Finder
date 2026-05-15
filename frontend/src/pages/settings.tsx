@@ -10,7 +10,7 @@ import { Slider } from "@/components/ui/slider";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Save, Key, Webhook, Bell, BrainCircuit, Activity, Mail, RefreshCw, Eye, EyeOff, ShieldCheck, QrCode, Smartphone } from "lucide-react";
+import { Save, Key, Webhook, Bell, BrainCircuit, Activity, Mail, RefreshCw, Eye, EyeOff, ShieldCheck, QrCode, Smartphone, Send, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const AI_MODELS = [
@@ -29,9 +29,13 @@ export default function Settings() {
   const [apiKey, setApiKey] = useState("");
   const [regenerating, setRegenerating] = useState(false);
 
+  const [smtpTesting, setSmtpTesting] = useState(false);
   const [formData, setFormData] = useState({
     default_export_format: "json",
     webhook_url: "",
+    slack_webhook_url: "",
+    teams_webhook_url: "",
+    pagerduty_routing_key: "",
     notifications_enabled: false,
     ai_analysis_enabled: true,
     max_concurrent_scans: 3,
@@ -56,6 +60,9 @@ export default function Settings() {
         smtp_port: (s.smtp_port as number) ?? 587,
         smtp_user: (s.smtp_user as string) ?? "",
         smtp_from: (s.smtp_from as string) ?? "noreply@bugfinder.io",
+        slack_webhook_url: (s.slack_webhook_url as string) ?? "",
+        teams_webhook_url: (s.teams_webhook_url as string) ?? "",
+        pagerduty_routing_key: (s.pagerduty_routing_key as string) ?? "",
       });
       setApiKey((s.api_key as string) ?? "");
     }
@@ -83,6 +90,18 @@ export default function Settings() {
     } catch {
       toast({ title: "Failed to regenerate API key", variant: "destructive" });
     } finally { setRegenerating(false); }
+  }
+
+  async function testSmtp() {
+    setSmtpTesting(true);
+    try {
+      const r = await fetch("/api/settings/test-smtp", { method: "POST", credentials: "include" });
+      const d = await r.json() as { ok?: boolean; error?: string };
+      if (d.ok) toast({ title: "SMTP test passed", description: "Test email sent successfully." });
+      else toast({ title: "SMTP test failed", description: d.error ?? "Unknown error", variant: "destructive" });
+    } catch {
+      toast({ title: "SMTP test failed", description: "Could not reach server", variant: "destructive" });
+    } finally { setSmtpTesting(false); }
   }
 
   if (isLoading) return <div className="p-8 text-center text-muted-foreground">Loading settings...</div>;
@@ -206,6 +225,36 @@ export default function Settings() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">SMTP password is configured via the SMTP_PASS environment variable.</p>
+            <Button variant="outline" size="sm" onClick={testSmtp} disabled={smtpTesting || !formData.smtp_host} className="gap-2">
+              {smtpTesting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              Test SMTP Connection
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Notification Channels */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center"><Bell className="w-5 h-5 mr-2 text-primary" />Notification Channels</CardTitle>
+            <CardDescription>Configure Slack, Teams, and PagerDuty for critical alert delivery</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label>Slack Webhook URL</Label>
+              <Input placeholder="https://hooks.slack.com/services/..." value={formData.slack_webhook_url}
+                onChange={(e) => setFormData({ ...formData, slack_webhook_url: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>Microsoft Teams Webhook URL</Label>
+              <Input placeholder="https://outlook.office.com/webhook/..." value={formData.teams_webhook_url}
+                onChange={(e) => setFormData({ ...formData, teams_webhook_url: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label>PagerDuty Routing Key</Label>
+              <Input placeholder="your-pagerduty-routing-key" value={formData.pagerduty_routing_key}
+                onChange={(e) => setFormData({ ...formData, pagerduty_routing_key: e.target.value })} />
+              <p className="text-xs text-muted-foreground">Events API v2 integration key from your PagerDuty service.</p>
+            </div>
           </CardContent>
         </Card>
 

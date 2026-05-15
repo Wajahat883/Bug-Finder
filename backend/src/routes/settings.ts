@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth, requireAdmin } from "../middlewares/rbac";
+import nodemailer from "nodemailer";
 
 const router = Router();
 
@@ -10,6 +11,9 @@ function formatSettings(s: Record<string, unknown>) {
   return {
     default_export_format: s["default_export_format"] ?? "json",
     webhook_url: s["webhook_url"] ?? "",
+    slack_webhook_url: s["slack_webhook_url"] ?? "",
+    teams_webhook_url: s["teams_webhook_url"] ?? "",
+    pagerduty_routing_key: s["pagerduty_routing_key"] ?? "",
     notifications_enabled: s["notifications_enabled"] ?? true,
     ai_analysis_enabled: s["ai_analysis_enabled"] ?? true,
     max_concurrent_scans: s["max_concurrent_scans"] ?? 5,
@@ -51,7 +55,8 @@ router.get("/settings", requireAuth, async (req, res) => {
 router.put("/settings", requireAdmin, async (req, res) => {
   try {
     const body = req.body as Record<string, unknown>;
-    const allowed = ["default_export_format", "webhook_url", "notifications_enabled",
+    const allowed = ["default_export_format", "webhook_url", "slack_webhook_url",
+      "teams_webhook_url", "pagerduty_routing_key", "notifications_enabled",
       "ai_analysis_enabled", "max_concurrent_scans", "ai_model",
       "smtp_host", "smtp_port", "smtp_user", "smtp_from"];
 
@@ -92,6 +97,38 @@ router.post("/settings/regenerate-api-key", requireAdmin, async (req, res) => {
   } catch (err) {
     logger.error({ err }, "Regenerate API key error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.post("/settings/test-smtp", requireAdmin, async (req, res) => {
+  try {
+    const s = ((await col("settings").find().toArray())[0] ?? {}) as Record<string, unknown>;
+    const host = String(s["smtp_host"] ?? process.env["SMTP_HOST"] ?? "");
+    const port = Number(s["smtp_port"] ?? process.env["SMTP_PORT"] ?? 587);
+    const user = String(s["smtp_user"] ?? process.env["SMTP_USER"] ?? "");
+    const pass = String(process.env["SMTP_PASS"] ?? "");
+    const from = String(s["smtp_from"] ?? process.env["SMTP_FROM"] ?? "noreply@bugfinder.io");
+    const adminEmail = String(process.env["ADMIN_EMAIL"] ?? from);
+
+    if (!host) return res.json({ ok: false, error: "SMTP host not configured" });
+
+    const transporter = nodemailer.createTransport({
+      host, port, secure: port === 465,
+      auth: user ? { user, pass } : undefined,
+    });
+
+    await transporter.verify();
+    await transporter.sendMail({
+      from, to: adminEmail,
+      subject: "Bug Finder — SMTP Test",
+      text: "This is a test email from Bug Finder platform. SMTP is working correctly.",
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ err }, "SMTP test failed");
+    res.json({ ok: false, error: msg });
   }
 });
 

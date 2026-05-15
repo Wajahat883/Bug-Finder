@@ -268,6 +268,46 @@ function AiStreamPanel({
   );
 }
 
+function RetestButton({ findingId, currentStatus }: { findingId: string; currentStatus?: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [loading, setLoading] = useState(false);
+
+  async function requestRetest() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/findings/${findingId}/retest`, { method: "POST", credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      qc.invalidateQueries({ queryKey: ["/api/findings", findingId] });
+      toast({ title: "Retest requested", description: "The finding has been queued for retesting." });
+    } catch (e: unknown) {
+      toast({ title: "Retest failed", description: e instanceof Error ? e.message : "Error", variant: "destructive" });
+    } finally { setLoading(false); }
+  }
+
+  const statusColors: Record<string, string> = {
+    pending: "border-yellow-500/40 text-yellow-400",
+    running: "border-blue-500/40 text-blue-400",
+    passed: "border-green-500/40 text-green-400",
+    failed: "border-red-500/40 text-red-400",
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      {currentStatus && currentStatus !== "none" && (
+        <Badge variant="outline" className={`text-[10px] ${statusColors[currentStatus] ?? "border-muted-foreground/40 text-muted-foreground"}`}>
+          Retest: {currentStatus}
+        </Badge>
+      )}
+      <Button size="sm" variant="outline" className="text-xs h-7 border-teal-500/40 text-teal-400 hover:bg-teal-500/10 gap-1.5"
+        onClick={requestRetest} disabled={loading || currentStatus === "running"}>
+        {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+        Retest
+      </Button>
+    </div>
+  );
+}
+
 export default function FindingDetail() {
   const params = useParams();
   const [, setLocation] = useLocation();
@@ -637,6 +677,47 @@ export default function FindingDetail() {
           </Card>
         </div>
       )}
+
+      {/* Suppression Banner */}
+      {(finding as Record<string, unknown>).triage_status === "suppressed" && (
+        <div className="flex items-center gap-3 px-4 py-3 rounded-lg border border-purple-500/40 bg-purple-500/10 text-purple-300 text-sm">
+          <Shield className="w-4 h-4 shrink-0" />
+          <span className="flex-1">
+            <strong>Suppressed</strong>
+            {(finding as Record<string, unknown>).suppressed_until
+              ? ` until ${format(new Date(String((finding as Record<string, unknown>).suppressed_until)), "MMM d, yyyy")}`
+              : " indefinitely"}
+            {!!((finding as Record<string, unknown>).fp_reason) && ` — ${String((finding as Record<string, unknown>).fp_reason).replace(/_/g, " ")}`}
+          </span>
+          <Button size="sm" variant="outline" className="border-purple-500/50 text-purple-300 text-xs"
+            onClick={() => submitTriage("confirmed")}>Unsuppress</Button>
+        </div>
+      )}
+
+      {/* Compliance Tags + Days Open + Retest */}
+      {(() => {
+        const tags = (finding as Record<string, unknown>).compliance_tags as string[] | undefined;
+        const daysOpen = (finding as Record<string, unknown>).days_open as number | null | undefined;
+        const retestStatus = (finding as Record<string, unknown>).retest_status as string | undefined;
+        return (
+          <div className="flex flex-wrap items-center gap-3">
+            {tags && tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 items-center">
+                <span className="text-xs text-muted-foreground">Compliance:</span>
+                {tags.map(tag => (
+                  <Badge key={tag} variant="outline" className="text-[10px] border-cyan-500/40 text-cyan-400">{tag}</Badge>
+                ))}
+              </div>
+            )}
+            {daysOpen != null && (
+              <Badge variant="outline" className={`text-[10px] ${daysOpen > 30 ? "border-red-500/40 text-red-400" : daysOpen > 14 ? "border-yellow-500/40 text-yellow-400" : "border-muted-foreground/40 text-muted-foreground"}`}>
+                Open {daysOpen}d
+              </Badge>
+            )}
+            <RetestButton findingId={findingId} currentStatus={retestStatus} />
+          </div>
+        );
+      })()}
 
       {/* KPI Cards */}
       <div className="grid gap-4 md:grid-cols-4">
