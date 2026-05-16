@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ShieldCheck, X, Loader2 } from "lucide-react";
+import { ShieldCheck, X, Loader2, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface AuditEntry {
@@ -64,6 +64,24 @@ export default function AuditLog() {
     setFilterTo("");
   };
 
+  async function exportAuditLog(format: "csv" | "json") {
+    const params = new URLSearchParams({ format });
+    if (filterFrom) params.set("from", filterFrom);
+    if (filterTo) params.set("to", filterTo);
+    try {
+      const res = await fetch(`/api/audit-log/export?${params.toString()}`, { credentials: "include" });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-log-${new Date().toISOString().split("T")[0]}.${format}`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast({ title: "Export failed", variant: "destructive" });
+    }
+  }
+
   const filteredLogs = (logs as AuditEntry[]).filter(log => {
     if (!filterActor) return true;
     const actor = (log.actor ?? log.username ?? "").toLowerCase();
@@ -75,18 +93,34 @@ export default function AuditLog() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-bold">Audit Log</h1>
-        <Button
-          variant="outline"
-          onClick={() => verifyMutation.mutate()}
-          disabled={verifyMutation.isPending}
-          className="flex items-center gap-2"
-        >
-          {verifyMutation.isPending ? (
-            <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</>
-          ) : (
-            <><ShieldCheck className="w-4 h-4 text-green-400" /> Verify Chain Integrity</>
-          )}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => exportAuditLog("csv")}
+            className="flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" /> Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => exportAuditLog("json")}
+            className="flex items-center gap-2"
+          >
+            <Download className="w-4 h-4" /> Export JSON
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => verifyMutation.mutate()}
+            disabled={verifyMutation.isPending}
+            className="flex items-center gap-2"
+          >
+            {verifyMutation.isPending ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Verifying...</>
+            ) : (
+              <><ShieldCheck className="w-4 h-4 text-green-400" /> Verify Chain Integrity</>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Chain integrity result banner */}

@@ -10,7 +10,7 @@ import { Slider } from "@/components/ui/slider";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Save, Key, Webhook, Bell, BrainCircuit, Activity, Mail, RefreshCw, Eye, EyeOff, ShieldCheck, QrCode, Smartphone, Send, Loader2 } from "lucide-react";
+import { Save, Key, Webhook, Bell, BrainCircuit, Activity, Mail, RefreshCw, Eye, EyeOff, ShieldCheck, QrCode, Smartphone, Send, Loader2, BookOpen } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const AI_MODELS = [
@@ -308,6 +308,33 @@ export default function Settings() {
 
         {/* 2FA Setup */}
         <TwoFactorCard />
+
+        {/* Onboarding Tour */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center"><BookOpen className="w-5 h-5 mr-2 text-primary" />Onboarding Tour</CardTitle>
+            <CardDescription>Restart the setup guide to revisit the onboarding steps</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={async () => {
+                await fetch("/api/auth/profile", {
+                  method: "PATCH",
+                  credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ onboarding_complete: false }),
+                });
+                window.location.reload();
+              }}
+            >
+              <BookOpen className="w-4 h-4" />
+              Restart Tour
+            </Button>
+          </CardContent>
+        </Card>
 
         <div className="flex justify-end">
           <Button onClick={() => updateSettings.mutate({ data: formData as Record<string, unknown> })}

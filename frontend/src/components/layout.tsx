@@ -8,6 +8,7 @@ import {
   ChevronDown, ChevronRight, Bookmark, GitCompare, ClipboardCheck,
   Timer, Sparkles, Moon, Sun, X, Contrast, ExternalLink,
   UserCircle, KeyRound, BarChart2, Briefcase, Key, Building2,
+  Code2,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { CommandPalette } from "./command-palette";
@@ -15,6 +16,8 @@ import { CommandSearch } from "@/components/command-search";
 import { useToast } from "@/hooks/use-toast";
 import { SessionExpiryModal } from "./session-expiry-modal";
 import { useNotifications, pushNotification } from "@/hooks/use-notifications";
+import { OnboardingWizard } from "./onboarding-wizard";
+import { useQueryClient } from "@tanstack/react-query";
 
 // ─── Audio ping for critical alerts ──────────────────────────────────────────
 
@@ -83,6 +86,9 @@ function pageName(loc: string): string {
   if (loc.startsWith("/feature-flags")) return "Feature Flags";
   if (loc.startsWith("/status")) return "System Status";
   if (loc.startsWith("/forbidden")) return "Access Denied";
+  if (loc.startsWith("/secrets")) return "Exposed Secrets";
+  if (loc.startsWith("/scanner-rules")) return "Scanner Rules";
+  if (loc.startsWith("/admin/login-history")) return "Login History";
   return "Dashboard";
 }
 
@@ -121,6 +127,7 @@ const NAV_GROUPS = [
       { href: "/false-positives", label: "FP Review Queue", icon: ShieldAlert, shortcut: null },
       { href: "/triage-metrics",  label: "Triage Metrics",  icon: BarChart2,   shortcut: null },
       { href: "/feature-flags",   label: "Feature Flags",   icon: KeyRound,    shortcut: null },
+      { href: "/secrets",         label: "Secrets",         icon: KeyRound,    shortcut: null },
     ],
   },
   {
@@ -153,6 +160,8 @@ const NAV_GROUPS = [
       { href: "/audit-log",            label: "Audit Log",       icon: BarChart2,    shortcut: null },
       { href: "/integrations",         label: "Integrations",    icon: Network,      shortcut: null },
       { href: "/status",               label: "System Status",   icon: Activity,     shortcut: null },
+      { href: "/scanner-rules",        label: "Scanner Rules",   icon: Code2,        shortcut: null },
+      { href: "/admin/login-history",  label: "Login History",   icon: Clock,        shortcut: null },
     ],
   },
 ];
@@ -199,6 +208,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { data: user, isLoading: userLoading, isError: userError } = useGetMe({
     query: { retry: false, staleTime: 60000 },
   });
+  const qc = useQueryClient();
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
   const { notifications, markRead, markAllRead } = useNotifications();
@@ -380,6 +390,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [toast, soundMuted]);
 
+  const showOnboarding = !userLoading && !userError && !!user && (user as Record<string, unknown>)?.onboarding_complete !== true;
+
   const currentPage = pageName(location);
   const displayName = (user as Record<string, unknown>)?.github_login as string || (user as Record<string, unknown>)?.username as string || "SecOps Lead";
   const displayRole = ((user as Record<string, unknown>)?.role as string)?.toUpperCase() || "ANALYST";
@@ -388,7 +400,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     "/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel", "/testing",
     "/executive", "/attack-surface", "/compliance", "/sla", "/engagements", "/scan-templates", "/cvss",
     "/admin/anomaly-alerts", "/admin/ip-allowlist", "/admin/sessions", "/admin/saml-config", "/admin/policy",
-    "/admin/tenants",
+    "/admin/tenants", "/scanner-rules", "/admin/login-history",
   ];
 
   async function logout() {
@@ -762,6 +774,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       </div>
     </div>
     <SessionExpiryModal />
+    {showOnboarding && (
+      <OnboardingWizard onComplete={async () => {
+        await fetch("/api/auth/profile", {
+          method: "PATCH", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ onboarding_complete: true }),
+        });
+        qc.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      }} />
+    )}
     {shortcutsOpen && (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShortcutsOpen(false)}>
         <div className="bg-card border border-border rounded-xl shadow-2xl p-6 w-96 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>

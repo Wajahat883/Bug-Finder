@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Trash2, Play, Bookmark, Zap, Shield, Rocket, Edit } from "lucide-react";
+import { Plus, Trash2, Play, Bookmark, Zap, Shield, Rocket, Edit, Download, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Template {
@@ -41,6 +41,7 @@ export default function ScanTemplates() {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     name: "", description: "", scan_profile: "standard",
     validation_enabled: true, fuzzing_enabled: false, bug_bounty_mode: false, tags: "",
@@ -93,6 +94,40 @@ export default function ScanTemplates() {
     setLocation(`/scans/new?template=${tmpl.id}`);
   };
 
+  const exportTemplate = (tmpl: Template) => {
+    const blob = new Blob([JSON.stringify(tmpl, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `template-${tmpl.name.replace(/\s+/g, "-").toLowerCase()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importTemplate = async (file: File) => {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const arr: Partial<Template>[] = Array.isArray(parsed) ? parsed : [parsed];
+      for (const tmpl of arr) {
+        const r = await fetch("/api/scan-templates", {
+          method: "POST", credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: tmpl.name, description: tmpl.description, scan_profile: tmpl.scan_profile,
+            validation_enabled: tmpl.validation_enabled, fuzzing_enabled: tmpl.fuzzing_enabled,
+            bug_bounty_mode: tmpl.bug_bounty_mode, tags: tmpl.tags,
+          }),
+        });
+        if (!r.ok) throw new Error("Import failed");
+      }
+      await load();
+      toast({ title: `Imported ${arr.length} template(s)` });
+    } catch {
+      toast({ title: "Import failed — invalid JSON", variant: "destructive" });
+    }
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center h-64 text-muted-foreground">
       Loading templates…
@@ -106,6 +141,14 @@ export default function ScanTemplates() {
           <h1 className="text-3xl font-bold tracking-tight">Scan Templates</h1>
           <p className="text-muted-foreground">Reusable scan configurations for repeatable security assessments</p>
         </div>
+        <div className="flex gap-2">
+          <input
+            ref={importRef} type="file" accept=".json" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) importTemplate(f); e.target.value = ""; }}
+          />
+          <Button variant="outline" className="gap-2" onClick={() => importRef.current?.click()}>
+            <Upload className="w-4 h-4" /> Import Template
+          </Button>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button className="gap-2"><Plus className="w-4 h-4" /> New Template</Button>
@@ -157,6 +200,7 @@ export default function ScanTemplates() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -190,6 +234,9 @@ export default function ScanTemplates() {
             <div className="px-6 pb-4 flex gap-2">
               <Button size="sm" className="flex-1 gap-2" onClick={() => handleLaunch(tmpl)}>
                 <Play className="w-3 h-3" /> Use Template
+              </Button>
+              <Button size="sm" variant="outline" className="gap-1" onClick={() => exportTemplate(tmpl)} title="Export template">
+                <Download className="w-3.5 h-3.5" />
               </Button>
               {!tmpl.is_builtin && (
                 <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => handleDelete(tmpl.id, tmpl.name)}>

@@ -4,7 +4,6 @@ import { useState, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { format, formatDistanceToNow } from "date-fns";
 import {
@@ -138,16 +137,17 @@ function RemediationDetailPanel({
     : null;
 
   return (
-    <Sheet open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto p-0">
-        <SheetHeader className="px-6 py-4 border-b border-border sticky top-0 bg-background z-10">
-          <SheetTitle className="flex items-center justify-between gap-3">
+    <>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto p-0">
+        <DialogHeader className="px-6 py-4 border-b border-border sticky top-0 bg-background z-10">
+          <DialogTitle className="flex items-center justify-between gap-3">
             <span className="truncate text-base font-semibold">{rem.title}</span>
             <button onClick={onClose} className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors">
               <X className="w-4 h-4" />
             </button>
-          </SheetTitle>
-        </SheetHeader>
+          </DialogTitle>
+        </DialogHeader>
 
         <div className="px-6 py-4 space-y-6">
           {/* ── ASSIGNEE ── */}
@@ -350,38 +350,55 @@ function RemediationDetailPanel({
             </Button>
           </section>
         </div>
+      </DialogContent>
+    </Dialog>
+    <RejectDialog
+      open={rejectOpen}
+      onClose={() => setRejectOpen(false)}
+      onConfirm={(reason) => {
+        patchRemediation.mutate({ status: "in_progress", rejection_reason: reason });
+        setRejectOpen(false);
+      }}
+    />
+    </>
+  );
+}
 
-        {/* Reject dialog */}
-        <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Reject Fix</DialogTitle>
-            </DialogHeader>
-            <textarea
-              className="w-full text-sm rounded border border-border bg-background px-3 py-2 resize-none outline-none focus:border-primary/60 transition-colors"
-              rows={4}
-              placeholder="Reason for rejection…"
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-            />
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setRejectOpen(false)}>Cancel</Button>
-              <Button
-                variant="destructive"
-                disabled={!rejectReason.trim()}
-                onClick={() => {
-                  patchRemediation.mutate({ status: "in_progress", rejection_reason: rejectReason.trim() });
-                  setRejectOpen(false);
-                  setRejectReason("");
-                }}
-              >
-                Reject
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </SheetContent>
-    </Sheet>
+function RejectDialog({
+  open,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Reject Fix</DialogTitle>
+        </DialogHeader>
+        <textarea
+          className="w-full text-sm rounded border border-border bg-background px-3 py-2 resize-none outline-none focus:border-primary/60 transition-colors"
+          rows={4}
+          placeholder="Reason for rejection…"
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="destructive"
+            disabled={!reason.trim()}
+            onClick={() => { onConfirm(reason.trim()); setReason(""); }}
+          >
+            Reject
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

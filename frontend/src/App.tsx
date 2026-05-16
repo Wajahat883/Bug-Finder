@@ -60,6 +60,9 @@ import AdminPolicy from "@/pages/admin-policy";
 import Forbidden from "@/pages/forbidden";
 import StatusPage from "@/pages/status";
 import ReportSchedules from "@/pages/report-schedules";
+import SecretsPage from "@/pages/secrets";
+import ScannerRulesPage from "@/pages/scanner-rules";
+import AdminLoginHistory from "@/pages/admin-login-history";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -188,6 +191,11 @@ function Router() {
               {() => <AdminRoute component={AdminTenants} />}
             </Route>
             <Route path="/credentials" component={CredentialsPage} />
+            <Route path="/secrets" component={SecretsPage} />
+            <Route path="/scanner-rules" component={ScannerRulesPage} />
+            <Route path="/admin/login-history">
+              {() => <AdminRoute component={AdminLoginHistory} />}
+            </Route>
 
             <Route path="/report-schedules" component={ReportSchedules} />
             <Route path="/status" component={StatusPage} />
