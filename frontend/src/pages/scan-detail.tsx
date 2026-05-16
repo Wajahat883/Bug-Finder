@@ -582,6 +582,9 @@ export default function ScanDetail() {
           <Button variant="outline" onClick={exportPDF} disabled={isRunning}>
             <FileText className="w-4 h-4 mr-2" />PDF Report
           </Button>
+          <Button variant="outline" onClick={() => window.open(`/api/reports/${scanId}/pdf`, "_blank")} disabled={isRunning}>
+            <Download className="w-4 h-4 mr-2" />Download Report PDF
+          </Button>
           <Button variant="outline" onClick={startSSE} disabled={sseActive}>
             {sseActive ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Radio className="w-4 h-4 mr-2" />}
             {sseActive ? "Streaming…" : "Live Stream"}

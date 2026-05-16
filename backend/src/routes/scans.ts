@@ -513,5 +513,29 @@ router.get("/scan-jobs/queue", requireAdmin, async (_req, res) => {
   }
 });
 
+router.patch("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { redisSet } = await import("../lib/redis");
+    await redisSet(`scan:paused:${id}`, "1", 24 * 3600);
+    await col("scan_jobs").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: { paused: true, paused_at: new Date() } });
+    res.json({ ok: true, status: "paused" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to pause scan" });
+  }
+});
+
+router.patch("/scan-jobs/:id/resume", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { redisDel } = await import("../lib/redis");
+    await redisDel(`scan:paused:${id}`);
+    await col("scan_jobs").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: { paused: false, resumed_at: new Date() } });
+    res.json({ ok: true, status: "running" });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to resume scan" });
+  }
+});
+
 export { formatFinding };
 export default router;

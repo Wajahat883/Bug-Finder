@@ -100,4 +100,37 @@ router.patch("/remediations/:id", async (req, res) => {
   }
 });
 
+// Evidence for remediations
+router.get("/remediations/:id/evidence", requireAuth, async (req, res) => {
+  try {
+    const evidence = await col("remediation_evidence").find({ remediation_id: req.params.id } as Record<string, unknown>).toArray() as Array<Record<string, unknown>>;
+    res.json(evidence.map(e => ({ id: String(e["_id"]), filename: e["filename"], content_type: e["content_type"], label: e["label"], size_bytes: e["size_bytes"], created_at: e["created_at"], base64_data: e["base64_data"] })));
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.post("/remediations/:id/evidence", requireAuth, async (req, res) => {
+  try {
+    const { filename, content_type, base64_data, label } = req.body as Record<string, string>;
+    await col("remediation_evidence").insertOne({ remediation_id: req.params.id, filename, content_type, base64_data, label, size_bytes: Math.ceil(base64_data.length * 0.75), created_at: new Date() } as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
+router.delete("/remediations/:id/evidence/:evidenceId", requireAuth, async (req, res) => {
+  try {
+    const { evidenceId } = req.params;
+    if (!ObjectId.isValid(evidenceId)) return res.status(404).json({ error: "Not found" });
+    await col("remediation_evidence").deleteOne({ _id: new ObjectId(evidenceId) } as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
+// Activity log for remediations
+router.get("/remediations/:id/activity", requireAuth, async (req, res) => {
+  try {
+    const activities = await col("audit_log").find({ resource: "remediation", resource_id: req.params.id } as Record<string, unknown>).sort({ created_at: -1 }).limit(50).toArray() as Array<Record<string, unknown>>;
+    res.json(activities.map(a => ({ action: a["action"], actor: a["username"] ?? a["userId"], timestamp: a["created_at"], details: a["details"] })));
+  } catch { res.status(500).json({ error: "Internal server error" }); }
+});
+
 export default router;

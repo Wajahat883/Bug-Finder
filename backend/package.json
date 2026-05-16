@@ -36,7 +36,8 @@
     "zod": "^3.23.8",
     "@node-saml/node-saml": "^4.0.5",
     "@simplewebauthn/server": "^9.0.3",
-    "@aws-sdk/client-secrets-manager": "^3.600.0"
+    "@aws-sdk/client-secrets-manager": "^3.600.0",
+    "pdfkit": "^0.15.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

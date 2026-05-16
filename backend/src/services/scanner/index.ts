@@ -297,6 +297,28 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     severity: finding.severity,
   });
 
+  // Auto-notify on critical/high findings
+  try {
+    const sev2 = String(finding.severity ?? "");
+    if (["critical", "high"].includes(sev2) && userId) {
+      const [prefs, user] = await Promise.all([
+        col("notification_preferences").findOne({ user_id: userId }) as Promise<Record<string, unknown> | null>,
+        col("users").findOne({ _id: new ObjectId(userId) }) as Promise<Record<string, unknown> | null>,
+      ]);
+      const shouldNotify = sev2 === "critical" ? ((prefs as Record<string, unknown> | null)?.["notify_critical"] !== false) : ((prefs as Record<string, unknown> | null)?.["notify_high"] === true);
+      if (shouldNotify && (user as Record<string, unknown> | null)?.["email"]) {
+        const { sendEmail } = await import("../../services/email");
+        const { broadcastNewFinding } = await import("../../routes/stream");
+        sendEmail({
+          to: String((user as Record<string, unknown>)["email"]),
+          subject: `[${sev2.toUpperCase()}] New finding: ${String(finding.title ?? "Security vulnerability detected")}`,
+          html: `<div style="font-family:sans-serif;max-width:600px"><div style="background:#7c3aed;padding:20px;border-radius:8px 8px 0 0"><h2 style="color:white;margin:0">🚨 ${sev2.toUpperCase()} Finding Detected</h2></div><div style="padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px"><p><strong>Title:</strong> ${finding.title ?? ""}</p><p><strong>Endpoint:</strong> ${finding.endpoint ?? "N/A"}</p><p><strong>Category:</strong> ${finding.category ?? "N/A"}</p><a href="${process.env["APP_URL"] ?? "http://localhost:5000"}/findings" style="display:inline-block;background:#7c3aed;color:white;padding:10px 20px;border-radius:6px;text-decoration:none;margin-top:10px">View Finding →</a></div></div>`,
+        }).catch(() => {});
+        broadcastNewFinding({ severity: sev2, title: finding.title });
+      }
+    }
+  } catch { /* non-fatal */ }
+
   if (finding.severity === "critical" || finding.severity === "high") {
     await col("remediations").insertOne({
       finding_id: insertResult.insertedId,

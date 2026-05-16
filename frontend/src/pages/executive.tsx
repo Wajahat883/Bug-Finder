@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, Legend,
+  ResponsiveContainer, CartesianGrid, Legend, Cell,
 } from "recharts";
 import { format, parseISO, startOfMonth } from "date-fns";
 import { useState } from "react";
-import { Loader2, Activity } from "lucide-react";
+import { Loader2, Activity, Clock, Zap, Target, AlertTriangle } from "lucide-react";
 
 function AiNarrativePanel({ scanId }: { scanId: string }) {
   const [text, setText] = useState("");
@@ -102,6 +102,21 @@ export default function Executive() {
 
   const latestScan = completed.sort((a, b) =>
     new Date(String(b.created_at)).getTime() - new Date(String(a.created_at)).getTime())[0];
+
+  const { data: execMetrics } = useQuery<{
+    mttd_hours: number;
+    mttr_days: number;
+    open_critical: number;
+    remediation_velocity: number;
+    vulnerability_density: number;
+    top_targets: Array<{ url: string; finding_count: number; risk_score: number }>;
+  }>({
+    queryKey: ["/api/analytics/metrics/executive"],
+    queryFn: () =>
+      fetch("/api/analytics/metrics/executive", { credentials: "include" }).then((r) => r.json()),
+  });
+
+  const BAR_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6"];
 
   return (
     <div className="space-y-6">
