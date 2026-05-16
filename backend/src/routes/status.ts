@@ -1,6 +1,8 @@
 import { Router } from "express";
+import { execSync } from "child_process";
 import { col } from "../lib/db";
 import { getRedis } from "../lib/redis";
+import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
@@ -52,6 +54,30 @@ router.get("/status/incidents", async (_req, res) => {
   } catch {
     res.json([]);
   }
+});
+
+router.get("/scanner/health", requireAuth, async (_req, res) => {
+  let nucleiBinary = false;
+  let nucleiVersion = "";
+  let dockerAvailable = false;
+  let mode: "binary" | "docker" | "simulation" = "simulation";
+
+  try {
+    const out = execSync("nuclei -version 2>&1", { timeout: 3000, encoding: "utf8" });
+    nucleiBinary = true;
+    nucleiVersion = (out.match(/nuclei v?([\d.]+)/i)?.[1]) ?? "unknown";
+    mode = "binary";
+  } catch { /* nuclei not installed */ }
+
+  if (!nucleiBinary) {
+    try {
+      execSync("docker info", { timeout: 3000 });
+      dockerAvailable = true;
+      mode = "docker";
+    } catch { /* docker not available */ }
+  }
+
+  res.json({ nuclei_binary: nucleiBinary, nuclei_version: nucleiVersion, docker: dockerAvailable, mode });
 });
 
 export default router;

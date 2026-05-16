@@ -10,6 +10,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import {
   ShieldAlert,
   Target,
   AlertTriangle,
@@ -39,6 +46,8 @@ import {
   Radio,
   Upload,
   Download,
+  ChevronDown,
+  Plug,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useState, useCallback, useRef } from "react";
@@ -605,6 +614,20 @@ export default function FindingDetail() {
   const [jiraLoading, setJiraLoading] = useState(false);
   const [jiraUrl, setJiraUrl] = useState<string | null>(null);
 
+  // Integration dropdown state
+  const [intLoading, setIntLoading] = useState(false);
+  const [jiraDialogOpen, setJiraDialogOpen] = useState(false);
+  const [jiraProjectKey, setJiraProjectKey] = useState("SEC");
+  const [ghDialogOpen, setGhDialogOpen] = useState(false);
+  const [ghRepo, setGhRepo] = useState("");
+
+  const { data: connections = [] } = useQuery<Array<{ integration_id: string; account_name: string }>>({
+    queryKey: ["/api/integrations/connections"],
+    queryFn: () => fetch("/api/integrations/connections", { credentials: "include" }).then(r => r.json()),
+  });
+  const connectedIds = new Set(connections.map(c => c.integration_id));
+  const hasAnyIntegration = connectedIds.has("jira") || connectedIds.has("github") || connectedIds.has("slack");
+
   const qc = useQueryClient();
   const [newComment, setNewComment] = useState("");
   const [triageLoading, setTriageLoading] = useState(false);
@@ -671,6 +694,70 @@ export default function FindingDetail() {
     enabled: false,
     staleTime: 300000,
   });
+
+  async function createJiraIssueOAuth(projectKey: string) {
+    setIntLoading(true);
+    try {
+      const r = await fetch("/api/integrations/jira/create-issue-oauth", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ finding_id: findingId, project_key: projectKey }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Failed");
+      toast({
+        title: `Jira issue ${d.key} created`,
+        description: (
+          <a href={d.url} target="_blank" rel="noopener noreferrer" className="underline text-blue-400">
+            Open {d.key}
+          </a>
+        ) as unknown as string,
+      });
+      qc.invalidateQueries({ queryKey: ["/api/findings", findingId] });
+    } catch (err: unknown) {
+      toast({ title: err instanceof Error ? err.message : "Jira error", variant: "destructive" });
+    } finally { setIntLoading(false); setJiraDialogOpen(false); }
+  }
+
+  async function createGithubIssueOAuth(repo: string) {
+    setIntLoading(true);
+    try {
+      const r = await fetch("/api/integrations/github/create-issue-oauth", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ finding_id: findingId, repo }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Failed");
+      setGhIssueUrl(d.url as string);
+      toast({
+        title: `GitHub issue #${d.number} created`,
+        description: (
+          <a href={d.url} target="_blank" rel="noopener noreferrer" className="underline text-green-400">
+            View issue
+          </a>
+        ) as unknown as string,
+      });
+    } catch (err: unknown) {
+      toast({ title: err instanceof Error ? err.message : "GitHub error", variant: "destructive" });
+    } finally { setIntLoading(false); setGhDialogOpen(false); }
+  }
+
+  async function sendSlackNotify() {
+    setIntLoading(true);
+    try {
+      const r = await fetch("/api/integrations/slack/notify", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ finding_id: findingId }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "Failed");
+      toast({ title: "Slack alert sent to #security-alerts" });
+    } catch (err: unknown) {
+      toast({ title: err instanceof Error ? err.message : "Slack error", variant: "destructive" });
+    } finally { setIntLoading(false); }
+  }
 
   async function createJiraIssue() {
     setJiraLoading(true);
@@ -780,12 +867,22 @@ export default function FindingDetail() {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <button onClick={() => history.back()} className="text-muted-foreground hover:text-foreground">
               <ArrowLeft className="w-4 h-4" />
             </button>
             <SeverityBadge severity={finding.severity} />
             <h1 className="text-2xl font-bold tracking-tight">{finding.title}</h1>
+            {(finding as Record<string, unknown>).jira_issue_key && (
+              <a
+                href={String((finding as Record<string, unknown>).jira_issue_url ?? "#")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs font-mono px-2 py-0.5 rounded border border-blue-500/40 bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors">
+                <ExternalLink className="w-3 h-3" />
+                {String((finding as Record<string, unknown>).jira_issue_key)}
+              </a>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5"><Target className="w-4 h-4" />{finding.target_url}</span>
@@ -813,7 +910,7 @@ export default function FindingDetail() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
             {ghIssueUrl ? (
               <a href={ghIssueUrl} target="_blank" rel="noopener noreferrer">
                 <Button variant="outline" size="sm" className="border-green-600 text-green-500">
@@ -837,6 +934,47 @@ export default function FindingDetail() {
               <Button variant="outline" size="sm" onClick={createJiraIssue} disabled={jiraLoading} className="border-blue-600/40">
                 {jiraLoading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <LinkIcon className="w-4 h-4 mr-1.5" />}
                 {jiraLoading ? "Creating..." : "Jira Ticket"}
+              </Button>
+            )}
+            {/* OAuth Integrations dropdown */}
+            {hasAnyIntegration ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="border-violet-500/40 text-violet-400 hover:bg-violet-500/10 gap-1.5" disabled={intLoading}>
+                    {intLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plug className="w-4 h-4" />}
+                    Integrations
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  {connectedIds.has("jira") && (
+                    <DropdownMenuItem onClick={() => setJiraDialogOpen(true)} className="gap-2 cursor-pointer">
+                      <LinkIcon className="w-4 h-4 text-blue-400" />
+                      Create Jira Ticket
+                    </DropdownMenuItem>
+                  )}
+                  {connectedIds.has("github") && (
+                    <DropdownMenuItem onClick={() => setGhDialogOpen(true)} className="gap-2 cursor-pointer">
+                      <Github className="w-4 h-4" />
+                      Create GitHub Issue
+                    </DropdownMenuItem>
+                  )}
+                  {(connectedIds.has("jira") || connectedIds.has("github")) && connectedIds.has("slack") && (
+                    <DropdownMenuSeparator />
+                  )}
+                  {connectedIds.has("slack") && (
+                    <DropdownMenuItem onClick={sendSlackNotify} className="gap-2 cursor-pointer">
+                      <Send className="w-4 h-4 text-yellow-400" />
+                      Send to Slack
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <Button variant="outline" size="sm" disabled className="border-muted/40 text-muted-foreground gap-1.5" title="Connect integrations in Settings → Integrations">
+                <Plug className="w-4 h-4" />
+                Integrations
+                <ChevronDown className="w-3.5 h-3.5" />
               </Button>
             )}
           </div>
@@ -914,6 +1052,74 @@ export default function FindingDetail() {
           )}
         </CardContent>
       </Card>
+
+      {/* Jira OAuth Dialog */}
+      {jiraDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setJiraDialogOpen(false)}>
+          <Card className="w-full max-w-sm border-border" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <LinkIcon className="w-4 h-4 text-blue-400" /> Create Jira Ticket
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Project Key</label>
+                <Input
+                  value={jiraProjectKey}
+                  onChange={e => setJiraProjectKey(e.target.value.toUpperCase())}
+                  placeholder="e.g. SEC"
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setJiraDialogOpen(false)}>Cancel</Button>
+                <Button size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={intLoading || !jiraProjectKey.trim()}
+                  onClick={() => createJiraIssueOAuth(jiraProjectKey.trim())}>
+                  {intLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                  Create Ticket
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* GitHub OAuth Dialog */}
+      {ghDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setGhDialogOpen(false)}>
+          <Card className="w-full max-w-sm border-border" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Github className="w-4 h-4" /> Create GitHub Issue
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1.5">Repository (owner/repo)</label>
+                <Input
+                  value={ghRepo}
+                  onChange={e => setGhRepo(e.target.value)}
+                  placeholder="e.g. acme/backend"
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setGhDialogOpen(false)}>Cancel</Button>
+                <Button size="sm"
+                  className="bg-gray-700 hover:bg-gray-600 text-white"
+                  disabled={intLoading || !ghRepo.trim()}
+                  onClick={() => createGithubIssueOAuth(ghRepo.trim())}>
+                  {intLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : null}
+                  Create Issue
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* FP Reason Dialog */}
       {fpDialogOpen && (

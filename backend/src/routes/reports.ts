@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
+import PDFDocument from "pdfkit";
 
 const router = Router();
 
@@ -131,6 +132,110 @@ router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
   } catch (err) {
     logger.error({ err }, "PDF generation error");
     res.status(500).json({ error: "Report generation failed" });
+  }
+});
+
+// GET /reports/:id/pdf — Generate a real PDF security report using pdfkit
+router.get("/reports/:id/pdf", async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string; role?: string };
+    const { id } = req.params;
+
+    // Get scan job
+    const scan = ObjectId.isValid(id)
+      ? await col("scan_jobs").findOne({ _id: new ObjectId(id) }) as Record<string, unknown> | null
+      : null;
+
+    // Get findings for this scan
+    const findings = await col("findings")
+      .find({ scan_job_id: id, ...(sess.role !== "admin" ? { user_id: sess.userId } : {}) } as Record<string, unknown>)
+      .sort({ severity_order: 1 })
+      .limit(500)
+      .toArray() as Array<Record<string, unknown>>;
+
+    // Get user settings for branding
+    const settings = await col("settings").findOne({ user_id: sess.userId } as Record<string, unknown>) as Record<string, unknown> | null;
+    const companyName = String(settings?.["report_company_name"] ?? "Bug Finder Pro");
+    const primaryColor = String(settings?.["report_primary_color"] ?? "#7c3aed");
+
+    const critCount = findings.filter(f => f["severity"] === "critical").length;
+    const highCount = findings.filter(f => f["severity"] === "high").length;
+    const medCount = findings.filter(f => f["severity"] === "medium").length;
+    const lowCount = findings.filter(f => f["severity"] === "low").length;
+
+    const doc = new PDFDocument({ margin: 50, size: "A4" });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="security-report-${id.slice(0, 8)}.pdf"`);
+    doc.pipe(res);
+
+    // Cover page
+    doc.rect(0, 0, doc.page.width, 120).fill(primaryColor);
+    doc.fillColor("white").fontSize(28).font("Helvetica-Bold").text(companyName, 50, 40);
+    doc.fontSize(14).font("Helvetica").text("Security Assessment Report", 50, 78);
+    doc.fillColor("black").moveDown(3);
+
+    // Summary
+    doc.fontSize(18).font("Helvetica-Bold").fillColor("#1a1a1a").text("Executive Summary", 50, 140);
+    doc.moveTo(50, 162).lineTo(545, 162).stroke("#e5e7eb");
+    doc.moveDown(0.5);
+
+    const target = String(scan?.["target_url"] ?? "Multiple targets");
+    doc.fontSize(11).font("Helvetica").fillColor("#374151")
+      .text(`Target: ${target}`)
+      .text(`Scan Date: ${scan?.["completed_at"] ? new Date(scan["completed_at"] as string).toLocaleDateString() : new Date().toLocaleDateString()}`)
+      .text(`Total Findings: ${findings.length}`)
+      .moveDown();
+
+    // Severity summary boxes
+    const boxes = [
+      { label: "Critical", count: critCount, color: "#ef4444" },
+      { label: "High", count: highCount, color: "#f97316" },
+      { label: "Medium", count: medCount, color: "#eab308" },
+      { label: "Low", count: lowCount, color: "#22c55e" },
+    ];
+
+    let bx = 50;
+    for (const box of boxes) {
+      doc.rect(bx, doc.y, 110, 60).fill(box.color);
+      doc.fillColor("white").fontSize(24).font("Helvetica-Bold").text(String(box.count), bx + 10, doc.y - 55);
+      doc.fontSize(10).font("Helvetica").text(box.label, bx + 10, doc.y - 30);
+      bx += 120;
+    }
+    doc.fillColor("black").moveDown(5);
+
+    // Findings list
+    doc.addPage();
+    doc.fontSize(18).font("Helvetica-Bold").fillColor("#1a1a1a").text("Findings Detail");
+    doc.moveTo(50, doc.y + 5).lineTo(545, doc.y + 5).stroke("#e5e7eb");
+    doc.moveDown();
+
+    const sevColor: Record<string, string> = { critical: "#ef4444", high: "#f97316", medium: "#eab308", low: "#22c55e", info: "#6b7280" };
+
+    for (const finding of findings.slice(0, 50)) {
+      if (doc.y > 700) doc.addPage();
+      const sev = String(finding["severity"] ?? "info");
+      doc.rect(50, doc.y, 545 - 50, 2).fill(sevColor[sev] ?? "#6b7280");
+      doc.moveDown(0.3);
+      doc.fontSize(12).font("Helvetica-Bold").fillColor("#1a1a1a").text(String(finding["title"] ?? "Untitled"), { continued: true });
+      doc.font("Helvetica").fillColor(sevColor[sev] ?? "#6b7280").fontSize(10).text(`  [${sev.toUpperCase()}]`);
+      doc.fillColor("#6b7280").fontSize(9).font("Helvetica").text(`Endpoint: ${finding["endpoint"] ?? "N/A"} | CWE: ${finding["cwe_id"] ?? "N/A"} | CVSS: ${finding["cvss_score"] ?? "N/A"}`);
+      if (finding["description"]) {
+        doc.fillColor("#374151").fontSize(10).text(String(finding["description"]).slice(0, 300) + (String(finding["description"]).length > 300 ? "..." : ""), { width: 490 });
+      }
+      doc.moveDown(0.8);
+    }
+
+    if (findings.length > 50) {
+      doc.fontSize(10).fillColor("#6b7280").text(`... and ${findings.length - 50} more findings. Download CSV for full list.`);
+    }
+
+    // Footer
+    doc.fontSize(8).fillColor("#9ca3af").text(`Generated by ${companyName} · Bug Finder Pro · ${new Date().toISOString()}`, 50, 780, { align: "center" });
+
+    doc.end();
+  } catch (err) {
+    logger.error({ err }, "PDF generation error");
+    if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
   }
 });
 

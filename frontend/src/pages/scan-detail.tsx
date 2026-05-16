@@ -264,6 +264,15 @@ export default function ScanDetail() {
   const [diffLoading, setDiffLoading] = useState(false);
   const [compareFetching, setCompareFetching] = useState(false);
 
+  const { data: scan, isLoading: scanLoading } = useGetScanJob(scanId as any, {
+    query: {
+      refetchInterval: (query) => {
+        const status = query.state.data?.status;
+        return (status === "queued" || status === "running") ? 3000 : false;
+      }
+    }
+  });
+
   // Engine status polling
   type EngineStatus = { engine: string; status: "pending" | "running" | "done" | "error" | "skipped"; findings: number; started_at?: string; ended_at?: string; error?: string };
   const { data: engines = [] } = useQuery<EngineStatus[]>({
@@ -306,6 +315,12 @@ export default function ScanDetail() {
     } finally { setDiffLoading(false); }
   }
 
+  const { data: scannerHealth } = useQuery({
+    queryKey: ["/api/scanner/health"],
+    queryFn: () => fetch("/api/scanner/health", { credentials: "include" }).then(r => r.json()),
+    staleTime: 300000,
+  });
+
   const { data: killChains, isLoading: killChainsLoading } = useQuery({
     queryKey: ["/api/scan-jobs", scanId, "kill-chains"],
     queryFn: () =>
@@ -322,15 +337,6 @@ export default function ScanDetail() {
   });
 
   const otherScans = (allScans?.items ?? []).filter(s => s.id !== scanId && s.status === "completed");
-
-  const { data: scan, isLoading: scanLoading } = useGetScanJob(scanId as any, {
-    query: {
-      refetchInterval: (query) => {
-        const status = query.state.data?.status;
-        return (status === "queued" || status === "running") ? 3000 : false;
-      }
-    }
-  });
 
   const { data: findings, isLoading: findingsLoading, refetch: refetchFindings } = useGetScanJobFindings(scanId, {
     query: { refetchInterval: 3000 }
@@ -586,6 +592,14 @@ export default function ScanDetail() {
           </Button>
         </div>
       </div>
+
+      {(scannerHealth as any)?.mode === "simulation" && (
+        <div className="flex items-center gap-3 p-3 rounded-lg border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 text-sm mb-4">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span>Scanner running in <strong>simulation mode</strong> — findings are simulated. Install Nuclei for real vulnerability scanning.</span>
+          <a href="/status" className="ml-auto text-xs underline hover:no-underline flex-shrink-0">View Status</a>
+        </div>
+      )}
 
       {isRunning && (
         <Card className="border-blue-500/20 bg-blue-500/5">

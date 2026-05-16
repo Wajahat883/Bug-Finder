@@ -67,6 +67,12 @@ export default function StatusPage() {
     queryFn: () => fetch("/api/status/incidents").then(r => r.json()),
   });
 
+  const { data: scannerHealth } = useQuery({
+    queryKey: ["/api/scanner/health"],
+    queryFn: () => fetch("/api/scanner/health", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 60000,
+  });
+
   const overallOk = data?.status === "operational";
   const overallDegraded = data?.status === "degraded";
 
@@ -135,6 +141,25 @@ export default function StatusPage() {
           ) : (
             <div className="text-center py-8 text-muted-foreground">No component data</div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3"><CardTitle className="text-base">Scanner Engine</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {[
+            { label: "Nuclei Binary", ok: scannerHealth?.nuclei_binary, detail: scannerHealth?.nuclei_version ? `v${scannerHealth.nuclei_version}` : "Not installed" },
+            { label: "Docker", ok: scannerHealth?.docker, detail: scannerHealth?.docker ? "Available" : "Not available" },
+            { label: "Active Mode", ok: scannerHealth?.mode !== "simulation", detail: scannerHealth?.mode === "binary" ? "Real binary (full scan)" : scannerHealth?.mode === "docker" ? "Docker mode" : "⚠ Simulation mode — install Nuclei for real scans" },
+          ].map(item => (
+            <div key={item.label} className="flex items-center justify-between p-2 rounded border border-border">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${item.ok ? "bg-green-500" : "bg-red-500"}`} />
+                <span className="text-sm font-medium">{item.label}</span>
+              </div>
+              <span className={`text-xs ${item.ok ? "text-muted-foreground" : "text-red-400"}`}>{item.detail}</span>
+            </div>
+          ))}
         </CardContent>
       </Card>
 

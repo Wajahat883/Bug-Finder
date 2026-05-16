@@ -261,11 +261,272 @@ router.post("/integrations/:id/sync", requireAuth, async (req, res) => {
   } catch { res.status(500).json({ error: "Internal server error" }); }
 });
 
-// OAuth begin redirect stubs
-(["jira", "github", "slack", "pagerduty", "linear"] as const).forEach(service => {
-  router.get(`/integrations/oauth/${service}/begin`, requireAuth, (_req, res) => {
-    res.json({ message: `Configure ${service} OAuth credentials (CLIENT_ID/SECRET) in environment to enable`, configured: false });
+// ── Real OAuth 2.0 flows ───────────────────────────────────────────────────
+
+import crypto from "crypto";
+
+// OAuth state store (in-memory, use Redis in production)
+const oauthStates = new Map<string, { service: string; userId: string; expiresAt: number }>();
+
+const OAUTH_CONFIGS: Record<string, { authUrl: string; tokenUrl: string; scopes: string; clientIdEnv: string; clientSecretEnv: string }> = {
+  github: {
+    authUrl: "https://github.com/login/oauth/authorize",
+    tokenUrl: "https://github.com/login/oauth/access_token",
+    scopes: "repo,issues:write",
+    clientIdEnv: "GITHUB_CLIENT_ID",
+    clientSecretEnv: "GITHUB_CLIENT_SECRET",
+  },
+  slack: {
+    authUrl: "https://slack.com/oauth/v2/authorize",
+    tokenUrl: "https://slack.com/api/oauth.v2.access",
+    scopes: "chat:write,channels:read",
+    clientIdEnv: "SLACK_CLIENT_ID",
+    clientSecretEnv: "SLACK_CLIENT_SECRET",
+  },
+  jira: {
+    authUrl: "https://auth.atlassian.com/authorize",
+    tokenUrl: "https://auth.atlassian.com/oauth/token",
+    scopes: "read:jira-work write:jira-work offline_access",
+    clientIdEnv: "JIRA_CLIENT_ID",
+    clientSecretEnv: "JIRA_CLIENT_SECRET",
+  },
+  pagerduty: {
+    authUrl: "https://app.pagerduty.com/oauth/authorize",
+    tokenUrl: "https://app.pagerduty.com/oauth/token",
+    scopes: "write",
+    clientIdEnv: "PAGERDUTY_CLIENT_ID",
+    clientSecretEnv: "PAGERDUTY_CLIENT_SECRET",
+  },
+  linear: {
+    authUrl: "https://linear.app/oauth/authorize",
+    tokenUrl: "https://api.linear.app/oauth/token",
+    scopes: "issues:create",
+    clientIdEnv: "LINEAR_CLIENT_ID",
+    clientSecretEnv: "LINEAR_CLIENT_SECRET",
+  },
+};
+
+// BEGIN OAuth flow
+router.get("/integrations/oauth/:service/begin", requireAuth, (req, res) => {
+  const { service } = req.params;
+  const config = OAUTH_CONFIGS[service];
+  if (!config) return res.status(400).json({ error: "Unknown integration" });
+
+  const clientId = process.env[config.clientIdEnv];
+  if (!clientId) {
+    return res.status(400).json({
+      error: "not_configured",
+      message: `Set ${config.clientIdEnv} and ${config.clientSecretEnv} environment variables to enable ${service} integration`,
+    });
+  }
+
+  const sess = req.session as unknown as { userId?: string };
+  const state = crypto.randomBytes(16).toString("hex");
+  oauthStates.set(state, { service, userId: sess.userId ?? "", expiresAt: Date.now() + 10 * 60 * 1000 });
+
+  const redirectUri = `${process.env["APP_URL"] ?? "http://localhost:5000"}/api/integrations/oauth/${service}/callback`;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: config.scopes,
+    state,
+    response_type: "code",
+    ...(service === "jira" ? { audience: "api.atlassian.com", prompt: "consent" } : {}),
   });
+
+  res.redirect(`${config.authUrl}?${params.toString()}`);
+});
+
+// CALLBACK handler
+router.get("/integrations/oauth/:service/callback", async (req, res) => {
+  const { service } = req.params;
+  const { code, state, error } = req.query as Record<string, string>;
+
+  if (error) return res.redirect(`/integrations?error=${encodeURIComponent(error)}`);
+
+  const stateData = oauthStates.get(state);
+  if (!stateData || stateData.service !== service || Date.now() > stateData.expiresAt) {
+    return res.redirect("/integrations?error=invalid_state");
+  }
+  oauthStates.delete(state);
+
+  const config = OAUTH_CONFIGS[service];
+  const clientId = process.env[config.clientIdEnv]!;
+  const clientSecret = process.env[config.clientSecretEnv]!;
+  const redirectUri = `${process.env["APP_URL"] ?? "http://localhost:5000"}/api/integrations/oauth/${service}/callback`;
+
+  try {
+    const tokenRes = await fetch(config.tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify({ grant_type: "authorization_code", client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri }),
+    });
+    const tokenData = await tokenRes.json() as Record<string, unknown>;
+
+    if (tokenData["error"]) throw new Error(String(tokenData["error_description"] ?? tokenData["error"]));
+
+    const authedUser = tokenData["authed_user"] as Record<string, unknown> | undefined;
+    const accessToken = String(tokenData["access_token"] ?? authedUser?.["access_token"] ?? "");
+
+    // Get account info
+    let accountName = service;
+    try {
+      if (service === "github") {
+        const userRes = await fetch("https://api.github.com/user", { headers: { Authorization: `Bearer ${accessToken}`, "User-Agent": "BugFinderPro" } });
+        const user = await userRes.json() as Record<string, unknown>;
+        accountName = String(user["login"] ?? "GitHub");
+      } else if (service === "slack") {
+        const teamRes = await fetch("https://slack.com/api/auth.test", { headers: { Authorization: `Bearer ${accessToken}` } });
+        const team = await teamRes.json() as Record<string, unknown>;
+        accountName = String(team["team"] ?? "Slack");
+      } else if (service === "jira") {
+        const siteRes = await fetch("https://api.atlassian.com/oauth/token/accessible-resources", { headers: { Authorization: `Bearer ${accessToken}`, "Accept": "application/json" } });
+        const sites = await siteRes.json() as Array<Record<string, unknown>>;
+        accountName = String(sites[0]?.["name"] ?? "Jira");
+        if (sites[0]?.["id"]) {
+          await col("integration_connections").updateOne(
+            { integration_id: "jira", user_id: stateData.userId } as Record<string, unknown>,
+            { $set: { jira_cloud_id: sites[0]["id"] } }
+          );
+        }
+      }
+    } catch { /* account name is optional */ }
+
+    await col("integration_connections").updateOne(
+      { integration_id: service, user_id: stateData.userId } as Record<string, unknown>,
+      { $set: { integration_id: service, user_id: stateData.userId, access_token: accessToken, refresh_token: tokenData["refresh_token"] ?? null, account_name: accountName, permissions: config.scopes.split(","), created_at: new Date(), last_sync: new Date() } },
+      { upsert: true }
+    );
+
+    res.redirect("/integrations?connected=" + service);
+  } catch (err) {
+    logger.error({ err }, `OAuth callback error for ${service}`);
+    res.redirect(`/integrations?error=token_exchange_failed`);
+  }
+});
+
+// Create Jira issue from finding (OAuth-based)
+router.post("/integrations/jira/create-issue-oauth", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string };
+    const { finding_id, project_key, issue_type = "Bug", priority } = req.body as Record<string, string>;
+
+    const conn = await col("integration_connections").findOne({ integration_id: "jira", user_id: sess.userId }) as Record<string, unknown> | null;
+    if (!conn) return res.status(400).json({ error: "Jira not connected" });
+
+    const finding = await col("findings").findOne({ _id: new ObjectId(finding_id) }) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    const cloudId = conn["jira_cloud_id"] as string;
+    const token = conn["access_token"] as string;
+
+    const body = {
+      fields: {
+        project: { key: project_key || "SEC" },
+        summary: `[${String(finding["severity"]).toUpperCase()}] ${finding["title"]}`,
+        description: { type: "doc", version: 1, content: [{ type: "paragraph", content: [{ type: "text", text: `Endpoint: ${finding["endpoint"] ?? "N/A"}\n\nDescription: ${finding["description"] ?? ""}\n\nRemediation: ${finding["remediation"] ?? ""}` }] }] },
+        issuetype: { name: issue_type },
+        priority: { name: priority || (finding["severity"] === "critical" ? "Highest" : finding["severity"] === "high" ? "High" : "Medium") },
+        labels: ["bug-finder-pro", String(finding["severity"]), String(finding["category"] ?? "")].filter(Boolean),
+      },
+    };
+
+    const jiraRes = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const issue = await jiraRes.json() as Record<string, unknown>;
+    if (issue["errors"] || !issue["key"]) return res.status(400).json({ error: "Jira API error", details: issue });
+
+    await col("findings").updateOne({ _id: new ObjectId(finding_id) } as Record<string, unknown>, { $set: { jira_issue_key: issue["key"], jira_issue_url: `https://${conn["account_name"]}.atlassian.net/browse/${issue["key"]}` } });
+
+    res.json({ ok: true, key: issue["key"], url: `https://${conn["account_name"]}.atlassian.net/browse/${issue["key"]}` });
+  } catch (err) {
+    logger.error({ err }, "Jira create issue error");
+    res.status(500).json({ error: "Failed to create Jira issue" });
+  }
+});
+
+// Create GitHub issue from finding (OAuth-based)
+router.post("/integrations/github/create-issue-oauth", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string };
+    const { finding_id, repo } = req.body as Record<string, string>;
+
+    const conn = await col("integration_connections").findOne({ integration_id: "github", user_id: sess.userId }) as Record<string, unknown> | null;
+    if (!conn) return res.status(400).json({ error: "GitHub not connected" });
+
+    const finding = await col("findings").findOne({ _id: new ObjectId(finding_id) }) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    const token = conn["access_token"] as string;
+    const sevEmoji: Record<string, string> = { critical: "🔴", high: "🟠", medium: "🟡", low: "🟢" };
+    const emoji = sevEmoji[String(finding["severity"])] ?? "⚪";
+
+    const ghRes = await fetch(`https://api.github.com/repos/${repo}/issues`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "BugFinderPro" },
+      body: JSON.stringify({
+        title: `${emoji} [${String(finding["severity"]).toUpperCase()}] ${finding["title"]}`,
+        body: `## Security Finding from Bug Finder Pro\n\n**Severity:** ${finding["severity"]}\n**Category:** ${finding["category"] ?? "N/A"}\n**Endpoint:** \`${finding["endpoint"] ?? "N/A"}\`\n\n### Description\n${finding["description"] ?? ""}\n\n### Remediation\n${finding["remediation"] ?? ""}`,
+        labels: ["security", String(finding["severity"]), "bug-finder-pro"].filter(Boolean),
+      }),
+    });
+    const issue = await ghRes.json() as Record<string, unknown>;
+    if (!issue["number"]) return res.status(400).json({ error: "GitHub API error", details: issue });
+
+    await col("findings").updateOne({ _id: new ObjectId(finding_id) } as Record<string, unknown>, { $set: { github_issue_number: issue["number"], github_issue_url: issue["html_url"] } });
+    res.json({ ok: true, number: issue["number"], url: issue["html_url"] });
+  } catch (err) {
+    logger.error({ err }, "GitHub create issue error");
+    res.status(500).json({ error: "Failed to create GitHub issue" });
+  }
+});
+
+// Send Slack alert (OAuth-based)
+router.post("/integrations/slack/notify", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string };
+    const { finding_id, channel = "#security-alerts" } = req.body as Record<string, string>;
+
+    const conn = await col("integration_connections").findOne({ integration_id: "slack", user_id: sess.userId }) as Record<string, unknown> | null;
+    if (!conn) return res.status(400).json({ error: "Slack not connected" });
+
+    const finding = await col("findings").findOne({ _id: new ObjectId(finding_id) }) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    const sevColor: Record<string, string> = { critical: "#ef4444", high: "#f97316", medium: "#eab308", low: "#22c55e" };
+    const color = sevColor[String(finding["severity"])] ?? "#6b7280";
+    const token = conn["access_token"] as string;
+
+    const slackRes = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        channel,
+        blocks: [
+          { type: "header", text: { type: "plain_text", text: `🚨 ${String(finding["severity"]).toUpperCase()} Security Finding Detected` } },
+          {
+            type: "section", fields: [
+              { type: "mrkdwn", text: `*Title:*\n${finding["title"]}` },
+              { type: "mrkdwn", text: `*Severity:*\n${finding["severity"]}` },
+              { type: "mrkdwn", text: `*Endpoint:*\n\`${finding["endpoint"] ?? "N/A"}\`` },
+              { type: "mrkdwn", text: `*Category:*\n${finding["category"] ?? "N/A"}` },
+            ],
+          },
+          { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "View Finding" }, url: `${process.env["APP_URL"] ?? "http://localhost:5000"}/findings/${String(finding["_id"])}`, style: "danger" }] },
+        ],
+        attachments: [{ color }],
+      }),
+    });
+    const slackData = await slackRes.json() as Record<string, unknown>;
+    if (!slackData["ok"]) return res.status(400).json({ error: String(slackData["error"]) });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Slack notify error");
+    res.status(500).json({ error: "Failed to send Slack notification" });
+  }
 });
 
 export default router;
