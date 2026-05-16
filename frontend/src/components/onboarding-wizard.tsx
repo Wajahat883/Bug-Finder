@@ -52,7 +52,8 @@ export function useOnboarding() {
   return { show, dismiss };
 }
 
-export function OnboardingWizard({ onDismiss }: { onDismiss: () => void }) {
+export function OnboardingWizard({ onDismiss, onComplete }: { onDismiss?: () => void; onComplete?: () => void }) {
+  const dismiss = onDismiss ?? onComplete ?? (() => {});
   const [step, setStep] = useState(0);
   const [, setLocation] = useLocation();
 
@@ -62,20 +63,20 @@ export function OnboardingWizard({ onDismiss }: { onDismiss: () => void }) {
   function handleAction() {
     if (current.action) {
       setLocation(current.action.href);
-      onDismiss();
+      dismiss();
     }
   }
 
   function handleNext() {
     if (isLast) {
-      onDismiss();
+      dismiss();
     } else {
       setStep(s => s + 1);
     }
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) onDismiss(); }}>
+    <Dialog open onOpenChange={(open) => { if (!open) dismiss(); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
@@ -84,7 +85,7 @@ export function OnboardingWizard({ onDismiss }: { onDismiss: () => void }) {
               Welcome to Bug Finder Pro
             </span>
             <button
-              onClick={onDismiss}
+              onClick={dismiss}
               className="text-muted-foreground hover:text-foreground transition-colors"
               aria-label="Close"
             >
@@ -159,7 +160,7 @@ export function OnboardingWizard({ onDismiss }: { onDismiss: () => void }) {
         </div>
 
         <button
-          onClick={onDismiss}
+          onClick={dismiss}
           className="text-xs text-muted-foreground hover:text-foreground text-center w-full mt-1 transition-colors"
         >
           Skip setup guide

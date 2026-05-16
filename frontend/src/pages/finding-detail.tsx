@@ -48,6 +48,7 @@ import {
   Download,
   ChevronDown,
   Plug,
+  MessageSquare,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useState, useCallback, useRef } from "react";
@@ -525,6 +526,82 @@ function IntelTab({ findingId, cveId }: { findingId: string; cveId?: string }) {
   );
 }
 
+function DiscussionTab({ findingId, currentUser }: { findingId: string; currentUser?: string }) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const [newComment, setNewComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const { data: comments = [] } = useQuery<Array<{ id: string; body: string; author: string; created_at: string; edited?: boolean }>>({
+    queryKey: ["/api/comments", "finding", findingId],
+    queryFn: () => fetch(`/api/comments?resource=finding&resource_id=${findingId}`, { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 15000,
+  });
+
+  async function submitComment() {
+    if (!newComment.trim()) return;
+    setSubmitting(true);
+    try {
+      await fetch("/api/comments", {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resource: "finding", resource_id: findingId, body: newComment.trim() }),
+      });
+      setNewComment("");
+      qc.invalidateQueries({ queryKey: ["/api/comments", "finding", findingId] });
+    } catch { toast({ title: "Failed to post comment", variant: "destructive" }); }
+    finally { setSubmitting(false); }
+  }
+
+  async function deleteComment(commentId: string) {
+    await fetch(`/api/comments/${commentId}`, { method: "DELETE", credentials: "include" });
+    qc.invalidateQueries({ queryKey: ["/api/comments", "finding", findingId] });
+  }
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base flex items-center gap-2"><MessageSquare className="w-4 h-4" />Discussion ({comments.length})</CardTitle></CardHeader>
+      <CardContent className="space-y-4">
+        {comments.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No comments yet — start the discussion</p>}
+        <div className="space-y-3">
+          {comments.map(c => (
+            <div key={c.id} className="flex gap-3">
+              <div className="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
+                {c.author.slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 bg-muted rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold">{c.author}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{format(new Date(c.created_at), "MMM d, HH:mm")}</span>
+                    {c.author === currentUser && (
+                      <button onClick={() => deleteComment(c.id)} className="text-xs text-muted-foreground hover:text-destructive">×</button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-sm whitespace-pre-wrap">{c.body}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 pt-2 border-t border-border">
+          <Input
+            placeholder="Add a comment... (@mention teammates)"
+            value={newComment}
+            onChange={e => setNewComment(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitComment(); } }}
+            className="flex-1 text-sm h-9"
+          />
+          <Button size="sm" onClick={submitComment} disabled={submitting || !newComment.trim()} className="h-9">
+            {submitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">⌘+Enter to submit</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 function RelatedFindings({ currentId, cweId, category }: { currentId: string; cweId?: string; category?: string }) {
   const params = new URLSearchParams({ limit: "5" });
   if (cweId) params.set("cwe_id", cweId);
@@ -839,7 +916,7 @@ export default function FindingDetail() {
     "details", "evidence", "intel", "cve", "remediation",
     "payloads", "patch", "patch-gen", "report", "narrative", "poc",
     "tools", "fp", "cvss", "reasoning", "verify",
-    "comments",
+    "discussion", "comments",
   ];
 
   const tabLabels: Record<string, string> = {
@@ -859,6 +936,7 @@ export default function FindingDetail() {
     cvss: "CVSS",
     reasoning: "🧠 Reasoning",
     verify: "🔍 Verify",
+    discussion: "Discussion",
     comments: "Comments",
   };
 
@@ -1560,6 +1638,11 @@ export default function FindingDetail() {
             emptyText={`Click to verify this finding with a safe exploit. AI generates only non-destructive tests (SLEEP for SQLi, document.domain for XSS, etc.).`}
             findingContext={findingCtx}
           />
+        </TabsContent>
+
+        {/* Discussion */}
+        <TabsContent value="discussion" className="pt-6">
+          <DiscussionTab findingId={findingId} currentUser={(finding as Record<string,unknown>)?.user_id as string} />
         </TabsContent>
 
         {/* Comments */}

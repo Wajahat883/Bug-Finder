@@ -187,6 +187,91 @@ export default function Executive() {
         </div>
       )}
 
+      {/* ── KPI Metrics Row ── */}
+      {execMetrics && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {[
+            {
+              label: "MTTD",
+              value: `${execMetrics.mttd_hours}h`,
+              sub: "Mean time to detect",
+              icon: <Clock className="w-4 h-4" />,
+              color: "#7c3aed",
+            },
+            {
+              label: "MTTR",
+              value: `${execMetrics.mttr_days}d`,
+              sub: "Mean time to remediate",
+              icon: <Zap className="w-4 h-4" />,
+              color: "#3b82f6",
+            },
+            {
+              label: "Velocity",
+              value: `${execMetrics.remediation_velocity}/wk`,
+              sub: "Findings closed per week",
+              icon: <Activity className="w-4 h-4" />,
+              color: "#22c55e",
+            },
+            {
+              label: "Vuln Density",
+              value: `${execMetrics.vulnerability_density}/target`,
+              sub: "Findings per target",
+              icon: <Target className="w-4 h-4" />,
+              color: execMetrics.vulnerability_density > 5 ? "#ef4444" : "#eab308",
+            },
+          ].map((kpi) => (
+            <div key={kpi.label} className="border rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-1" style={{ color: kpi.color }}>
+                {kpi.icon}
+                <span className="text-xs font-semibold uppercase tracking-wider">{kpi.label}</span>
+              </div>
+              <div className="text-2xl font-bold" style={{ color: kpi.color }}>{kpi.value}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{kpi.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {execMetrics && execMetrics.open_critical > 0 && (
+        <div className="flex items-center gap-2 px-4 py-3 rounded-lg border border-destructive/30 bg-destructive/10 text-sm text-destructive">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+          <span><strong>{execMetrics.open_critical}</strong> open critical finding{execMetrics.open_critical !== 1 ? "s" : ""} require immediate attention.</span>
+        </div>
+      )}
+
+      {/* ── Top 5 Most Vulnerable Targets ── */}
+      {execMetrics && execMetrics.top_targets.length > 0 && (
+        <div className="border rounded-lg p-4">
+          <h2 className="font-semibold mb-4 text-sm">Top Vulnerable Targets</h2>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart
+              data={execMetrics.top_targets}
+              layout="vertical"
+              margin={{ top: 0, right: 16, bottom: 0, left: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" opacity={0.1} horizontal={false} />
+              <XAxis type="number" tick={{ fontSize: 11 }} />
+              <YAxis
+                type="category"
+                dataKey="url"
+                width={140}
+                tick={{ fontSize: 10 }}
+                tickFormatter={(v: string) => v.length > 22 ? `${v.slice(0, 22)}…` : v}
+              />
+              <Tooltip
+                contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8 }}
+                formatter={(value: number) => [`${value} findings`, "Count"]}
+              />
+              <Bar dataKey="finding_count" radius={[0, 4, 4, 0]}>
+                {execMetrics.top_targets.map((_, i) => (
+                  <Cell key={i} fill={BAR_COLORS[i % BAR_COLORS.length]} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
       {/* AI Narrative for latest scan */}
       {latestScan && <AiNarrativePanel scanId={String(latestScan._id)} />}
 

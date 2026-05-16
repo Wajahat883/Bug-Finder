@@ -198,4 +198,56 @@ router.get("/analytics/top-vulnerable-targets", requireAuth, async (req, res) =>
   }
 });
 
+// GET /analytics/metrics/executive — KPI metrics for executive dashboard
+router.get("/analytics/metrics/executive", requireAuth, async (req, res) => {
+  try {
+    const sess = req.session as unknown as { userId?: string; role?: string };
+    const userFilter = sess.role !== "admin" ? { user_id: sess.userId } : {};
+
+    const [allFindings, resolvedFindings, targets] = await Promise.all([
+      col("findings").find(userFilter as Record<string, unknown>).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("findings").find({ ...userFilter, status: "resolved" } as Record<string, unknown>).toArray() as Promise<Array<Record<string, unknown>>>,
+      col("targets").find(userFilter as Record<string, unknown>).toArray() as Promise<Array<Record<string, unknown>>>,
+    ]);
+
+    // MTTD: avg time from finding created to scan completed
+    const mttdMs = allFindings.reduce((sum, f) => {
+      const created = f["created_at"] ? new Date(f["created_at"] as string).getTime() : 0;
+      const scanned = f["scan_completed_at"] ? new Date(f["scan_completed_at"] as string).getTime() : created;
+      return sum + (scanned - created);
+    }, 0) / Math.max(allFindings.length, 1);
+
+    // MTTR: avg days to resolve
+    const mttrMs = resolvedFindings.reduce((sum, f) => {
+      const created = f["created_at"] ? new Date(f["created_at"] as string).getTime() : 0;
+      const resolved = f["resolved_at"] ? new Date(f["resolved_at"] as string).getTime() : created;
+      return sum + (resolved - created);
+    }, 0) / Math.max(resolvedFindings.length, 1);
+
+    // Velocity: resolved in last 7 days
+    const weekAgo = new Date(Date.now() - 7 * 86400000);
+    const recentResolved = resolvedFindings.filter(f => f["resolved_at"] && new Date(f["resolved_at"] as string) > weekAgo).length;
+
+    // Top targets by finding count
+    const targetMap: Record<string, number> = {};
+    for (const f of allFindings) {
+      const url = String(f["target_url"] ?? f["endpoint"] ?? "unknown");
+      targetMap[url] = (targetMap[url] ?? 0) + 1;
+    }
+    const topTargets = Object.entries(targetMap).sort(([, a], [, b]) => b - a).slice(0, 5).map(([url, count]) => ({ url, finding_count: count, risk_score: Math.min(10, count * 0.5) }));
+
+    res.json({
+      mttd_hours: Math.round(mttdMs / 3600000 * 10) / 10,
+      mttr_days: Math.round(mttrMs / 86400000 * 10) / 10,
+      remediation_velocity: recentResolved,
+      vulnerability_density: Math.round(allFindings.length / Math.max(targets.length, 1) * 10) / 10,
+      open_critical: allFindings.filter(f => f["severity"] === "critical" && f["status"] !== "resolved").length,
+      top_targets: topTargets,
+    });
+  } catch (err) {
+    logger.error({ err }, "Executive metrics error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 export default router;
