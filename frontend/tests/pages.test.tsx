@@ -67,8 +67,9 @@ describe("Admin login page", () => {
   it("renders admin login with restricted warning", async () => {
     const AdminLogin = (await import("@/pages/admin-login")).default;
     renderWithRouter(<AdminLogin />);
-    expect(screen.getByText(/admin portal/i)).toBeInTheDocument();
-    expect(screen.getByText(/restricted access/i)).toBeInTheDocument();
+    // Multiple elements may match — verify at least one is present
+    expect(screen.getAllByText(/admin portal/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/restricted access/i).length).toBeGreaterThan(0);
     expect(screen.getByPlaceholderText(/admin email/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/admin password/i)).toBeInTheDocument();
   });
@@ -86,8 +87,9 @@ describe("CVSS Calculator", () => {
   it("renders calculator section", async () => {
     const CVSS = (await import("@/pages/cvss")).default;
     renderWithRouter(<CVSS />);
-    expect(screen.getByText(/attack vector/i)).toBeInTheDocument();
-    expect(screen.getByText(/scope/i)).toBeInTheDocument();
+    // Multiple elements match these labels — verify at least one present
+    expect(screen.getAllByText(/attack vector/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/scope/i).length).toBeGreaterThan(0);
   });
 });
 
@@ -95,22 +97,32 @@ describe("Forgot password page", () => {
   it("renders email input and submit button", async () => {
     const ForgotPassword = (await import("@/pages/forgot-password")).default;
     renderWithRouter(<ForgotPassword />);
-    expect(screen.getByPlaceholderText(/email/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /send/i })).toBeInTheDocument();
+    // Placeholder is "you@example.com"; button text is "Send Reset Link"
+    expect(screen.getByPlaceholderText(/you@example\.com/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send reset link/i })).toBeInTheDocument();
   });
 });
 
+// Mock @/api-client at the top-level so Landing page can render
+vi.mock("@/api-client", () => ({
+  useGetMe: () => ({ data: null, isLoading: false }),
+  useGetSettings: () => ({ data: {}, isLoading: false }),
+  useGetDashboardStats: () => ({ data: undefined, isLoading: false }),
+  useGetDashboardActivity: () => ({ data: undefined, isLoading: false }),
+  useListScanJobs: () => ({ data: undefined, isLoading: false }),
+}));
+
 describe("Landing page", () => {
   it("renders hero section with CTA", async () => {
-    vi.mock("@/api-client", () => ({
-      useGetMe: () => ({ data: null, isLoading: false }),
-      useGetSettings: () => ({ data: {}, isLoading: false }),
-    }));
-
     const Landing = (await import("@/pages/landing")).default;
     renderWithRouter(<Landing />);
-    expect(screen.getByText(/bug finder/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /start free scan/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/bug finder/i).length).toBeGreaterThan(0);
+    // The landing page has "Start Free Scan" and "Sign In" buttons
+    expect(
+      screen.getAllByRole("button", { name: /start free scan/i }).length
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: /sign in/i }).length
+    ).toBeGreaterThan(0);
   });
 });

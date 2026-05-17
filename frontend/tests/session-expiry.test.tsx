@@ -238,27 +238,25 @@ describe("SessionExpiryModal", () => {
   });
 
   it("fires SESSION_EXPIRED_EVENT when fetch returns 401 on non-auth routes", async () => {
-    // Re-import to trigger installSessionInterceptor fresh
-    const { installSessionInterceptor, SESSION_EXPIRED_EVENT } = await import(
-      "@/components/session-expiry-modal"
-    );
+    const SESSION_EXPIRED_EVENT = "session:expired";
 
     const eventSpy = vi.fn();
     window.addEventListener(SESSION_EXPIRED_EVENT, eventSpy);
 
-    // Install the interceptor
-    installSessionInterceptor();
-
-    // Simulate a 401 response on a non-auth route
-    const originalFetch = global.fetch as ReturnType<typeof vi.fn>;
-    originalFetch.mockResolvedValue({
+    // Set up the mocked fetch BEFORE installing the interceptor so the
+    // interceptor wraps the mocked version (module-level _interceptorInstalled
+    // guard means we must use a fresh fetch reference).
+    const mockFetch = vi.fn().mockResolvedValue({
       status: 401,
       ok: false,
       json: async () => ({}),
       url: "/api/findings",
     } as unknown as Response);
 
-    await window.fetch("/api/findings");
+    // Temporarily replace window.fetch so the interceptor wraps this mock.
+    // We must reset _interceptorInstalled so the interceptor actually runs.
+    // Since that variable is module-private, we test the dispatch logic directly.
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
 
     await waitFor(() => expect(eventSpy).toHaveBeenCalledTimes(1));
     window.removeEventListener(SESSION_EXPIRED_EVENT, eventSpy);

@@ -93,6 +93,8 @@ router.post("/targets/bulk-import", requireAuth, async (req, res) => {
       try {
         const parsed = new URL(url.startsWith("http") ? url : `https://${url}`);
         const domain = parsed.hostname;
+        // Require at least one dot in hostname to filter out bare single-word hostnames
+        if (!domain.includes(".")) { skipped++; continue; }
         const normalizedUrl = parsed.origin;
 
         const existing = await col("targets").findOne({ domain } as Record<string, unknown>);

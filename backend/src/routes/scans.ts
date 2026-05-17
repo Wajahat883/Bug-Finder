@@ -209,20 +209,6 @@ router.get("/scan-jobs/:id", async (req, res) => {
   }
 });
 
-router.delete("/scan-jobs/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
-
-    await col("scan_jobs").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
-    await col("findings").deleteOne({ scan_job_id: new ObjectId(id) } as Record<string, unknown>);
-    res.status(204).send();
-  } catch (err) {
-    logger.error({ err }, "Delete scan job error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
 router.get("/scan-jobs/:id/findings", async (req, res) => {
   try {
     const { id } = req.params;
@@ -345,7 +331,7 @@ router.post("/scan-jobs/:id/pause", async (req, res) => {
       { returnDocument: "after" }
     );
     if (!result) return res.status(404).json({ error: "Scan not found or not running" });
-    res.json({ ok: true });
+    res.json({ ok: true, status: "paused" });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -362,7 +348,7 @@ router.post("/scan-jobs/:id/resume", async (req, res) => {
       { returnDocument: "after" }
     );
     if (!result) return res.status(404).json({ error: "Scan not found or not paused" });
-    res.json({ ok: true });
+    res.json({ ok: true, status: "running" });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });
   }
@@ -372,6 +358,7 @@ router.post("/scan-jobs/:id/resume", async (req, res) => {
 router.delete("/scan-jobs/:id", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!scan) return res.status(404).json({ error: "Scan not found" });
     if (!["running", "queued", "pending"].includes(String(scan["status"] ?? ""))) {

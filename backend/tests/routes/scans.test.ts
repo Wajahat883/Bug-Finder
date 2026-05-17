@@ -184,6 +184,18 @@ vi.mock("../../src/services/scanner/index", () => ({
   enqueueScan: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
+vi.mock("../../src/middlewares/resource-rbac", () => ({
+  engagementScopeFilter: vi.fn().mockReturnValue(null),
+}));
+
+vi.mock("../../src/services/dedup", () => ({
+  clusterFindings: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("../../src/services/vuln-intel", () => ({
+  enrichFindingWithIntel: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ── Build test app ─────────────────────────────────────────────────────────────
 
 async function buildApp(role: "analyst" | "admin" = "analyst", sessionUserId = USER_ID) {
@@ -208,7 +220,9 @@ async function buildApp(role: "analyst" | "admin" = "analyst", sessionUserId = U
   });
 
   const { default: scansRouter } = await import("../../src/routes/scans");
+  const { default: findingsRouter } = await import("../../src/routes/findings");
   app.use("/api", scansRouter);
+  app.use("/api", findingsRouter);
   return app;
 }
 
@@ -656,6 +670,7 @@ describe("PATCH /api/scan-jobs/:id/resume (PATCH variant)", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -674,6 +689,7 @@ describe("GET /api/scan-jobs/:id/findings", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -708,6 +724,7 @@ describe("POST /api/scan-jobs/:id/cancel", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     // Mock scanEvents
     vi.mock("../../src/services/scanner/index", () => ({
       runScanPipeline: vi.fn().mockResolvedValue(undefined),
@@ -763,6 +780,7 @@ describe("POST /api/scan-jobs/bulk", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -812,6 +830,7 @@ describe("PATCH /api/scan-jobs/:id/priority", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     adminApp = await buildApp("admin");
     analystApp = await buildApp("analyst");
   });

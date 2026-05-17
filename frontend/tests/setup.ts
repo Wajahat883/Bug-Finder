@@ -21,3 +21,15 @@ global.ResizeObserver = class ResizeObserver {
   unobserve() {}
   disconnect() {}
 };
+
+// IntersectionObserver is not implemented in jsdom (used by landing page)
+global.IntersectionObserver = class IntersectionObserver {
+  constructor(public callback: IntersectionObserverCallback) {}
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords(): IntersectionObserverEntry[] { return []; }
+  readonly root = null;
+  readonly rootMargin = "";
+  readonly thresholds = [];
+};

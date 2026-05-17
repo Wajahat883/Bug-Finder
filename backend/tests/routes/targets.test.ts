@@ -162,6 +162,55 @@ async function buildUnauthApp() {
 // Test suites
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Helper to restore default col mock (prevents mockImplementation bleed across describe blocks)
+async function restoreDefaultColMock() {
+  const { col } = await import("../../src/lib/db");
+  vi.mocked(col).mockImplementation((name: string) => {
+    if (name === "targets") {
+      return {
+        findOne: vi.fn().mockResolvedValue(mockTarget),
+        find: vi.fn().mockReturnValue({
+          sort: vi.fn().mockReturnValue({
+            toArray: vi.fn().mockResolvedValue([mockTarget]),
+            skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockTarget]) }) }),
+          }),
+          toArray: vi.fn().mockResolvedValue([mockTarget]),
+        }),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        countDocuments: vi.fn().mockResolvedValue(1),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    }
+    if (name === "scan_jobs") {
+      return {
+        findOne: vi.fn().mockResolvedValue(null),
+        find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }) }),
+      } as never;
+    }
+    if (name === "findings") {
+      return {
+        find: vi.fn().mockReturnValue({
+          sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+          toArray: vi.fn().mockResolvedValue([]),
+        }),
+      } as never;
+    }
+    return {
+      findOne: vi.fn().mockResolvedValue(null),
+      find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]), limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }), toArray: vi.fn().mockResolvedValue([]) }),
+      insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+      updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+      updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+      deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+      countDocuments: vi.fn().mockResolvedValue(0),
+      aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+    } as never;
+  });
+}
+
 describe("GET /api/targets", () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
   let unauthApp: Awaited<ReturnType<typeof buildUnauthApp>>;
@@ -227,6 +276,7 @@ describe("GET /api/targets/:id", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
     unauthApp = await buildUnauthApp();
   });
@@ -375,6 +425,7 @@ describe("PATCH /api/targets/:id/tags", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
     unauthApp = await buildUnauthApp();
   });
@@ -417,6 +468,7 @@ describe("GET /api/targets/:id/risk-trend", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -450,6 +502,7 @@ describe("GET /api/targets/:id/recurring-findings", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -472,6 +525,7 @@ describe("POST /api/targets/:id/monitor", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -507,6 +561,7 @@ describe("GET /api/attack-surface", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
     unauthApp = await buildUnauthApp();
   });
