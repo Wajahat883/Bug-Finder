@@ -400,7 +400,7 @@ router.post("/auth/reset-password", async (req, res) => {
   try {
     const { token, password } = req.body as { token?: string; password?: string };
     if (!token || !password) return res.status(400).json({ error: "token and password are required" });
-    if (password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
+    if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
 
     const reset = await col("password_resets").findOne({ token, used: false }) as {
       _id: ObjectId; user_id: ObjectId; expires: Date; used: boolean;

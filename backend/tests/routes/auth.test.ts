@@ -545,6 +545,40 @@ describe("POST /api/auth/reset-password", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "users") {
+        return {
+          findOne: vi.fn().mockResolvedValue(mockUser),
+          updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        } as never;
+      }
+      if (name === "password_resets") {
+        return {
+          findOne: vi.fn().mockResolvedValue({
+            _id: new ObjectId(),
+            user_id: new ObjectId(USER_ID),
+            token: "valid-reset-token",
+            expires: new Date(Date.now() + 3_600_000),
+            used: false,
+          }),
+          insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+          updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        } as never;
+      }
+      return {
+        findOne: vi.fn().mockResolvedValue(null),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        deleteMany: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+        countDocuments: vi.fn().mockResolvedValue(0),
+        find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    });
     app = await buildApp();
   });
 
