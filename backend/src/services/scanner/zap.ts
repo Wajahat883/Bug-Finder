@@ -1,4 +1,5 @@
-import { exec } from "child_process";
+import { exec, spawn, execSync } from "child_process";
+import fs from "fs";
 import { logger } from "../../lib/logger";
 import { ScanContext, ScanFinding } from "./types";
 
@@ -246,5 +247,125 @@ function execShell(cmd: string): Promise<{ stdout: string; stderr: string }> {
       if (err) reject(err);
       else resolve({ stdout, stderr });
     });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Docker-based ZAP scan (report mode) — runs zap-baseline.py / zap-full-scan.py
+// ---------------------------------------------------------------------------
+
+function isDockerAvailable(): boolean {
+  try { execSync("docker --version", { stdio: "pipe" }); return true; } catch { return false; }
+}
+
+function hasZapImage(): boolean {
+  try {
+    const result = execSync("docker images zaproxy/zap-stable -q", { stdio: "pipe" }).toString().trim();
+    return result.length > 0;
+  } catch { return false; }
+}
+
+interface ZapDockerFinding {
+  title: string; severity: string; description: string; solution: string;
+  reference: string; evidence: string; endpoint: string; cwe_id?: string; wascid?: string;
+}
+
+function parseZapJsonReport(report: unknown): ZapDockerFinding[] {
+  const findings: ZapDockerFinding[] = [];
+  const r = report as Record<string, unknown>;
+  for (const site of ((r["site"] ?? []) as Array<Record<string, unknown>>)) {
+    for (const alert of ((site["alerts"] ?? []) as Array<Record<string, unknown>>)) {
+      const instances = (alert["instances"] ?? []) as Array<Record<string, unknown>>;
+      findings.push({
+        title: String(alert["name"] ?? "Unknown"),
+        severity: zapRiskCodeToSeverity(String(alert["riskcode"] ?? "0")),
+        description: String(alert["desc"] ?? ""),
+        solution: String(alert["solution"] ?? ""),
+        reference: String(alert["reference"] ?? ""),
+        evidence: String(instances[0]?.["evidence"] ?? ""),
+        endpoint: String(instances[0]?.["uri"] ?? site["@name"] ?? ""),
+        cwe_id: alert["cweid"] ? `CWE-${alert["cweid"]}` : undefined,
+        wascid: alert["wascid"] ? String(alert["wascid"]) : undefined,
+      });
+    }
+  }
+  return findings;
+}
+
+function zapRiskCodeToSeverity(riskcode: string): string {
+  const map: Record<string, string> = { "3": "high", "2": "medium", "1": "low", "0": "info" };
+  return map[riskcode] ?? "info";
+}
+
+/**
+ * Run ZAP via Docker in report mode (zap-baseline.py / zap-full-scan.py).
+ * Falls back to simulation (empty array) when Docker is unavailable.
+ * This is separate from the daemon-mode scan used by runZapScan().
+ */
+export async function runZapDockerScan(
+  target: string,
+  mode: "baseline" | "attack" = "baseline"
+): Promise<ZapDockerFinding[]> {
+  if (!isDockerAvailable()) {
+    logger.warn("Docker not available — ZAP docker scan skipped");
+    return [];
+  }
+
+  if (!hasZapImage()) {
+    logger.warn("zaproxy/zap-stable image not found — pulling may be required");
+  }
+
+  const reportFile = `zap-report-${Date.now()}.json`;
+  const reportPath = `/tmp/${reportFile}`;
+  const script = mode === "baseline" ? "zap-baseline.py" : "zap-full-scan.py";
+
+  return new Promise((resolve) => {
+    const args = [
+      "run", "--rm",
+      "-v", "/tmp:/zap/wrk",
+      "zaproxy/zap-stable",
+      "python", script,
+      "-t", target,
+      "-J", `/zap/wrk/${reportFile}`,
+      "-I", // ignore failures / non-zero exit
+    ];
+
+    logger.info({ target, mode, script }, "Starting ZAP Docker scan");
+    const proc = spawn("docker", args, { stdio: "pipe" });
+    let stderr = "";
+
+    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+    proc.on("close", (code: number | null) => {
+      try {
+        if (fs.existsSync(reportPath)) {
+          const report = JSON.parse(fs.readFileSync(reportPath, "utf-8")) as unknown;
+          try { fs.unlinkSync(reportPath); } catch { /* best-effort cleanup */ }
+          const findings = parseZapJsonReport(report);
+          logger.info({ count: findings.length }, "ZAP Docker scan complete");
+          resolve(findings);
+        } else {
+          logger.warn({ code, stderr: stderr.slice(0, 500) }, "ZAP Docker report not generated");
+          resolve([]);
+        }
+      } catch (err) {
+        logger.error({ err }, "ZAP Docker report parse error");
+        resolve([]);
+      }
+    });
+
+    proc.on("error", (err) => {
+      logger.error({ err }, "ZAP Docker process error");
+      resolve([]);
+    });
+
+    // Timeout after 10 minutes
+    const timer = setTimeout(() => {
+      proc.kill();
+      logger.warn("ZAP Docker scan timed out after 10 minutes");
+      resolve([]);
+    }, 600_000);
+
+    proc.on("close", () => clearTimeout(timer));
   });
 }

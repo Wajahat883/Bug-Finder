@@ -32,23 +32,33 @@ function encryptSecret(plain: string): string {
 }
 
 function decryptSecret(encrypted: string): string {
+  const parts = encrypted.split(":");
+  if (parts.length !== 3) {
+    throw new Error("Webhook secret decryption failed — secret may be corrupted. Please regenerate the webhook secret.");
+  }
+  const [ivHex, encHex, tagHex] = parts;
+  const iv = Buffer.from(ivHex!, "hex");
+  const enc = Buffer.from(encHex!, "hex");
+  const tag = Buffer.from(tagHex!, "hex");
+  const decipher = crypto.createDecipheriv("aes-256-gcm", WEBHOOK_KEY, iv);
+  decipher.setAuthTag(tag);
   try {
-    const parts = encrypted.split(":");
-    if (parts.length !== 3) return encrypted; // legacy plaintext fallback
-    const [ivHex, encHex, tagHex] = parts;
-    const iv = Buffer.from(ivHex!, "hex");
-    const enc = Buffer.from(encHex!, "hex");
-    const tag = Buffer.from(tagHex!, "hex");
-    const decipher = crypto.createDecipheriv("aes-256-gcm", WEBHOOK_KEY, iv);
-    decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(enc), decipher.final()]).toString("utf8");
   } catch {
-    return encrypted; // fallback for legacy plaintext secrets
+    throw new Error("Webhook secret decryption failed — secret may be corrupted. Please regenerate the webhook secret.");
   }
 }
 
 function signWebhookPayload(secret: string, body: string): string {
   return "sha256=" + crypto.createHmac("sha256", secret).update(body).digest("hex");
+}
+
+const BASE_DELAYS = [60_000, 300_000, 1_800_000]; // 1m, 5m, 30m
+
+function getRetryDelay(attempt: number): number {
+  const base = BASE_DELAYS[Math.min(attempt, BASE_DELAYS.length - 1)] ?? BASE_DELAYS[BASE_DELAYS.length - 1]!;
+  const jitter = Math.random() * base * 0.2; // ±20% jitter
+  return Math.floor(base + jitter);
 }
 
 /**
@@ -149,11 +159,10 @@ async function deliverWebhook(
       } as Record<string, unknown>
     );
 
-    // Schedule retry if we haven't exhausted 3 attempts (delays: 1m / 5m / 30m)
+    // Schedule retry if we haven't exhausted 3 attempts (delays: 1m / 5m / 30m with ±20% jitter)
     const attempt = (hook["_retry_attempt"] as number) ?? 0;
     if (attempt < 3) {
-      const delays = [60_000, 300_000, 1_800_000];
-      const delay = delays[attempt] ?? 1_800_000;
+      const delay = getRetryDelay(attempt);
       await col("webhook_retries").insertOne({
         webhook_id: String(hook["_id"]),
         event: eventName,
@@ -399,6 +408,30 @@ router.post(
     }
   }
 );
+
+// Rotate webhook secret — generates a new random secret and re-encrypts it
+router.post("/webhooks/:id/rotate-secret", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+
+    const newSecret = crypto.randomBytes(32).toString("hex");
+    const encrypted = encryptSecret(newSecret);
+
+    const result = await col("webhooks").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: { secret: encrypted, secret_rotated_at: new Date() } } as Record<string, unknown>
+    );
+
+    if (result.matchedCount === 0) return res.status(404).json({ error: "Not found" });
+
+    logger.info({ id }, "Webhook secret rotated");
+    res.json({ ok: true, new_secret: newSecret });
+  } catch (err) {
+    logger.error({ err }, "Rotate webhook secret error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 // List pending retries
 router.get("/webhooks/retries", requireAuth, async (_req, res) => {

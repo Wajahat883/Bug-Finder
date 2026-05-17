@@ -7,25 +7,30 @@ import { requireAdmin, requireAuth } from "../middlewares/rbac";
 const router = Router();
 
 router.get("/integrations", requireAdmin, async (_req, res) => {
-  // Check settings DB for user-configured webhook URLs
-  const settings = (await col("settings").find().toArray())[0] as Record<string, unknown> | undefined;
-  const slackUrl = String(settings?.["slack_webhook_url"] ?? "") || process.env["SLACK_WEBHOOK_URL"] || "";
-  const teamsUrl = String(settings?.["teams_webhook_url"] ?? "") || process.env["TEAMS_WEBHOOK_URL"] || "";
-  const pdKey = String(settings?.["pagerduty_routing_key"] ?? "") || process.env["PAGERDUTY_ROUTING_KEY"] || "";
+  try {
+    // Check settings DB for user-configured webhook URLs
+    const settings = (await col("settings").find().toArray())[0] as Record<string, unknown> | undefined;
+    const slackUrl = String(settings?.["slack_webhook_url"] ?? "") || process.env["SLACK_WEBHOOK_URL"] || "";
+    const teamsUrl = String(settings?.["teams_webhook_url"] ?? "") || process.env["TEAMS_WEBHOOK_URL"] || "";
+    const pdKey = String(settings?.["pagerduty_routing_key"] ?? "") || process.env["PAGERDUTY_ROUTING_KEY"] || "";
 
-  res.json({
-    github: { connected: !!process.env["GITHUB_TOKEN"], name: "GitHub" },
-    slack:  { connected: !!slackUrl, name: "Slack" },
-    teams:  { connected: !!teamsUrl, name: "Microsoft Teams" },
-    pagerduty: { connected: !!pdKey, name: "PagerDuty" },
-    jira:   {
-      connected: !!(process.env["JIRA_URL"] && process.env["JIRA_EMAIL"] && process.env["JIRA_API_TOKEN"] && process.env["JIRA_PROJECT_KEY"]),
-      name: "Jira",
-      url: process.env["JIRA_URL"] ?? "",
-      email: process.env["JIRA_EMAIL"] ?? "",
-      projectKey: process.env["JIRA_PROJECT_KEY"] ?? "",
-    },
-  });
+    res.json({
+      github: { connected: !!process.env["GITHUB_TOKEN"], name: "GitHub" },
+      slack:  { connected: !!slackUrl, name: "Slack" },
+      teams:  { connected: !!teamsUrl, name: "Microsoft Teams" },
+      pagerduty: { connected: !!pdKey, name: "PagerDuty" },
+      jira:   {
+        connected: !!(process.env["JIRA_URL"] && process.env["JIRA_EMAIL"] && process.env["JIRA_API_TOKEN"] && process.env["JIRA_PROJECT_KEY"]),
+        name: "Jira",
+        url: process.env["JIRA_URL"] ?? "",
+        email: process.env["JIRA_EMAIL"] ?? "",
+        projectKey: process.env["JIRA_PROJECT_KEY"] ?? "",
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "List integrations error");
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // GET /integrations/health — webhook delivery health metrics
@@ -532,46 +537,55 @@ router.post("/integrations/slack/notify", requireAuth, async (req, res) => {
 // ── Linear: Create issue from finding ─────────────────────────────────────────
 
 router.post("/integrations/linear/create-issue", requireAuth, async (req, res) => {
-  const { finding_id, team_id } = req.body as { finding_id?: string; team_id?: string };
-  if (!finding_id) return res.status(400).json({ error: "finding_id required" });
-
   try {
-    const conn = await col("integration_connections").findOne({ service: "linear" }) as Record<string, unknown> | null;
-    if (!conn?.["access_token"]) return res.status(400).json({ error: "Linear not connected" });
+    const { finding_id, team_id } = req.body as { finding_id?: string; team_id?: string };
+    if (!finding_id) return res.status(400).json({ error: "finding_id required" });
+
+    const conn = await col("integration_connections").findOne({ integration_id: "linear" }) as Record<string, unknown> | null;
+    if (!conn?.["access_token"]) return res.status(400).json({ error: "Linear not connected. Go to Settings → Integrations." });
 
     const finding = await col("findings").findOne({ _id: new ObjectId(finding_id) }) as Record<string, unknown> | null;
     if (!finding) return res.status(404).json({ error: "Finding not found" });
 
     const priorityMap: Record<string, number> = { critical: 1, high: 2, medium: 3, low: 4 };
-    const resolvedTeamId = team_id || String(conn["default_team_id"] ?? "");
-    const priority = priorityMap[String(finding["severity"] ?? "")] ?? 3;
-    const title = String(finding["title"] ?? "").replace(/"/g, '\\"');
-    const description = String(finding["description"] ?? "").replace(/"/g, '\\"');
+    const priority = priorityMap[finding["severity"] as string] ?? 3;
+    const resolvedTeamId = team_id || (conn["default_team_id"] as string);
+
+    const mutation = `
+      mutation IssueCreate($title: String!, $description: String!, $teamId: String!, $priority: Int) {
+        issueCreate(input: { title: $title, description: $description, teamId: $teamId, priority: $priority }) {
+          success
+          issue { id identifier url }
+        }
+      }
+    `;
 
     const response = await fetch("https://api.linear.app/graphql", {
       method: "POST",
-      headers: {
-        "Authorization": String(conn["access_token"]),
-        "Content-Type": "application/json",
-      },
+      headers: { "Authorization": conn["access_token"] as string, "Content-Type": "application/json" },
       body: JSON.stringify({
-        query: `mutation { issueCreate(input: { title: "${title}", description: "${description}", teamId: "${resolvedTeamId}", priority: ${priority} }) { success issue { id identifier url } } }`,
-      }),
+        query: mutation,
+        variables: {
+          title: `[${String(finding["severity"]).toUpperCase()}] ${finding["title"]}`,
+          description: `**Endpoint:** ${finding["endpoint"]}\n\n**Description:** ${finding["description"]}\n\n**CVSS:** ${finding["cvss_score"]}`,
+          teamId: resolvedTeamId,
+          priority,
+        }
+      })
     });
 
-    const data = await response.json() as Record<string, unknown>;
-    const issueCreate = (data?.["data"] as Record<string, unknown>)?.["issueCreate"] as Record<string, unknown> | undefined;
+    const data = await response.json() as { data?: { issueCreate?: { success: boolean; issue?: { id: string; identifier: string; url: string } } }; errors?: unknown[] };
 
-    if (issueCreate?.["success"]) {
-      const issue = issueCreate["issue"] as Record<string, unknown>;
+    if (data?.data?.issueCreate?.success && data.data.issueCreate.issue) {
+      const issue = data.data.issueCreate.issue;
       await col("findings").updateOne(
         { _id: new ObjectId(finding_id) } as Record<string, unknown>,
-        { $set: { linear_issue_id: issue["id"], linear_issue_url: issue["url"] } }
+        { $set: { linear_issue_id: issue.id, linear_issue_url: issue.url, linear_issue_identifier: issue.identifier } }
       );
-      res.json({ ok: true, issueId: issue["id"], issueUrl: issue["url"] });
-    } else {
-      res.status(500).json({ error: "Linear issue creation failed", details: data });
+      return res.json({ ok: true, issueId: issue.id, issueUrl: issue.url, identifier: issue.identifier });
     }
+
+    res.status(500).json({ error: "Linear issue creation failed", details: data?.errors });
   } catch (err) {
     logger.error({ err }, "Linear create issue error");
     res.status(500).json({ error: "Internal server error" });

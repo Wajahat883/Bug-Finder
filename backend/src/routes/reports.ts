@@ -18,6 +18,11 @@ router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!scan) return res.status(404).json({ error: "Scan not found" });
 
+    const session = (req as any).session;
+    if (scan["user_id"] && scan["user_id"] !== session?.userId && session?.role !== "admin") {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
     const findingsAll = await col("findings").find({ scan_job_id: new ObjectId(id) } as Record<string, unknown>).sort({ severity: 1 }).toArray() as Array<Record<string, unknown>>;
 
     // Escape HTML to prevent stored XSS — finding data originates from external targets

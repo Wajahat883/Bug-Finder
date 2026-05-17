@@ -180,23 +180,31 @@ function parseNucleiJsonl(line: string, targetUrl: string): ScanFinding | null {
   if (!line.trim() || !line.startsWith("{")) return null;
   try {
     const r = JSON.parse(line) as Record<string, unknown>;
-    const sev = String(r["info"] ? (r["info"] as Record<string, unknown>)["severity"] : r["severity"] ?? "info").toLowerCase();
+    const info = typeof r["info"] === "object" && r["info"] !== null ? r["info"] as Record<string, unknown> : {};
+    const name = typeof info["name"] === "string" ? info["name"] : "Nuclei Finding";
+    const severity = typeof info["severity"] === "string" ? info["severity"] : (typeof r["severity"] === "string" ? r["severity"] : "info");
+    const sev = severity.toLowerCase();
     const validSev = (["critical", "high", "medium", "low", "info"].includes(sev) ? sev : "info") as ScanFinding["severity"];
+    const tags = typeof info["tags"] === "string" ? info["tags"] : "Security Misconfiguration";
+    const description = typeof info["description"] === "string" ? info["description"] : "Found by Nuclei template";
+    const remediation = typeof info["remediation"] === "string" ? info["remediation"] : "Apply security patches and follow vendor recommendations.";
+    const classification = typeof info["classification"] === "object" && info["classification"] !== null ? info["classification"] as Record<string, unknown> : {};
+    const cweId = typeof classification["cwe-id"] === "string" ? classification["cwe-id"] : (typeof r["cwe-id"] === "string" ? r["cwe-id"] : "CWE-200");
     return {
-      title: String((r["info"] as Record<string, unknown>)?.["name"] ?? r["template-id"] ?? "Nuclei Finding"),
-      category: String((r["info"] as Record<string, unknown>)?.["tags"] ?? "Security Misconfiguration"),
+      title: String(name ?? r["template-id"] ?? "Nuclei Finding"),
+      category: String(tags),
       severity: validSev,
       endpoint: String(r["matched-at"] ?? targetUrl),
-      description: String((r["info"] as Record<string, unknown>)?.["description"] ?? "Found by Nuclei template"),
+      description: String(description),
       evidence: [
         `Template: ${r["template-id"]}`,
         `Matched: ${r["matched-at"]}`,
         r["extracted-results"] ? `Extracted: ${JSON.stringify(r["extracted-results"])}` : "",
         r["curl-command"] ? `\nReproduction:\n${r["curl-command"]}` : "",
       ].filter(Boolean).join("\n"),
-      recommended_fix: String((r["info"] as Record<string, unknown>)?.["remediation"] ?? "Apply security patches and follow vendor recommendations."),
+      recommended_fix: String(remediation),
       cvss_score: typeof r["cvss-score"] === "number" ? r["cvss-score"] : ({ critical: 9.0, high: 7.5, medium: 5.0, low: 3.0, info: 1.0 }[validSev] ?? 5.0),
-      cwe_id: String((r["info"] as Record<string, unknown>)?.["classification"] ? ((r["info"] as Record<string, unknown>)["classification"] as Record<string, unknown>)?.["cwe-id"] ?? "CWE-200" : r["cwe-id"] ?? "CWE-200"),
+      cwe_id: String(cweId),
       scanner_name: `Nuclei/${r["template-id"] ?? "template"}`,
       scanner_family: "Nuclei",
       confidence: 0.88,

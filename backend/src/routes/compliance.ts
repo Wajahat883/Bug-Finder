@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
+import PDFDocument from "pdfkit";
 
 // SOC2 / ISO 27001 / PCI-DSS control mappings keyed by finding category
 const CONTROL_MAPPINGS: Record<string, { soc2: string[]; iso27001: string[]; pci: string[] }> = {
@@ -454,6 +455,55 @@ router.post("/compliance/evidence/:controlId", requireAuth, async (req, res) => 
   }
 });
 
+// Helper: generate attestation data for a framework
+async function generateAttestationData(
+  framework: string,
+  userFilter: Record<string, unknown> = {}
+): Promise<{
+  framework: string;
+  generated_at: string;
+  control_statuses: Array<{ control: string; status: string; findings_count: number }>;
+  compliance_score_pct: number;
+  evidence_count: number;
+}> {
+  const findings = await col("findings").find({ ...userFilter, status: { $nin: ["resolved", "false_positive"] } }).toArray() as Array<Record<string, unknown>>;
+  const evidenceList = await col("compliance_evidence").find({ framework }).sort({ created_at: -1 }).toArray() as Array<Record<string, unknown>>;
+
+  const fw = framework as "soc2" | "iso27001" | "pci";
+  const allControls = new Set<string>();
+  for (const m of Object.values(CONTROL_MAPPINGS)) for (const ctrl of m[fw]) allControls.add(ctrl);
+
+  const failingControls = new Map<string, number>();
+  for (const f of findings) {
+    if (!["critical", "high"].includes(String(f["severity"] ?? ""))) continue;
+    const key = normaliseCategoryKey(String(f["category"] ?? ""));
+    const mapping = CONTROL_MAPPINGS[key];
+    if (!mapping) continue;
+    for (const ctrl of mapping[fw]) {
+      failingControls.set(ctrl, (failingControls.get(ctrl) ?? 0) + 1);
+    }
+  }
+
+  const controlStatuses = Array.from(allControls).map(ctrl => ({
+    control: ctrl,
+    status: failingControls.has(ctrl) ? "failing" : "passing",
+    findings_count: failingControls.get(ctrl) ?? 0,
+  }));
+
+  const totalControls = allControls.size;
+  const failingCount = failingControls.size;
+  const passingCount = totalControls - failingCount;
+  const score = totalControls > 0 ? Math.round((passingCount / totalControls) * 100) : 100;
+
+  return {
+    framework,
+    generated_at: new Date().toISOString(),
+    control_statuses: controlStatuses,
+    compliance_score_pct: score,
+    evidence_count: evidenceList.length,
+  };
+}
+
 // GET /compliance/attestation/:framework — JSON attestation document
 router.get("/compliance/attestation/:framework", requireAuth, async (req, res) => {
   try {
@@ -498,6 +548,66 @@ router.get("/compliance/attestation/:framework", requireAuth, async (req, res) =
   } catch (err) {
     logger.error({ err }, "Attestation document error");
     res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /compliance/attestation/:framework/pdf — PDF attestation document
+router.get("/compliance/attestation/:framework/pdf", requireAuth, async (req, res) => {
+  try {
+    const { framework } = req.params;
+    const validFrameworks = ["soc2", "iso27001", "pci"];
+    if (!validFrameworks.includes(framework)) return res.status(400).json({ error: "Invalid framework" });
+
+    const sess = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = sess?.role !== "admin" ? { user_id: sess?.userId } : {};
+    const attestationData = await generateAttestationData(framework, userFilter as Record<string, unknown>);
+
+    const doc = new PDFDocument({ margin: 50, size: "A4" });
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${framework}-attestation-${new Date().toISOString().slice(0, 10)}.pdf"`);
+    doc.pipe(res);
+
+    // Cover page
+    doc.fontSize(28).font("Helvetica-Bold").text("Compliance Attestation", { align: "center" });
+    doc.moveDown(0.5);
+    doc.fontSize(18).font("Helvetica").text(
+      framework === "soc2" ? "SOC 2 Type II" : framework === "iso27001" ? "ISO 27001:2022" : "PCI-DSS v4.0",
+      { align: "center" }
+    );
+    doc.moveDown(0.5);
+    doc.fontSize(12).fillColor("#666").text(`Generated: ${new Date().toISOString()}`, { align: "center" });
+    doc.moveDown(2);
+
+    // Compliance score
+    const score = attestationData.compliance_score_pct ?? 0;
+    doc.fontSize(14).fillColor(score >= 80 ? "#16a34a" : score >= 60 ? "#d97706" : "#dc2626")
+      .text(`Overall Compliance Score: ${score}%`, { align: "center" });
+    doc.moveDown(1);
+
+    // Control statuses table
+    doc.fontSize(12).fillColor("#000").font("Helvetica-Bold").text("Control Status Summary");
+    doc.moveDown(0.5);
+
+    const controls = attestationData.control_statuses ?? [];
+    for (const control of controls) {
+      const statusColor = control.status === "passing" ? "#16a34a" : "#dc2626";
+      const icon = control.status === "passing" ? "+" : "x";
+      doc.fontSize(10).font("Helvetica")
+        .fillColor(statusColor).text(`${icon} `, { continued: true })
+        .fillColor("#000").text(`${control.control} — ${control.status.toUpperCase()}`);
+      if (control.findings_count > 0) {
+        doc.fontSize(9).fillColor("#666").text(`   Open findings: ${control.findings_count}`);
+      }
+    }
+
+    doc.moveDown(2);
+    doc.fontSize(9).fillColor("#999")
+      .text("This attestation was generated automatically by Bug Finder Pro. For audit purposes, please retain this document.", { align: "center" });
+
+    doc.end();
+  } catch (err) {
+    logger.error({ err }, "PDF attestation error");
+    if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
   }
 });
 

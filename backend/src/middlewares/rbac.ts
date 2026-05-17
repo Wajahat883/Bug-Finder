@@ -70,6 +70,11 @@ export function requireApiKeyScope(scope: string) {
         res.status(401).json({ error: "Invalid or inactive API key" });
         return;
       }
+      // Expiry check
+      if (keyDoc["expires_at"] && new Date(keyDoc["expires_at"] as string) < new Date()) {
+        res.status(401).json({ error: "API key expired. Please rotate your key.", code: "KEY_EXPIRED" });
+        return;
+      }
       const scopes = (keyDoc["scopes"] as string[]) ?? [];
       if (!scopes.includes(scope) && !scopes.includes("admin")) {
         res.status(403).json({ error: `API key missing required scope: ${scope}` });
@@ -105,6 +110,11 @@ export async function requireAuthOrApiKey(req: Request, res: Response, next: Nex
     const keyDoc = await col("api_keys").findOne({ key: apiKey, active: true } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!keyDoc) {
       res.status(401).json({ error: "Invalid or inactive API key" });
+      return;
+    }
+    // Expiry check
+    if (keyDoc["expires_at"] && new Date(keyDoc["expires_at"] as string) < new Date()) {
+      res.status(401).json({ error: "API key expired. Please rotate your key.", code: "KEY_EXPIRED" });
       return;
     }
     col("api_keys").updateOne(

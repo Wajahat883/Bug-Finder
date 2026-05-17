@@ -157,15 +157,23 @@ router.post("/scan-jobs/:id/start-simulation", requireAuth, async (req, res) => 
 // Dashboard SSE clients registry
 const dashboardClients = new Set<import("express").Response>();
 
-export function broadcastDashboard(type: string, payload: Record<string, unknown> = {}) {
-  const data = JSON.stringify({ type, ...payload });
-  dashboardClients.forEach(res => {
-    try { res.write(`data: ${data}\n\n`); } catch { dashboardClients.delete(res); }
-  });
+export function broadcastDashboard(type: string, data: unknown = {}): void {
+  const message = `event: ${type}\ndata: ${typeof data === "string" ? data : JSON.stringify(data)}\n\n`;
+  for (const client of dashboardClients) {
+    try { client.write(message); } catch { dashboardClients.delete(client); }
+  }
 }
 
-export function broadcastNewFinding(finding: Record<string, unknown>) {
-  broadcastDashboard("new_finding", { finding });
+export function broadcastNewFinding(finding: Record<string, unknown>): void {
+  const payload = JSON.stringify({
+    id: finding["_id"],
+    title: finding["title"],
+    severity: finding["severity"],
+    endpoint: finding["endpoint"],
+    cvss_score: finding["cvss_score"],
+    created_at: finding["created_at"],
+  });
+  broadcastDashboard("new_finding", payload);
 }
 
 export function broadcastScanComplete(scanId: string) {

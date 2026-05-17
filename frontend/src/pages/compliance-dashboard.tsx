@@ -174,15 +174,23 @@ function FrameworkTabs({ active, onChange, report, controlStatuses, onExportAtte
             </div>
 
             {/* Export attestation */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex-shrink-0"
-              onClick={() => onExportAttestation(key)}
-            >
-              <Download className="w-3.5 h-3.5 mr-1.5" />
-              Export Attestation
-            </Button>
+            <div className="flex gap-2 flex-shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onExportAttestation(key)}
+              >
+                Export JSON
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.open(`/api/compliance/attestation/${key}/pdf`, "_blank")}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Export PDF
+              </Button>
+            </div>
           </div>
         );
       })}
@@ -574,7 +582,7 @@ export default function ComplianceDashboard() {
   const [drillDownControl, setDrillDownControl] = useState<{ id: string; name: string; status: string } | null>(null);
   const [evidenceDialogControl, setEvidenceDialogControl] = useState<{ id: string; name: string } | null>(null);
 
-  const { data: report, isLoading, refetch } = useQuery<any>({
+  const { data: report, isLoading, isError, refetch } = useQuery<any>({
     queryKey: ["/api/compliance/report"],
     queryFn: () => fetch("/api/compliance/report", { credentials: "include" }).then(r => r.json()),
   });
@@ -663,6 +671,14 @@ export default function ComplianceDashboard() {
   if (isLoading) return (
     <div className="flex items-center justify-center h-64 text-muted-foreground">
       <RefreshCw className="w-5 h-5 animate-spin mr-2" /> Loading compliance data…
+    </div>
+  );
+
+  if (isError) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-4">
+      <AlertTriangle className="w-12 h-12 text-red-400" />
+      <p className="text-muted-foreground text-sm">Failed to load data. Please try again.</p>
+      <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
     </div>
   );
 

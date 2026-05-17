@@ -13,6 +13,7 @@ router.get("/gdpr/export", requireAuth, async (req, res) => {
     const userId = sess.userId;
     if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
+    const userFilter = { user_id: userId } as Record<string, unknown>;
     const [
       user,
       findings,
@@ -21,14 +22,16 @@ router.get("/gdpr/export", requireAuth, async (req, res) => {
       notifications,
       apiKeys,
       notifPrefs,
+      totalFindings,
     ] = await Promise.all([
       col("users").findOne({ _id: new ObjectId(userId) } as Record<string, unknown>),
-      col("findings").find({ user_id: userId } as Record<string, unknown>).limit(1000).toArray(),
-      col("scan_jobs").find({ user_id: userId } as Record<string, unknown>).limit(500).toArray(),
-      col("audit_log").find({ user_id: userId } as Record<string, unknown>).sort({ created_at: -1 }).limit(500).toArray(),
-      col("notifications").find({ user_id: userId } as Record<string, unknown>).sort({ created_at: -1 }).limit(500).toArray(),
-      col("api_keys").find({ user_id: userId } as Record<string, unknown>).toArray(),
-      col("notification_preferences").findOne({ user_id: userId } as Record<string, unknown>),
+      col("findings").find(userFilter).limit(5000).toArray(),
+      col("scan_jobs").find(userFilter).limit(500).toArray(),
+      col("audit_log").find(userFilter).sort({ created_at: -1 }).limit(1000).toArray(),
+      col("notifications").find(userFilter).sort({ created_at: -1 }).limit(500).toArray(),
+      col("api_keys").find(userFilter).toArray(),
+      col("notification_preferences").findOne(userFilter),
+      col("findings").countDocuments(userFilter),
     ]);
 
     const safeUser = {
@@ -44,6 +47,7 @@ router.get("/gdpr/export", requireAuth, async (req, res) => {
       user: { ...safeUser, _id: String((safeUser as Record<string, unknown>)["_id"]) },
       scan_jobs: (scans as Array<Record<string, unknown>>).map(s => ({ ...s, _id: String(s["_id"]) })),
       findings: (findings as Array<Record<string, unknown>>).map(f => ({ ...f, _id: String(f["_id"]) })),
+      findings_note: totalFindings > 5000 ? `Only the first 5000 of ${totalFindings} findings are included in this export.` : undefined,
       audit_log: (auditEntries as Array<Record<string, unknown>>).map(e => ({ ...e, _id: String(e["_id"]) })),
       notifications: (notifications as Array<Record<string, unknown>>).map(n => ({ ...n, _id: String(n["_id"]) })),
       api_keys: (apiKeys as Array<Record<string, unknown>>).map(k => ({
@@ -67,39 +71,63 @@ router.get("/gdpr/export", requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /gdpr/my-account — soft-delete: anonymise PII, keep audit trail
+// DELETE /gdpr/my-account — cascading soft-delete: anonymise PII across all collections, keep audit trail
 router.delete("/gdpr/my-account", requireAuth, async (req, res) => {
   try {
     const sess = req.session as unknown as { userId?: string };
     const userId = sess.userId;
     if (!userId) return res.status(401).json({ error: "Not authenticated" });
 
+    const deletedAt = new Date();
+    const anonEmail = `deleted_${userId}@deleted.invalid`;
+
+    // 1. Anonymize user profile
     await col("users").updateOne(
       { _id: new ObjectId(userId) } as Record<string, unknown>,
-      {
-        $set: {
-          deleted_at: new Date(),
-          email: `deleted_${userId}@deleted`,
-          first_name: "[deleted]",
-          last_name: "[deleted]",
-          username: `deleted_${userId}`,
-          password: "[REDACTED]",
-          totp_secret: null,
-          totp_secret_pending: null,
-          avatar_url: null,
-          updated_at: new Date(),
-        },
-      }
+      { $set: { email: anonEmail, name: "Deleted User", deleted_at: deletedAt, totp_secret: null, profile_image: null } }
     );
 
-    await auditFromReq(req, "gdpr.account_deleted", "users", userId);
+    // 2. Soft-delete scan jobs
+    await col("scan_jobs").updateMany(
+      { user_id: userId } as Record<string, unknown>,
+      { $set: { deleted_at: deletedAt, user_id: anonEmail } }
+    );
 
+    // 3. Anonymize findings (keep for security records, anonymize owner)
+    await col("findings").updateMany(
+      { user_id: userId } as Record<string, unknown>,
+      { $set: { user_id: anonEmail, anonymized_at: deletedAt } }
+    );
+
+    // 4. Delete webhooks (no retention needed)
+    await col("webhooks").deleteMany({ user_id: userId } as Record<string, unknown>);
+
+    // 5. Delete API keys
+    await col("api_keys").deleteMany({ user_id: userId } as Record<string, unknown>);
+
+    // 6. Delete notification preferences
+    await col("notification_preferences").deleteMany({ user_id: userId } as Record<string, unknown>);
+
+    // 7. Delete notifications
+    await col("notifications").deleteMany({ user_id: userId } as Record<string, unknown>);
+
+    // 8. Log deletion to audit_log (keep for compliance — anonymized)
+    await col("audit_log").insertOne({
+      action: "gdpr_account_deletion",
+      actor: anonEmail,
+      actor_id: userId,
+      deleted_at: deletedAt,
+      collections_affected: ["users", "scan_jobs", "findings", "webhooks", "api_keys", "notification_preferences", "notifications"],
+      created_at: deletedAt,
+    } as Record<string, unknown>);
+
+    // 9. Destroy session
     req.session.destroy(() => {
       res.clearCookie("bbp.sid");
     });
 
-    logger.info({ userId }, "GDPR soft-delete completed");
-    res.json({ ok: true });
+    logger.info({ userId }, "GDPR cascading soft-delete completed");
+    res.json({ ok: true, message: "Account deleted and data anonymized per GDPR Article 17" });
   } catch (err) {
     logger.error({ err }, "GDPR account deletion error");
     res.status(500).json({ error: "Account deletion failed" });

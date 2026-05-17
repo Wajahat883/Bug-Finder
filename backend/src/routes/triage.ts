@@ -8,6 +8,7 @@ import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth, requireRole } from "../middlewares/rbac";
 import { logAudit } from "../lib/audit";
+import { sendIntegrationAlerts } from "../services/alerts";
 
 const router = Router();
 
@@ -404,6 +405,11 @@ router.post("/api/findings/manual", requireAuth, async (req, res) => {
     };
 
     const result = await col("findings").insertOne(finding);
+
+    // Non-blocking Slack/Teams alerts for critical/high findings
+    if (["critical", "high"].includes(finding["severity"] as string)) {
+      sendIntegrationAlerts(finding as Record<string, unknown>).catch(() => {});
+    }
 
     await logAudit({
       userId: session.userId ?? "unknown",

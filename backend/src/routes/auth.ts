@@ -44,7 +44,7 @@ function clearLoginAttempts(email: string): void {
 
 const DEFAULT_ADMIN_EMAIL = process.env["ADMIN_EMAIL"] ?? "admin@bugfinder.local";
 let DEFAULT_ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] ?? "";
-if (!DEFAULT_ADMIN_PASSWORD) { DEFAULT_ADMIN_PASSWORD = crypto.randomBytes(12).toString("hex"); logger.warn("ADMIN_PASSWORD not set — auto-generated a random password (will be printed once)"); console.log(`=== Auto-generated admin password: ${DEFAULT_ADMIN_PASSWORD} ===`); }
+if (!DEFAULT_ADMIN_PASSWORD) { DEFAULT_ADMIN_PASSWORD = crypto.randomBytes(12).toString("hex"); logger.warn("ADMIN_PASSWORD not set — auto-generated a random password"); }
 
 interface SessionData {
   userId?: string;

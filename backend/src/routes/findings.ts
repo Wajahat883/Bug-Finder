@@ -8,6 +8,8 @@ import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
 import { getComplianceTags } from "../lib/compliance-map";
 import { engagementScopeFilter } from "../middlewares/resource-rbac";
 import { logAudit, auditFromReq } from "../lib/audit";
+import { withTenant } from "../middlewares/tenant";
+import { sendIntegrationAlerts } from "../services/alerts";
 
 const router = Router();
 
@@ -24,7 +26,7 @@ router.get("/findings", requireAuth, async (req, res) => {
     const suppressFp = req.query["suppress_fp"] === "true";
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    const query: Record<string, unknown> = {};
+    let query: Record<string, unknown> = withTenant({}, req.tenantId);
     if (session.role !== "admin") query["user_id"] = session.userId ?? null;
     // Apply engagement-level RBAC scope filter
     const scopeFilter = engagementScopeFilter(req);
@@ -32,11 +34,12 @@ router.get("/findings", requireAuth, async (req, res) => {
     if (severity) query["severity"] = severity;
     if (valStatus) query["validation_status"] = valStatus;
     if (search) {
+      const safeSearch = String(search);
       query["$or"] = [
-        { title: { $regex: search, $options: "i" } },
-        { endpoint: { $regex: search, $options: "i" } },
-        { cwe_id: { $regex: search, $options: "i" } },
-        { category: { $regex: search, $options: "i" } },
+        { title: { $regex: safeSearch, $options: "i" } },
+        { endpoint: { $regex: safeSearch, $options: "i" } },
+        { cwe_id: { $regex: safeSearch, $options: "i" } },
+        { category: { $regex: safeSearch, $options: "i" } },
       ];
     }
     if (scanJobId && ObjectId.isValid(scanJobId)) query["scan_job_id"] = new ObjectId(scanJobId);

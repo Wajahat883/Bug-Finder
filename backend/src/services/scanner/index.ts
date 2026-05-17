@@ -18,6 +18,7 @@ import { runIdorCheck } from "./idor";
 import { runPathTraversalCheck } from "./pathtraversal";
 import { runDnsCheck } from "./dns";
 import { runSubdomainEnum, runWaybackCrawl } from "./subdomains";
+import { sendIntegrationAlerts } from "../alerts";
 import { runJsSecretScan } from "./js-secrets";
 import { runJwtCheck } from "./jwt";
 import { runGraphQLCheck, runWebSocketCheck } from "./graphql";
@@ -308,6 +309,11 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     scan_job_id: new ObjectId(jobId),
     severity: finding.severity,
   });
+
+  // Integration alerts (Slack/Teams) — non-blocking
+  if (["critical", "high"].includes(String(finding.severity ?? ""))) {
+    sendIntegrationAlerts({ ...finding, _id: insertResult.insertedId } as Record<string, unknown>).catch(() => {});
+  }
 
   // Auto-notify on critical/high findings
   try {

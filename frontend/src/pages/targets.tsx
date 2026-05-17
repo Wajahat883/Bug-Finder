@@ -474,7 +474,7 @@ export default function Targets() {
     onError: () => toast({ title: "Delete failed", description: "Could not delete this target. Please try again.", variant: "destructive" }),
   });
 
-  const { data, isLoading } = useQuery<TargetsResponse>({
+  const { data, isLoading, isError } = useQuery<TargetsResponse>({
     queryKey: ["/api/targets", search, tagFilter, sortBy, sortDir],
     queryFn: () => {
       const params = new URLSearchParams({ sort_by: sortBy, sort_dir: sortDir, page_size: "100" });
@@ -588,7 +588,13 @@ export default function Targets() {
       </div>
 
       {/* Table */}
-      {isLoading ? (
+      {isError ? (
+        <div className="flex flex-col items-center justify-center h-64 gap-4">
+          <AlertTriangle className="w-12 h-12 text-red-400" />
+          <p className="text-muted-foreground text-sm">Failed to load data. Please try again.</p>
+          <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
+        </div>
+      ) : isLoading ? (
         <TableSkeleton rows={6} cols={8} />
       ) : targets.length === 0 && !search && !tagFilter ? (
         /* Empty state — no targets at all */

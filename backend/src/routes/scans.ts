@@ -198,6 +198,7 @@ router.get("/scan-jobs/:id", async (req, res) => {
     if (!job) return res.status(404).json({ error: "Scan job not found" });
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    if (!session?.userId) return res.status(401).json({ error: "Not authenticated" });
     if (session.role !== "admin" && job.user_id !== session.userId) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -292,22 +293,22 @@ function formatFinding(f: Record<string, unknown>) {
     ? Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000)
     : null;
   return {
-    id: String(redacted["_id"]),
+    id: String(redacted["_id"] ?? ""),
     scan_job_id: redacted["scan_job_id"] ? String(redacted["scan_job_id"]) : null,
-    title: redacted["title"],
-    category: redacted["category"],
-    severity: redacted["severity"],
-    validation_status: redacted["validation_status"],
-    confidence: redacted["confidence"],
-    endpoint: redacted["endpoint"],
-    description: redacted["description"],
+    title: redacted["title"] ?? "Untitled",
+    category: redacted["category"] ?? "",
+    severity: redacted["severity"] ?? "low",
+    validation_status: redacted["validation_status"] ?? "needs_review",
+    confidence: redacted["confidence"] ?? 0,
+    endpoint: redacted["endpoint"] ?? "",
+    description: redacted["description"] ?? "",
     evidence: redacted["evidence"] ?? null,
     recommended_fix: redacted["recommended_fix"] ?? null,
     cvss_score: redacted["cvss_score"] ?? null,
     cwe_id: redacted["cwe_id"] ?? null,
     risk_score: redacted["risk_score"] ?? 0,
-    scanner_name: redacted["scanner_name"],
-    created_at: redacted["created_at"],
+    scanner_name: redacted["scanner_name"] ?? "",
+    created_at: redacted["created_at"] ?? null,
     target_url: redacted["target_url"] ?? null,
     compliance_tags: complianceTags,
     days_open: daysOpen,

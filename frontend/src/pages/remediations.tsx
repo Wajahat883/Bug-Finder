@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { format, formatDistanceToNow } from "date-fns";
 import {
@@ -533,12 +534,20 @@ export default function Remediations() {
   const dragId = useRef<string | null>(null);
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery<any[]>({
+  const { data, isLoading, isError } = useQuery<any[]>({
     queryKey: ["/api/remediations"],
     queryFn: () =>
       fetch("/api/remediations?limit=200", { credentials: "include" }).then((r) => r.json()),
     select: (d) => (Array.isArray(d) ? d : (d as any)?.items ?? []),
   });
+
+  if (isError) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-4">
+      <AlertTriangle className="w-12 h-12 text-red-400" />
+      <p className="text-muted-foreground text-sm">Failed to load data. Please try again.</p>
+      <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
+    </div>
+  );
 
   const updateStatus = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
@@ -632,7 +641,18 @@ export default function Remediations() {
       )}
 
       {isLoading ? (
-        <div className="p-12 text-center text-muted-foreground">Loading remediations…</div>
+        <div className="p-6 space-y-3">
+          <Skeleton className="h-8 w-64" />
+          {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded" />)}
+        </div>
+      ) : remediations.length === 0 && !isLoading ? (
+        <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
+          <CheckCircle2 className="w-16 h-16 text-green-500/30" />
+          <div>
+            <p className="text-lg font-medium">No remediations</p>
+            <p className="text-sm text-muted-foreground mt-1">Remediations will appear here once findings are assigned</p>
+          </div>
+        </div>
       ) : view === "kanban" ? (
         /* ── KANBAN ── */
         <div className="flex gap-4 overflow-x-auto pb-4" style={{ minHeight: 400 }}>

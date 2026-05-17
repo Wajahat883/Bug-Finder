@@ -1,9 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid,
 } from "recharts";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, AlertTriangle } from "lucide-react";
 
 function fetchJson(url: string) {
   return fetch(url, { credentials: "include" }).then((r) => {
@@ -17,18 +19,27 @@ interface ScannerPerf { scanner_name: string; total_findings: number; avg_confid
 interface TopTarget { id: string; url: string; domain: string; total_findings: number; critical_findings: number; risk_score: number }
 
 export default function AnalyticsEnhanced() {
-  const { data: trends, isLoading: trendsLoading } = useQuery<TrendItem[]>({
+  const { data: trends, isLoading: trendsLoading, isError: trendsError } = useQuery<TrendItem[]>({
     queryKey: ["analytics-finding-trends"],
     queryFn: () => fetchJson("/api/analytics/finding-trends"),
   });
-  const { data: scannerPerf, isLoading: perfLoading } = useQuery<ScannerPerf[]>({
+  const { data: scannerPerf, isLoading: perfLoading, isError: perfError } = useQuery<ScannerPerf[]>({
     queryKey: ["analytics-scanner-perf"],
     queryFn: () => fetchJson("/api/analytics/scanner-performance"),
   });
-  const { data: topTargets, isLoading: targetsLoading } = useQuery<TopTarget[]>({
+  const { data: topTargets, isLoading: targetsLoading, isError: targetsError } = useQuery<TopTarget[]>({
     queryKey: ["analytics-top-targets"],
     queryFn: () => fetchJson("/api/analytics/top-vulnerable-targets"),
   });
+
+  const anyError = trendsError || perfError || targetsError;
+  if (anyError) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-4">
+      <AlertTriangle className="w-12 h-12 text-red-400" />
+      <p className="text-muted-foreground text-sm">Failed to load data. Please try again.</p>
+      <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
+    </div>
+  );
 
   return (
     <div className="space-y-6">
@@ -49,7 +60,10 @@ export default function AnalyticsEnhanced() {
         </CardHeader>
         <CardContent>
           {trendsLoading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <div className="p-6 space-y-4">
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-64 w-full rounded-lg" />
+            </div>
           ) : trends && trends.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
@@ -82,7 +96,10 @@ export default function AnalyticsEnhanced() {
         </CardHeader>
         <CardContent>
           {perfLoading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <div className="p-6 space-y-3">
+              <Skeleton className="h-8 w-64" />
+              {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded" />)}
+            </div>
           ) : scannerPerf && scannerPerf.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -123,7 +140,10 @@ export default function AnalyticsEnhanced() {
         </CardHeader>
         <CardContent>
           {targetsLoading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <div className="p-6 space-y-4">
+              <Skeleton className="h-8 w-48" />
+              <Skeleton className="h-64 w-full rounded-lg" />
+            </div>
           ) : topTargets && topTargets.length > 0 ? (
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">

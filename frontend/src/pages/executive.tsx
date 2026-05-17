@@ -6,6 +6,7 @@ import {
 import { format, parseISO, startOfMonth } from "date-fns";
 import { useState } from "react";
 import { Loader2, Activity, Clock, Zap, Target, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -322,7 +323,7 @@ function AiNarrativePanel({ scanId }: { scanId: string }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Executive() {
-  const { data: scans = [] } = useQuery<Array<Record<string, unknown>>>({
+  const { data: scans = [], isError: scansError } = useQuery<Array<Record<string, unknown>>>({
     queryKey: ["/api/scan-jobs"],
     queryFn: () =>
       fetch("/api/scan-jobs?page_size=100", { credentials: "include" })
@@ -395,6 +396,14 @@ export default function Executive() {
   const bySeverityRows: BySeverityRow[] = execMetrics?.by_severity ?? MOCK_BY_SEVERITY;
 
   const BAR_COLORS = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6"];
+
+  if (scansError) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-4">
+      <AlertTriangle className="w-12 h-12 text-red-400" />
+      <p className="text-muted-foreground text-sm">Failed to load data. Please try again.</p>
+      <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
+    </div>
+  );
 
   return (
     <div className="space-y-6">

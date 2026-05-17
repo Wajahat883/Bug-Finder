@@ -826,10 +826,18 @@ function OAuthIntegrationsPanel() {
 export default function Integrations() {
   const { toast } = useToast();
 
-  const { data } = useQuery<Record<string, any>>({
+  const { data, isError } = useQuery<Record<string, any>>({
     queryKey: ["/api/integrations"],
     queryFn: () => fetch("/api/integrations", { credentials: "include" }).then((r) => r.json()),
   });
+
+  if (isError) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-4">
+      <AlertTriangle className="w-12 h-12 text-red-400" />
+      <p className="text-muted-foreground text-sm">Failed to load data. Please try again.</p>
+      <Button variant="outline" size="sm" onClick={() => window.location.reload()}>Retry</Button>
+    </div>
+  );
 
   function testSlack() {
     fetch("/api/integrations/slack/test", { method: "POST", credentials: "include" })

@@ -155,6 +155,14 @@ app.use("/api", (req, res, next) => {
   next();
 });
 
+// Rate-limit CORS preflight requests to prevent OPTIONS flood attacks
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    return globalLimiter(req, res, next);
+  }
+  next();
+});
+
 // API key auth runs before routes — sets session if valid key provided
 app.use("/api", apiKeyAuth);
 app.use(ipAllowlistMiddleware);

@@ -697,7 +697,7 @@ export default function ApiKeys() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      </>}
+      </>)}
     </div>
   );
 }
