@@ -27,7 +27,7 @@ function formatSettings(s: Record<string, unknown>) {
   };
 }
 
-router.get("/settings", requireAuth, async (req, res) => {
+router.get("/settings", requireAdmin, async (req, res) => {
   try {
     const col_ = col("settings");
     let s = (await col_.find().toArray())[0] as Record<string, unknown> | undefined;
@@ -64,8 +64,6 @@ router.put("/settings", requireAdmin, async (req, res) => {
     for (const key of allowed) {
       if (body[key] !== undefined) updates[key] = body[key];
     }
-    // Update runtime env for AI model if changed
-    if (updates["ai_model"]) process.env["OPENCODE_MODEL"] = String(updates["ai_model"]);
 
     const col_ = col("settings");
     const existing = await col_.find().toArray() as Array<Record<string, unknown>>;

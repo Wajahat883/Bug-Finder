@@ -5,7 +5,7 @@ import { logger } from "../lib/logger";
 const router = Router();
 
 // GET /api/version — Current API version info
-router.get("/api/version", (_req, res) => {
+router.get("/version", (_req, res) => {
   res.json({
     version: "1.0.0",
     api_version: "v1",

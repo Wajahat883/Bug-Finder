@@ -8,7 +8,7 @@
  *   4. "default" (single-tenant mode when MULTI_TENANT=false)
  */
 import type { Request, Response, NextFunction } from "express";
-import { col } from "../lib/db";
+import { col, ObjectId } from "../lib/db";
 
 declare module "express" {
   interface Request {
@@ -43,7 +43,7 @@ export async function tenantMiddleware(req: Request, _res: Response, next: NextF
   const session = (req as unknown as { session: Record<string, unknown> }).session;
   if (session?.userId) {
     try {
-      const user = await col("users").findOne({ _id: session.userId }) as Record<string, unknown> | null;
+      const user = await col("users").findOne({ _id: new ObjectId(String(session.userId)) }) as Record<string, unknown> | null;
       if (user?.tenant_id) {
         req.tenantId = String(user.tenant_id);
         return next();

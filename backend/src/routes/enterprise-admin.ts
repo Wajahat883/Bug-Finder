@@ -149,6 +149,34 @@ router.get("/audit-log/logins", requireAuth, async (req, res) => {
   }
 });
 
+router.get("/admin/login-history", requireAuth, async (req, res) => {
+  try {
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userId = session.userId;
+    const isAdmin = session.role === "admin";
+    const query: Record<string, unknown> = { action: { $in: ["user.login", "user.login_failed", "user.saml_login", "user.logout"] } };
+    if (!isAdmin) query["user_id"] = userId;
+    const logs = await col("audit_log").find(query).sort({ created_at: -1 }).limit(100).toArray();
+    res.json(logs.map(l => {
+      const details = l["details"] as Record<string, unknown> | undefined;
+      const action = String(l["action"] ?? "");
+      return {
+        id: String(l["_id"]),
+        user_email: details?.["user_email"] ?? l["username"] ?? "unknown",
+        username: l["username"] ?? "unknown",
+        ip: l["ip"] ?? "",
+        user_agent: details?.["user_agent"] ?? "",
+        success: !action.includes("failed"),
+        action,
+        timestamp: l["created_at"],
+        created_at: l["created_at"],
+      };
+    }));
+  } catch (err) {
+    errorResponse(res, 500, "Internal Server Error");
+  }
+});
+
 // ── Audit Log Export ──────────────────────────────────────────────────────────
 
 router.get("/admin/audit-log/export", requireAdmin, async (req, res) => {
@@ -222,6 +250,109 @@ router.get("/admin/saml-config", requireAdmin, async (_req, res) => {
     login_url: "/api/auth/saml/login",
     enabled: !!(process.env["SAML_ENTRY_POINT"] ?? ""),
   });
+});
+
+// ── Tenant Management ─────────────────────────────────────────────────────────
+
+router.get("/admin/tenants", requireAdmin, async (req, res) => {
+  try {
+    const tenants = await col("tenants").find({}).sort({ created_at: -1 }).toArray() as Array<Record<string, unknown>>;
+    res.json(tenants.map(t => ({
+      id: String(t["_id"]),
+      name: t["name"],
+      owner_email: t["owner_email"],
+      active: t["active"] ?? true,
+      max_concurrent_scans: t["max_concurrent_scans"] ?? 5,
+      max_findings_stored: t["max_findings_stored"] ?? 10000,
+      storage_limit_gb: t["storage_limit_gb"] ?? 10,
+      created_at: t["created_at"],
+      updated_at: t["updated_at"],
+    })));
+  } catch (err) {
+    logger.error({ err }, "List tenants error");
+    errorResponse(res, 500, "Internal Server Error");
+  }
+});
+
+router.post("/admin/tenants", requireAdmin, async (req, res) => {
+  try {
+    const { name, owner_email } = req.body as { name?: string; owner_email?: string };
+    if (!name) return errorResponse(res, 400, "name is required");
+    const existing = await col("tenants").findOne({ name } as Record<string, unknown>);
+    if (existing) return errorResponse(res, 409, "A tenant with this name already exists");
+    const doc = {
+      name,
+      owner_email: owner_email ?? "",
+      active: true,
+      max_concurrent_scans: 5,
+      max_findings_stored: 10000,
+      storage_limit_gb: 10,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    const insert = await col("tenants").insertOne(doc);
+    const tenant = await col("tenants").findOne({ _id: insert.insertedId }) as Record<string, unknown>;
+    res.status(201).json({
+      id: String(tenant["_id"]),
+      name: tenant["name"],
+      owner_email: tenant["owner_email"],
+      active: tenant["active"],
+      max_concurrent_scans: tenant["max_concurrent_scans"],
+      max_findings_stored: tenant["max_findings_stored"],
+      storage_limit_gb: tenant["storage_limit_gb"],
+      created_at: tenant["created_at"],
+      updated_at: tenant["updated_at"],
+    });
+  } catch (err) {
+    logger.error({ err }, "Create tenant error");
+    errorResponse(res, 500, "Internal Server Error");
+  }
+});
+
+router.patch("/admin/tenants/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return errorResponse(res, 404, "Not Found");
+    const { active } = req.body as { active?: boolean };
+    const update: Record<string, unknown> = { updated_at: new Date() };
+    if (active !== undefined) update["active"] = active;
+    await col("tenants").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: update });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Update tenant error");
+    errorResponse(res, 500, "Internal Server Error");
+  }
+});
+
+router.delete("/admin/tenants/:id", requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return errorResponse(res, 404, "Not Found");
+    await col("tenants").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Delete tenant error");
+    errorResponse(res, 500, "Internal Server Error");
+  }
+});
+
+router.put("/admin/tenants/:tenantId/quota", requireAdmin, async (req, res) => {
+  try {
+    const { tenantId } = req.params;
+    if (!ObjectId.isValid(tenantId)) return errorResponse(res, 404, "Not Found");
+    const { max_concurrent_scans, max_findings_stored, storage_limit_gb } = req.body as {
+      max_concurrent_scans?: number; max_findings_stored?: number; storage_limit_gb?: number;
+    };
+    const update: Record<string, unknown> = { updated_at: new Date() };
+    if (max_concurrent_scans !== undefined) update["max_concurrent_scans"] = max_concurrent_scans;
+    if (max_findings_stored !== undefined) update["max_findings_stored"] = max_findings_stored;
+    if (storage_limit_gb !== undefined) update["storage_limit_gb"] = storage_limit_gb;
+    await col("tenants").updateOne({ _id: new ObjectId(tenantId) } as Record<string, unknown>, { $set: update });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Update tenant quota error");
+    errorResponse(res, 500, "Internal Server Error");
+  }
 });
 
 export default router;

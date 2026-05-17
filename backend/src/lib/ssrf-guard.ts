@@ -62,6 +62,19 @@ export function checkSsrf(targetUrl: string): SsrfCheckResult {
   // Block IPv6 private ranges
   if (hostname.startsWith("[")) {
     const ipv6 = hostname.slice(1, -1);
+    // Handle IPv6-mapped IPv4 addresses (e.g., [::ffff:169.254.169.254])
+    if (ipv6.toLowerCase().startsWith("::ffff:")) {
+      const ipv4 = ipv6.slice(7);
+      for (const range of PRIVATE_RANGES) {
+        if (range.test(ipv4)) {
+          return { allowed: false, reason: `Blocked IPv6-mapped IPv4 private range: ${ipv4}` };
+        }
+      }
+      if (ipv4 === "0.0.0.0" || ipv4 === "255.255.255.255") {
+        return { allowed: false, reason: `Blocked special IP: ${ipv4}` };
+      }
+      return { allowed: true };
+    }
     for (const range of PRIVATE_RANGES) {
       if (range.test(ipv6)) {
         return { allowed: false, reason: `Blocked private IPv6: ${ipv6}` };

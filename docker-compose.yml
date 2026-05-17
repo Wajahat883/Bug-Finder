@@ -169,6 +169,10 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@bugfinder.io}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@bugfinder.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      CREDENTIAL_VAULT_KEY: ${CREDENTIAL_VAULT_KEY:-dev-credential-vault-key-min-32-chars!}
+      WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:-dev-webhook-secret-key-32-chars!!}
       SAML_ENTRY_POINT: ${SAML_ENTRY_POINT:-}
       SAML_CALLBACK_URL: ${SAML_CALLBACK_URL:-}
       SAML_ISSUER: ${SAML_ISSUER:-bugfinder}

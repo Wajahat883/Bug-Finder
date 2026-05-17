@@ -1073,58 +1073,6 @@ router.post("/findings/:id/assign", requireAuth, async (req, res) => {
   } catch(err) { logger.error({err},"assign error"); res.status(500).json({ error: "Internal server error" }); }
 });
 
-// ── Enterprise: Bulk operations (PATCH) ──────────────────────────────────────
-router.patch("/findings/bulk", requireAuth, async (req, res) => {
-  try {
-    const { ids, action, assignee_id, status, risk_accepted, risk_reason } = req.body as {
-      ids?: string[];
-      action?: string;
-      assignee_id?: string;
-      status?: string;
-      risk_accepted?: boolean;
-      risk_reason?: string;
-    };
-    if (!ids || !Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: "ids array is required" });
-    if (ids.length > 100) return res.status(400).json({ error: "Cannot bulk-update more than 100 findings at once" });
-
-    const objectIds = ids.map(id => new ObjectId(id));
-    const update: Record<string, unknown> = { updated_at: new Date() };
-
-    if (action === "assign" && assignee_id) {
-      update["assignee_id"] = assignee_id;
-    } else if (action === "status" && status) {
-      update["status"] = status;
-    } else if (action === "accept_risk") {
-      update["risk_accepted"] = true;
-      update["risk_accepted_at"] = new Date();
-      update["risk_reason"] = risk_reason ?? "Risk accepted via bulk operation";
-      update["triage_status"] = "accepted";
-    } else if (action === "retest") {
-      update["retest_status"] = "pending";
-    } else if (action === "delete") {
-      // Soft delete
-      await col("findings").updateMany(
-        { _id: { $in: objectIds } } as Record<string, unknown>,
-        { $set: { deleted: true, deleted_at: new Date() } }
-      );
-      await auditFromReq(req, "finding.bulk_delete", "findings", ids.join(","), { count: ids.length });
-      return res.json({ ok: true, affected: ids.length });
-    } else {
-      return res.status(400).json({ error: "action must be assign, status, accept_risk, retest, or delete" });
-    }
-
-    await col("findings").updateMany(
-      { _id: { $in: objectIds } } as Record<string, unknown>,
-      { $set: update }
-    );
-    await auditFromReq(req, `finding.bulk_${action}`, "findings", ids.join(","), { count: ids.length, action });
-    res.json({ ok: true, affected: ids.length });
-  } catch (err) {
-    logger.error({ err }, "Bulk findings update error");
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
-
 // ── Enterprise: Assign finding to a user ─────────────────────────────────────
 router.patch("/findings/:id/assign", requireAuth, async (req, res) => {
   try {

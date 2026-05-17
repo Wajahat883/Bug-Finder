@@ -267,7 +267,7 @@ export default function ReportSchedules() {
 
   const runNow = useMutation({
     mutationFn: (id: string) =>
-      fetch(`/api/report-schedules/${id}/run`, { method: "POST", credentials: "include" }).then(r => r.json()),
+      fetch(`/api/report-schedules/${id}/send-now`, { method: "POST", credentials: "include" }).then(r => r.json()),
     onSuccess: (d) => toast({ title: d.ok ? "Report run triggered" : d.message ?? "Run failed" }),
     onError: () => toast({ title: "Failed to trigger run", variant: "destructive" }),
   });

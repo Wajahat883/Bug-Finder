@@ -31,7 +31,7 @@ async function getSaml() {
 }
 
 // GET /api/auth/saml/metadata — SP metadata for IdP configuration
-router.get("/api/auth/saml/metadata", async (req, res) => {
+router.get("/auth/saml/metadata", async (req, res) => {
   const saml = await getSaml();
   if (!saml) {
     return errorResponse(res, 501, "Not Implemented", "SAML is not enabled. Install @node-saml/node-saml.");
@@ -45,7 +45,7 @@ router.get("/api/auth/saml/metadata", async (req, res) => {
 });
 
 // GET /api/auth/saml/login — redirect to IdP for authentication
-router.get("/api/auth/saml/login", async (req, res) => {
+router.get("/auth/saml/login", async (req, res) => {
   const saml = await getSaml();
   if (!saml) {
     return errorResponse(res, 501, "Not Implemented", "SAML is not enabled.");
@@ -60,7 +60,7 @@ router.get("/api/auth/saml/login", async (req, res) => {
 });
 
 // POST /api/auth/saml/callback — IdP posts SAML response here
-router.post("/api/auth/saml/callback", async (req, res) => {
+router.post("/auth/saml/callback", async (req, res) => {
   const saml = await getSaml();
   if (!saml) {
     return errorResponse(res, 501, "Not Implemented", "SAML is not enabled.");

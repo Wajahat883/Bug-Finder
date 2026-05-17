@@ -50,7 +50,7 @@ export function requireFeatureFlag(flagName: string) {
 const router = Router();
 
 // GET /api/feature-flags — list all flags (admin only)
-router.get("/api/feature-flags", requireAdmin, async (_req, res) => {
+router.get("/feature-flags", requireAdmin, async (_req, res) => {
   try {
     const flags = await listFlags();
     res.json(flags);
@@ -61,7 +61,7 @@ router.get("/api/feature-flags", requireAdmin, async (_req, res) => {
 });
 
 // GET /api/feature-flags/me — flags enabled for current user (any auth user)
-router.get("/api/feature-flags/me", requireAuth, async (req, res) => {
+router.get("/feature-flags/me", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const allFlags = await listFlags();
@@ -80,7 +80,7 @@ router.get("/api/feature-flags/me", requireAuth, async (req, res) => {
 });
 
 // PATCH /api/feature-flags/:name — update a flag (admin only)
-router.patch("/api/feature-flags/:name", requireAdmin, async (req, res) => {
+router.patch("/feature-flags/:name", requireAdmin, async (req, res) => {
   try {
     const name = String(req.params["name"]);
     const { enabled, allowed_roles, allowed_user_ids, rollout_percent, description } = req.body as {
@@ -108,7 +108,7 @@ router.patch("/api/feature-flags/:name", requireAdmin, async (req, res) => {
 });
 
 // POST /api/feature-flags — create a new flag (admin only)
-router.post("/api/feature-flags", requireAdmin, async (req, res) => {
+router.post("/feature-flags", requireAdmin, async (req, res) => {
   try {
     const { name, enabled = false, description, allowed_roles, rollout_percent } = req.body as {
       name: string; enabled?: boolean; description?: string;
@@ -126,7 +126,7 @@ router.post("/api/feature-flags", requireAdmin, async (req, res) => {
 });
 
 // GET /api/feature-flags/status — current flag values for the authenticated user
-router.get("/api/feature-flags/status", requireAuth, async (req, res) => {
+router.get("/feature-flags/status", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string; tenantId?: string } }).session;
     const allFlags = await listFlags();

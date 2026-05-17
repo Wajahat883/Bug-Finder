@@ -245,6 +245,7 @@ router.get("/auth/me", async (req, res) => {
       two_fa_enabled: user.two_fa_enabled ?? false,
     });
   } catch (err) {
+    logger.error({ err }, "Auth me error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -78,13 +78,12 @@ app.use(
 
 app.use(cors({
   origin: (origin, cb) => {
-    // No origin = same-origin request or server-to-server — always allow
     if (!origin) return cb(null, true);
-    // In dev (no ALLOWED_ORIGINS set) — allow all origins so frontend works on any port
-    if (allowedOrigins.length === 0) return cb(null, true);
-    // In prod — only allow explicitly listed origins
+    if (allowedOrigins.length === 0) {
+      if (isProdMode) return cb(null, false);
+      return cb(null, true);
+    }
     if (allowedOrigins.includes(origin)) return cb(null, true);
-    // Blocked — return null (no CORS headers) not an Error (which crashes response)
     return cb(null, false);
   },
   credentials: true,
@@ -132,7 +131,7 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 // CSRF: double-submit cookie pattern — sets __csrf cookie, validates X-CSRF-Token header on mutating requests
 app.use("/api", (req, res, next) => {
   const skipMethods = ["GET", "HEAD", "OPTIONS"];
-  const skipPaths = ["/api/auth/login", "/api/auth/register", "/api/auth/saml", "/api/webhooks"];
+  const skipPaths = ["/api/auth/login", "/api/auth/register", "/api/auth/saml"];
 
   // Issue token on every request (SameSite=Lax already mitigates most CSRF, this adds defense-in-depth)
   if (!req.cookies?.["__csrf"]) {

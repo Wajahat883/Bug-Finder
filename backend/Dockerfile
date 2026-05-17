@@ -15,6 +15,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache curl
+
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY backend ./backend
 

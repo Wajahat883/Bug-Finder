@@ -19,7 +19,7 @@ function getSession(req: any) {
 
 // ── PHASE 1: Triage a finding (mark FP, confirm, suppress, needs-review) ─────
 
-router.patch("/api/findings/:id/triage", requireAuth, async (req, res) => {
+router.patch("/findings/:id/triage", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const session = getSession(req);
@@ -114,7 +114,7 @@ router.patch("/api/findings/:id/triage", requireAuth, async (req, res) => {
 
 // ── PHASE 2: FP review queue ──────────────────────────────────────────────────
 
-router.get("/api/findings/false-positives", requireAuth, async (req, res) => {
+router.get("/findings/false-positives", requireAuth, async (req, res) => {
   try {
     const session = getSession(req);
     const status = req.query["status"] as string ?? "all";
@@ -155,7 +155,7 @@ router.get("/api/findings/false-positives", requireAuth, async (req, res) => {
 
 // ── PHASE 2: Approve / reject a FP (senior/admin only) ───────────────────────
 
-router.post("/api/findings/:id/triage/review", requireAuth, async (req, res) => {
+router.post("/findings/:id/triage/review", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const session = getSession(req);
@@ -203,7 +203,7 @@ router.post("/api/findings/:id/triage/review", requireAuth, async (req, res) => 
 
 // ── PHASE 2: Suppress a finding ───────────────────────────────────────────────
 
-router.post("/api/findings/:id/suppress", requireAuth, async (req, res) => {
+router.post("/findings/:id/suppress", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const session = getSession(req);
@@ -240,7 +240,7 @@ router.post("/api/findings/:id/suppress", requireAuth, async (req, res) => {
 
 // ── PHASE 2: Triage history for a finding ────────────────────────────────────
 
-router.get("/api/findings/:id/triage/history", requireAuth, async (req, res) => {
+router.get("/findings/:id/triage/history", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const history = await col("finding_triage_history")
@@ -257,7 +257,7 @@ router.get("/api/findings/:id/triage/history", requireAuth, async (req, res) => 
 
 // ── PHASE 3: FN risk score for a scan ─────────────────────────────────────────
 
-router.get("/api/scan-jobs/:id/fn-risk", requireAuth, async (req, res) => {
+router.get("/scan-jobs/:id/fn-risk", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { id };
@@ -314,7 +314,7 @@ router.get("/api/scan-jobs/:id/fn-risk", requireAuth, async (req, res) => {
 
 // ── PHASE 3: Coverage map for a scan ─────────────────────────────────────────
 
-router.get("/api/scan-jobs/:id/coverage-map", requireAuth, async (req, res) => {
+router.get("/scan-jobs/:id/coverage-map", requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { id };
@@ -373,7 +373,7 @@ router.get("/api/scan-jobs/:id/coverage-map", requireAuth, async (req, res) => {
 
 // ── PHASE 3: Manual finding submission ───────────────────────────────────────
 
-router.post("/api/findings/manual", requireAuth, async (req, res) => {
+router.post("/findings/manual", requireAuth, async (req, res) => {
   try {
     const session = getSession(req);
     const { scan_job_id, title, severity, category, endpoint, description, evidence, poc, source } = req.body;
@@ -430,7 +430,7 @@ router.post("/api/findings/manual", requireAuth, async (req, res) => {
 
 // ── PHASE 3: Scanner feedback (FN improvement) ───────────────────────────────
 
-router.post("/api/scanner/feedback", requireAuth, async (req, res) => {
+router.post("/scanner/feedback", requireAuth, async (req, res) => {
   try {
     const session = getSession(req);
     const { finding_id, missed_by_module, suggested_payload, endpoint_pattern, notes } = req.body;
@@ -456,7 +456,7 @@ router.post("/api/scanner/feedback", requireAuth, async (req, res) => {
 
 // ── PHASE 4: AI-assisted FP probability assessment ────────────────────────────
 
-router.post("/api/ai/triage/:findingId", requireAuth, async (req, res) => {
+router.post("/ai/triage/:findingId", requireAuth, async (req, res) => {
   try {
     const { findingId } = req.params;
     const query = ObjectId.isValid(findingId) ? { _id: new ObjectId(findingId) } : { id: findingId };
@@ -512,7 +512,7 @@ router.post("/api/ai/triage/:findingId", requireAuth, async (req, res) => {
 
 // ── PHASE 5: FP/FN stats for metrics dashboard ───────────────────────────────
 
-router.get("/api/triage/stats", requireAuth, async (req, res) => {
+router.get("/triage/stats", requireAuth, async (req, res) => {
   try {
     const session = getSession(req);
     const userFilter: Record<string, unknown> = session.role !== "admin" ? { user_id: session.userId } : {};
@@ -599,7 +599,7 @@ router.get("/api/triage/stats", requireAuth, async (req, res) => {
 
 // ── PHASE 5: FP expiry job endpoint (called by cron) ─────────────────────────
 
-router.post("/api/triage/run-expiry-job", requireAuth, requireRole("admin"), async (req, res) => {
+router.post("/triage/run-expiry-job", requireAuth, requireRole("admin"), async (req, res) => {
   try {
     const now = new Date();
     const expired = await col("findings").find({

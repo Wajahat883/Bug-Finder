@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
+import { checkSsrf } from "../lib/ssrf-guard";
 
 const router = Router();
 
@@ -67,7 +68,10 @@ router.get("/targets/:id", requireAuth, async (req, res) => {
     const { id } = req.params;
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
-    const target = (await col("targets").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+
+    const target = (await col("targets").findOne({ _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!target) return res.status(404).json({ error: "Target not found" });
     res.json(formatTarget(target));
   } catch (err) {
@@ -93,9 +97,13 @@ router.post("/targets/bulk-import", requireAuth, async (req, res) => {
       try {
         const parsed = new URL(url.startsWith("http") ? url : `https://${url}`);
         const domain = parsed.hostname;
+        const normalizedUrl = parsed.origin;
+
+        const ssrfResult = checkSsrf(normalizedUrl);
+        if (!ssrfResult.allowed) { skipped++; continue; }
+
         // Require at least one dot in hostname to filter out bare single-word hostnames
         if (!domain.includes(".")) { skipped++; continue; }
-        const normalizedUrl = parsed.origin;
 
         const existing = await col("targets").findOne({ domain } as Record<string, unknown>);
         if (existing) {
@@ -162,6 +170,23 @@ router.patch("/targets/:id/tags", requireAuth, async (req, res) => {
     res.json(formatTarget(updated));
   } catch (err) {
     logger.error({ err }, "Update target tags error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+router.delete("/targets/:id", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+
+    const result = await col("targets").deleteOne({ _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>);
+    if (result.deletedCount === 0) return res.status(404).json({ error: "Target not found or access denied" });
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "Delete target error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

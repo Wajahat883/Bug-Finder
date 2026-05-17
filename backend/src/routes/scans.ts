@@ -283,41 +283,62 @@ router.get("/scan-jobs/:id/attack-surface", async (req, res) => {
   }
 });
 
+router.get("/scan-jobs/:id/engines", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!job) return res.status(404).json({ error: "Scan job not found" });
+    const engines = (job["engines"] as Array<Record<string, unknown>>) ?? [];
+    res.json(engines.map((e: Record<string, unknown>) => ({
+      engine: e["engine"] ?? e["name"] ?? "unknown",
+      status: e["status"] ?? "pending",
+      findings: e["findings"] ?? 0,
+      started_at: e["started_at"] ?? null,
+      ended_at: e["ended_at"] ?? null,
+      error: e["error"] ?? null,
+    })));
+  } catch (err) {
+    logger.error({ err }, "Engines list error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 
 function formatFinding(f: Record<string, unknown>) {
-  const redacted = redactObject(f, FINDING_SENSITIVE_FIELDS);
-  const cweId = String(redacted["cwe_id"] ?? "");
-  const complianceTags = cweId ? getComplianceTags(cweId) : (redacted["compliance_tags"] ?? []);
-  const createdAt = redacted["created_at"] as Date | string | null;
+  const { obj: fRedacted } = redactObject(f, FINDING_SENSITIVE_FIELDS);
+  const cweId = String(fRedacted["cwe_id"] ?? "");
+  const complianceTags = cweId ? getComplianceTags(cweId) : (fRedacted["compliance_tags"] ?? []);
+  const createdAt = fRedacted["created_at"] as Date | string | null;
   const daysOpen = createdAt
     ? Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000)
     : null;
   return {
-    id: String(redacted["_id"] ?? ""),
-    scan_job_id: redacted["scan_job_id"] ? String(redacted["scan_job_id"]) : null,
-    title: redacted["title"] ?? "Untitled",
-    category: redacted["category"] ?? "",
-    severity: redacted["severity"] ?? "low",
-    validation_status: redacted["validation_status"] ?? "needs_review",
-    confidence: redacted["confidence"] ?? 0,
-    endpoint: redacted["endpoint"] ?? "",
-    description: redacted["description"] ?? "",
-    evidence: redacted["evidence"] ?? null,
-    recommended_fix: redacted["recommended_fix"] ?? null,
-    cvss_score: redacted["cvss_score"] ?? null,
-    cwe_id: redacted["cwe_id"] ?? null,
-    risk_score: redacted["risk_score"] ?? 0,
-    scanner_name: redacted["scanner_name"] ?? "",
-    created_at: redacted["created_at"] ?? null,
-    target_url: redacted["target_url"] ?? null,
+    id: String(fRedacted["_id"] ?? ""),
+    scan_job_id: fRedacted["scan_job_id"] ? String(fRedacted["scan_job_id"]) : null,
+    title: fRedacted["title"] ?? "Untitled",
+    category: fRedacted["category"] ?? "",
+    severity: fRedacted["severity"] ?? "low",
+    validation_status: fRedacted["validation_status"] ?? "needs_review",
+    confidence: fRedacted["confidence"] ?? 0,
+    endpoint: fRedacted["endpoint"] ?? "",
+    description: fRedacted["description"] ?? "",
+    evidence: fRedacted["evidence"] ?? null,
+    recommended_fix: fRedacted["recommended_fix"] ?? null,
+    cvss_score: fRedacted["cvss_score"] ?? null,
+    cwe_id: fRedacted["cwe_id"] ?? null,
+    risk_score: fRedacted["risk_score"] ?? 0,
+    scanner_name: fRedacted["scanner_name"] ?? "",
+    created_at: fRedacted["created_at"] ?? null,
+    target_url: fRedacted["target_url"] ?? null,
     compliance_tags: complianceTags,
     days_open: daysOpen,
-    is_duplicate: redacted["is_duplicate"] ?? false,
-    duplicate_of: redacted["duplicate_of"] ?? null,
-    retest_status: redacted["retest_status"] ?? null,
-    assigned_to: redacted["assigned_to"] ?? null,
-    notes: redacted["notes"] ?? null,
-    fp_reason: redacted["fp_reason"] ?? null,
+    is_duplicate: fRedacted["is_duplicate"] ?? false,
+    duplicate_of: fRedacted["duplicate_of"] ?? null,
+    retest_status: fRedacted["retest_status"] ?? null,
+    assigned_to: fRedacted["assigned_to"] ?? null,
+    notes: fRedacted["notes"] ?? null,
+    fp_reason: fRedacted["fp_reason"] ?? null,
   };
 }
 

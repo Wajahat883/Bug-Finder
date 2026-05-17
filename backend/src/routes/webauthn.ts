@@ -19,7 +19,7 @@ function getSession(req: unknown) {
 }
 
 // POST /api/webauthn/register/begin — start passkey registration
-router.post("/api/webauthn/register/begin", requireAuth, async (req, res) => {
+router.post("/webauthn/register/begin", requireAuth, async (req, res) => {
   try {
     let generateRegistrationOptions: (opts: unknown) => Promise<unknown>;
     try {
@@ -63,7 +63,7 @@ router.post("/api/webauthn/register/begin", requireAuth, async (req, res) => {
 });
 
 // POST /api/webauthn/register/complete — finish passkey registration
-router.post("/api/webauthn/register/complete", requireAuth, async (req, res) => {
+router.post("/webauthn/register/complete", requireAuth, async (req, res) => {
   try {
     let verifyRegistrationResponse: (opts: unknown) => Promise<unknown>;
     try {
@@ -113,7 +113,7 @@ router.post("/api/webauthn/register/complete", requireAuth, async (req, res) => 
 });
 
 // POST /api/webauthn/authenticate/begin — start passkey login
-router.post("/api/webauthn/authenticate/begin", async (req, res) => {
+router.post("/webauthn/authenticate/begin", async (req, res) => {
   try {
     let generateAuthenticationOptions: (opts: unknown) => Promise<unknown>;
     try {
@@ -149,7 +149,7 @@ router.post("/api/webauthn/authenticate/begin", async (req, res) => {
 });
 
 // POST /api/webauthn/authenticate/complete — finish passkey login
-router.post("/api/webauthn/authenticate/complete", async (req, res) => {
+router.post("/webauthn/authenticate/complete", async (req, res) => {
   try {
     let verifyAuthenticationResponse: (opts: unknown) => Promise<unknown>;
     try {
@@ -207,7 +207,7 @@ router.post("/api/webauthn/authenticate/complete", async (req, res) => {
 });
 
 // GET /api/webauthn/credentials — list user's registered passkeys
-router.get("/api/webauthn/credentials", requireAuth, async (req, res) => {
+router.get("/webauthn/credentials", requireAuth, async (req, res) => {
   try {
     const session = getSession(req);
     const creds = await col("webauthn_credentials")
@@ -221,7 +221,7 @@ router.get("/api/webauthn/credentials", requireAuth, async (req, res) => {
 });
 
 // DELETE /api/webauthn/credentials/:id — remove a passkey
-router.delete("/api/webauthn/credentials/:id", requireAuth, async (req, res) => {
+router.delete("/webauthn/credentials/:id", requireAuth, async (req, res) => {
   try {
     const session = getSession(req);
     await col("webauthn_credentials").deleteOne({

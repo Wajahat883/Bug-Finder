@@ -455,6 +455,41 @@ router.post("/compliance/evidence/:controlId", requireAuth, async (req, res) => 
   }
 });
 
+router.get("/compliance/controls/:controlId/findings", requireAuth, async (req, res) => {
+  try {
+    const { controlId } = req.params;
+    const sess = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = sess?.role !== "admin" ? { user_id: sess?.userId ?? null } : {};
+
+    const findings = await col("findings").find({
+      ...userFilter,
+      status: { $nin: ["resolved", "false_positive"] },
+    }).toArray() as Array<Record<string, unknown>>;
+
+    const matched = findings.filter(f => {
+      const key = normaliseCategoryKey(String(f["category"] ?? ""));
+      const mapping = CONTROL_MAPPINGS[key];
+      if (!mapping) return false;
+      return mapping.soc2.includes(controlId) ||
+             mapping.iso27001.includes(controlId) ||
+             mapping.pci.includes(controlId);
+    });
+
+    res.json(matched.map(f => ({
+      id: String(f["_id"]),
+      title: f["title"] ?? "",
+      severity: f["severity"] ?? "low",
+      status: f["status"] ?? f["validation_status"] ?? "open",
+      endpoint: f["endpoint"] ?? "",
+      category: f["category"] ?? "",
+      created_at: f["created_at"] ?? null,
+    })));
+  } catch (err) {
+    logger.error({ err }, "Controls findings error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // Helper: generate attestation data for a framework
 async function generateAttestationData(
   framework: string,

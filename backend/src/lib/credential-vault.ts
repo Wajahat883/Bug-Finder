@@ -22,10 +22,12 @@ const ALGO = "aes-256-gcm";
 function getVaultKey(): Buffer {
   const raw = process.env["CREDENTIAL_VAULT_KEY"] ?? "";
   if (raw.length >= 32) {
-    // Use the first 32 bytes of the key as-is
     return Buffer.from(raw.slice(0, 32), "utf8");
   }
-  // Derive a 32-byte key from whatever is provided (or empty = dev mode)
+  if (!raw) {
+    const { logger } = require("./logger");
+    logger.warn("CREDENTIAL_VAULT_KEY not set — using insecure fallback key. Set the env var for production use.");
+  }
   return createHash("sha256").update(raw || "bug-finder-dev-vault-key-insecure").digest();
 }
 

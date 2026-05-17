@@ -77,6 +77,10 @@ export async function getSecret(key: string): Promise<string> {
 export async function getVaultKey(): Promise<Buffer> {
   const raw = await getSecret("CREDENTIAL_VAULT_KEY");
   if (raw.length >= 32) return Buffer.from(raw.slice(0, 32), "utf8");
+  if (!raw) {
+    const { logger } = require("./logger");
+    logger.warn("CREDENTIAL_VAULT_KEY secret not set — using insecure fallback key. Set the secret for production use.");
+  }
   return createHash("sha256").update(raw || "bug-finder-dev-vault-key-insecure").digest();
 }
 

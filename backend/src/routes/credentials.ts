@@ -12,6 +12,7 @@ import { z } from "zod";
 import { requireAuth } from "../middlewares/rbac";
 import { storeCredential, loadCredential, listCredentialMeta, deleteCredential } from "../lib/credential-vault";
 import { col } from "../lib/db";
+import { checkSsrf } from "../lib/ssrf-guard";
 import { ObjectId } from "mongodb";
 
 const storeCredentialSchema = z.object({
@@ -106,6 +107,12 @@ router.post("/credentials/:id/test", requireAuth, async (req: AuthenticatedReque
     const { target_url } = req.body as { target_url?: string };
     if (!target_url) {
       res.status(400).json({ error: "target_url is required for testing" });
+      return;
+    }
+
+    const ssrfResult = checkSsrf(target_url);
+    if (!ssrfResult.allowed) {
+      res.status(400).json({ error: ssrfResult.reason ?? "SSRF blocked" });
       return;
     }
 

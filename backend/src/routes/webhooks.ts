@@ -17,8 +17,13 @@ const createWebhookSchema = z.object({
 const patchWebhookSchema = z.object({ enabled: z.boolean() });
 
 // AES-256-GCM key derived from env var, padded/truncated to exactly 32 bytes
+const WEBHOOK_SECRET = process.env["WEBHOOK_SECRET_KEY"];
+if (!WEBHOOK_SECRET) {
+  const { logger } = require("../lib/logger");
+  logger.warn("WEBHOOK_SECRET_KEY not set — using insecure fallback key. Set the env var for production use.");
+}
 const WEBHOOK_KEY = Buffer.from(
-  (process.env["WEBHOOK_SECRET_KEY"] ?? "bugfinder-webhook-key-32chars!!")
+  (WEBHOOK_SECRET ?? "bugfinder-webhook-key-32chars!!")
     .slice(0, 32)
     .padEnd(32, "0")
 );
@@ -258,10 +263,13 @@ startRetryRunner();
 const router = Router();
 
 // List all webhooks (mask secret)
-router.get("/webhooks", requireAuth, async (_req, res) => {
+router.get("/webhooks", requireAuth, async (req, res) => {
   try {
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const query: Record<string, unknown> = {};
+    if (session.role !== "admin") query["user_id"] = session.userId ?? null;
     const hooks = (await col("webhooks")
-      .find({})
+      .find(query)
       .sort({ created_at: -1 })
       .toArray()) as Array<Record<string, unknown>>;
     res.json(

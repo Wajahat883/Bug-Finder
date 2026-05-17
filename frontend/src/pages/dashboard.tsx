@@ -185,12 +185,6 @@ export default function Dashboard() {
   }, [queryClient]);
 
   const [trendDays, setTrendDays] = useState(90);
-  const { data: trendRaw } = useQuery({
-    queryKey: ["/api/risk-trend", trendDays],
-    queryFn: () =>
-      fetch(`/api/risk-trend?days=${trendDays}`, { credentials: "include" }).then(r => r.json()),
-    refetchInterval: 60000,
-  });
 
   const scans: any[] = Array.isArray(scansResp)
     ? scansResp
@@ -473,11 +467,10 @@ export default function Dashboard() {
 
       {/* Risk Score Trend */}
       {(() => {
-        const trendData: { date: string; score: number }[] = Array.isArray(trendRaw)
-          ? trendRaw
-          : Array.isArray((trendRaw as any)?.data)
-          ? (trendRaw as any).data
-          : [];
+        const rawTrend = (s as any)?.risk_trend ?? [];
+        const trendData: { date: string; score: number }[] = (Array.isArray(rawTrend) ? rawTrend : [])
+          .map((item: any) => ({ date: item.date, score: Math.round((Number(item.risk) || 0) / 10) }))
+          .filter((item: any) => item.date != null);
         return (
           <div
             className="rounded-lg border p-4 flex flex-col"
