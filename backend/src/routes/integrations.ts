@@ -582,7 +582,7 @@ router.post("/integrations/linear/create-issue", requireAuth, async (req, res) =
 
 export async function triggerPagerDutyIncident(finding: Record<string, unknown>): Promise<void> {
   const conn = await col("integration_connections").findOne({ service: "pagerduty" }) as Record<string, unknown> | null;
-  const routingKey = String(conn?.["routing_key"] ?? "") || process.env["PAGERDUTY_ROUTING_KEY"] ?? "";
+  const routingKey = (String(conn?.["routing_key"] ?? "") || process.env["PAGERDUTY_ROUTING_KEY"]) ?? "";
   if (!routingKey) return;
 
   await fetch("https://events.pagerduty.com/v2/enqueue", {
