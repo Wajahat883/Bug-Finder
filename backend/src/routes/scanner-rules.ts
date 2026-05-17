@@ -6,6 +6,24 @@ import { ScanFinding } from "../services/scanner/types";
 import { requireAuth, requireAdmin } from "../middlewares/rbac";
 import { runCustomRules as runCustomRulesEngine } from "../services/scanner/custom-rules";
 
+interface ScannerRule {
+  name: string;
+  category?: string;
+  severity?: string;
+  method: string;
+  pathPattern: string;
+  headerCheck?: string | null;
+  bodyCheck?: string | null;
+  payload?: string | null;
+  expectedStatus?: number | null;
+  expectedResponse?: string | null;
+  failIfFound?: boolean;
+  cwe_id?: string | null;
+  description?: string;
+  remediation?: string;
+  enabled?: boolean;
+}
+
 const router = Router();
 router.use(requireAuth);
 router.use(requireAdmin);
@@ -34,7 +52,7 @@ router.get("/scanner-rules", async (_req, res) => {
 // GET /scanner/rules/:id — Get single rule
 router.get("/scanner-rules/:id", async (req, res) => {
   try {
-    const rule = await col("custom_scanner_rules").findOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    const rule = await col("custom_scanner_rules").findOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!rule) return res.status(404).json({ error: "Rule not found" });
     res.json({ ...rule, id: String(rule["_id"]) });
   } catch (err) {
@@ -90,7 +108,7 @@ router.patch("/scanner-rules/:id", async (req, res) => {
     if (updates.description) set["description"] = updates.description;
     if (updates.remediation) set["remediation"] = updates.remediation;
     if (updates.enabled !== undefined) set["enabled"] = updates.enabled;
-    await col("custom_scanner_rules").updateOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>, { $set: set });
+    await col("custom_scanner_rules").updateOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>, { $set: set });
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err }, "Update rule error");
@@ -101,7 +119,7 @@ router.patch("/scanner-rules/:id", async (req, res) => {
 // DELETE /scanner/rules/:id — Delete rule
 router.delete("/scanner-rules/:id", async (req, res) => {
   try {
-    await col("custom_scanner_rules").deleteOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>);
+    await col("custom_scanner_rules").deleteOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete rule" });
@@ -141,7 +159,7 @@ router.post("/scanner-rules/test", async (req, res) => {
         findings.push({
           title: `[Custom Rule] ${rule.name}`,
           category: rule.category ?? "Custom",
-          severity: rule.severity ?? "medium",
+          severity: (rule.severity ?? "medium") as import("../services/scanner/types").Severity,
           endpoint: url,
           description: rule.description || `Custom scanner rule detected: ${rule.name}. Status: ${response.status}`,
           evidence: `Status: ${response.status}, Body snippet: ${body.slice(0, 200)}`,

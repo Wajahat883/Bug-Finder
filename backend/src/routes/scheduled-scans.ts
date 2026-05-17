@@ -58,9 +58,9 @@ router.post("/scheduled-scans", async (req, res) => {
 router.patch("/scheduled-scans/:id", async (req, res) => {
   try {
     const { enabled } = req.body as { enabled?: boolean };
-    await col("scheduled_scans").updateOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>, { $set: { enabled: !!enabled, updated_at: new Date() } });
+    await col("scheduled_scans").updateOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>, { $set: { enabled: !!enabled, updated_at: new Date() } });
     if (enabled) {
-      const scan = await col("scheduled_scans").findOne({ _id: new ObjectId(req.params.id) }) as Record<string, unknown>;
+      const scan = await col("scheduled_scans").findOne({ _id: new ObjectId(String(req.params.id)) }) as Record<string, unknown>;
       if (scan) scheduleJob(scan as any);
     } else {
       unscheduleJob(req.params.id);
@@ -73,7 +73,7 @@ router.patch("/scheduled-scans/:id", async (req, res) => {
 router.delete("/scheduled-scans/:id", async (req, res) => {
   try {
     unscheduleJob(req.params.id);
-    await col("scheduled_scans").deleteOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>);
+    await col("scheduled_scans").deleteOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>);
     res.json({ ok: true });
   } catch (err) { logger.error({ err }, "Delete scheduled scan error"); res.status(500).json({ error: "Failed" }); }
 });

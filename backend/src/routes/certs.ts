@@ -38,7 +38,7 @@ async function checkDomainCert(domain: string): Promise<CertInfo> {
 
         resolve({
           domain,
-          issuer: cert.issuer?.O ?? cert.issuer?.CN ?? "Unknown",
+          issuer: String(cert.issuer?.O ?? cert.issuer?.CN ?? "Unknown"),
           validFrom: cert.valid_from,
           validTo: cert.valid_to,
           daysRemaining,
@@ -68,7 +68,7 @@ router.use(requireAuth);
 // GET /certs/check/:targetId — Check SSL cert for a target
 router.get("/certs/check/:targetId", async (req, res) => {
   try {
-    const target = await col("targets").findOne({ _id: new ObjectId(req.params.targetId) } as Record<string, unknown>) as Record<string, unknown> | null;
+    const target = await col("targets").findOne({ _id: new ObjectId(String(req.params.targetId)) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!target) return res.status(404).json({ error: "Target not found" });
     const domain = String(target["domain"] ?? "");
     if (!domain) return res.status(400).json({ error: "No domain" });
@@ -97,7 +97,7 @@ router.get("/certs/status", async (_req, res) => {
       }
       const info = await checkDomainCert(domain);
       await col("cert_checks").insertOne({ ...info, target_id: String(t["_id"]), checked_at: new Date() });
-      return { target_id: String(t["_id"]), domain, ...info };
+      return { target_id: String(t["_id"]), ...info };
     }));
     res.json(results.filter(Boolean));
   } catch (err) {

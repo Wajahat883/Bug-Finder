@@ -286,7 +286,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         severity: "medium",
         endpoint: targetUrl,
         description: "No HSTS header is set. Browsers will not enforce HTTPS on subsequent visits, leaving users vulnerable to SSL stripping.",
-        evidence: `GET ${targetUrl}\nStrict-Transport-Security: [MISSING]\n\nFull response headers:\n${[...res.headers.entries()].map(([k, v]) => `${k}: ${v}`).join("\n")}`,
+        evidence: `GET ${targetUrl}\nStrict-Transport-Security: [MISSING]\n\nFull response headers:\n${(Object.entries((res.headers as unknown as Record<string, string>))).map(([k, v]) => `${k}: ${v}`).join("\n")}`,
         recommended_fix: "Add: Strict-Transport-Security: max-age=31536000; includeSubDomains; preload",
         cvss_score: 5.3,
         cwe_id: "CWE-319",

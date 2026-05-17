@@ -65,7 +65,7 @@ router.post("/engagements", requireAuth, async (req, res) => {
 // GET /engagements/:id — get with targets and scan count
 router.get("/engagements/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const engagement = (await col("engagements").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!engagement) return res.status(404).json({ error: "Engagement not found" });
@@ -90,7 +90,7 @@ async function getTargetUrls(targetIds: string[]): Promise<string[]> {
 // PATCH /engagements/:id — update
 router.patch("/engagements/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const body = req.body as Record<string, unknown>;
     const updates: Record<string, unknown> = { updated_at: new Date() };
@@ -111,7 +111,7 @@ router.patch("/engagements/:id", requireAuth, async (req, res) => {
 // DELETE /engagements/:id
 router.delete("/engagements/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     await col("engagements").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     res.json({ ok: true });
@@ -124,7 +124,7 @@ router.delete("/engagements/:id", requireAuth, async (req, res) => {
 // POST /engagements/:id/targets — add target to scope
 router.post("/engagements/:id/targets", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const { target_id } = req.body as { target_id?: string };
     if (!target_id) return res.status(400).json({ error: "target_id is required" });
@@ -142,7 +142,7 @@ router.post("/engagements/:id/targets", requireAuth, async (req, res) => {
 // DELETE /engagements/:id/targets/:targetId — remove from scope
 router.delete("/engagements/:id/targets/:targetId", requireAuth, async (req, res) => {
   try {
-    const { id, targetId } = req.params;
+    const id = String(req.params["id"]); const targetId = String(req.params["targetId"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     await col("engagements").updateOne(
       { _id: new ObjectId(id) } as Record<string, unknown>,
@@ -158,7 +158,7 @@ router.delete("/engagements/:id/targets/:targetId", requireAuth, async (req, res
 // GET /engagements/:id/findings — all findings from in-scope targets
 router.get("/engagements/:id/findings", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const engagement = (await col("engagements").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!engagement) return res.status(404).json({ error: "Engagement not found" });
@@ -183,7 +183,7 @@ router.get("/engagements/:id/findings", requireAuth, async (req, res) => {
 // GET /engagements/:id/summary — total scans, findings by severity, risk scores
 router.get("/engagements/:id/summary", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const engagement = (await col("engagements").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!engagement) return res.status(404).json({ error: "Engagement not found" });

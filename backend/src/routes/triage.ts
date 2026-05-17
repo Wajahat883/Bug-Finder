@@ -21,7 +21,7 @@ function getSession(req: any) {
 
 router.patch("/findings/:id/triage", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const session = getSession(req);
     const {
       status,           // open | confirmed | false_positive | suppressed | needs_review
@@ -157,7 +157,7 @@ router.get("/findings/false-positives", requireAuth, async (req, res) => {
 
 router.post("/findings/:id/triage/review", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const session = getSession(req);
     const { decision, notes } = req.body; // decision: approve | reject
 
@@ -205,7 +205,7 @@ router.post("/findings/:id/triage/review", requireAuth, async (req, res) => {
 
 router.post("/findings/:id/suppress", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const session = getSession(req);
     const { days = 30 } = req.body;
 
@@ -242,7 +242,7 @@ router.post("/findings/:id/suppress", requireAuth, async (req, res) => {
 
 router.get("/findings/:id/triage/history", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const history = await col("finding_triage_history")
       .find({ finding_id: id })
       .sort({ created_at: -1 })
@@ -259,7 +259,7 @@ router.get("/findings/:id/triage/history", requireAuth, async (req, res) => {
 
 router.get("/scan-jobs/:id/fn-risk", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { id };
     const scan = await col("scan_jobs").findOne(query as any);
     if (!scan) return res.status(404).json({ error: "Scan not found" });
@@ -316,7 +316,7 @@ router.get("/scan-jobs/:id/fn-risk", requireAuth, async (req, res) => {
 
 router.get("/scan-jobs/:id/coverage-map", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { id };
     const scan = await col("scan_jobs").findOne(query as any);
     if (!scan) return res.status(404).json({ error: "Scan not found" });
@@ -458,7 +458,7 @@ router.post("/scanner/feedback", requireAuth, async (req, res) => {
 
 router.post("/ai/triage/:findingId", requireAuth, async (req, res) => {
   try {
-    const { findingId } = req.params;
+    const findingId = String(req.params["findingId"]);
     const query = ObjectId.isValid(findingId) ? { _id: new ObjectId(findingId) } : { id: findingId };
     const finding = await col("findings").findOne(query as any);
     if (!finding) return res.status(404).json({ error: "Finding not found" });

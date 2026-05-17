@@ -219,7 +219,7 @@ function buildSpdx(scanId: string, findings: Array<Record<string, unknown>>): Re
 
 router.get("/sbom/:scanId", requireAuth, async (req, res) => {
   try {
-    const { scanId } = req.params;
+    const scanId = String(req.params["scanId"]);
     const findings = await getScanFindings(scanId);
     if (findings === null) return res.status(404).json({ error: "Scan not found" });
 
@@ -235,7 +235,7 @@ router.get("/sbom/:scanId", requireAuth, async (req, res) => {
 
 router.get("/sbom/:scanId/download", requireAuth, async (req, res) => {
   try {
-    const { scanId } = req.params;
+    const scanId = String(req.params["scanId"]);
     const findings = await getScanFindings(scanId);
     if (findings === null) return res.status(404).json({ error: "Scan not found" });
 
@@ -254,7 +254,7 @@ router.get("/sbom/:scanId/download", requireAuth, async (req, res) => {
 
 router.get("/sbom/:scanId/spdx", requireAuth, async (req, res) => {
   try {
-    const { scanId } = req.params;
+    const scanId = String(req.params["scanId"]);
     const findings = await getScanFindings(scanId);
     if (findings === null) return res.status(404).json({ error: "Scan not found" });
 

@@ -6,10 +6,7 @@ import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
-router.use(requireAuth);
-
-// POST /findings/bulk-update — Bulk update severity or status on multiple findings
-router.post("/findings/bulk-update", async (req, res) => {
+router.post("/findings/bulk-update", requireAuth, async (req, res) => {
   try {
     const { ids, action, value } = req.body as { ids?: string[]; action?: string; value?: string };
     if (!ids?.length || !action) return res.status(400).json({ error: "ids array and action required" });
@@ -43,7 +40,7 @@ router.post("/findings/bulk-update", async (req, res) => {
 });
 
 // GET /analytics/dashboard — Enhanced dashboard with MTTR, trends, SLA compliance
-router.get("/analytics/dashboard", async (req, res) => {
+router.get("/analytics/dashboard", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
@@ -117,7 +114,7 @@ router.get("/analytics/dashboard", async (req, res) => {
 });
 
 // GET /analytics/activity — Recent activity feed with rich details
-router.get("/analytics/activity", async (req, res) => {
+router.get("/analytics/activity", requireAuth, async (req, res) => {
   try {
     const limit = parseInt(String(req.query["limit"] ?? "30"));
     const events = await col("activity_events").find({}).sort({ timestamp: -1 }).limit(limit).toArray() as Array<Record<string, unknown>>;

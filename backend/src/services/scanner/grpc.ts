@@ -119,7 +119,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         "X-Grpc-Web": "1",
         "Accept": "application/grpc-web+proto",
       },
-      body: grpcWebFrame(new Uint8Array([0])),
+      body: grpcWebFrame(new Uint8Array([0])) as unknown as BodyInit,
     });
 
     if (!r) continue;
@@ -161,7 +161,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         "X-Grpc-Web": "1",
         "Accept": "application/grpc-web+proto",
       },
-      body: frame,
+      body: frame as unknown as BodyInit,
     });
 
     if (!reflectR || reflectR.status !== 200) continue;
@@ -215,7 +215,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       const fileR = await ctxFetch(ctx, reflectUrl, {
         method: "POST",
         headers: { "Content-Type": "application/grpc-web+proto", "X-Grpc-Web": "1" },
-        body: fileFrame,
+        body: fileFrame as unknown as BodyInit,
       });
 
       const fileBuf = fileR ? await fileR.arrayBuffer().catch(() => null) : null;
@@ -233,7 +233,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
             "X-Grpc-Web": "1",
             "Accept": "application/grpc-web+proto",
           },
-          body: grpcWebFrame(new Uint8Array([0])), // empty message
+          body: grpcWebFrame(new Uint8Array([0])) as unknown as BodyInit, // empty message
         });
 
         if (!callR) continue;
@@ -285,7 +285,7 @@ export async function runGrpcCheck(ctx: ScanContext): Promise<ScanFinding[]> {
               const injR = await ctxFetch(ctx, methodUrl, {
                 method: "POST",
                 headers: { "Content-Type": "application/grpc-web+proto", "X-Grpc-Web": "1" },
-                body: grpcWebFrame(protoMsg),
+                body: grpcWebFrame(protoMsg) as unknown as BodyInit,
               });
               if (!injR) continue;
 

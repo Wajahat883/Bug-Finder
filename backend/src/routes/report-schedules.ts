@@ -46,7 +46,7 @@ router.post("/report-schedules", requireAuth, async (req, res) => {
 
 router.patch("/report-schedules/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { enabled } = req.body as { enabled?: boolean };
 
     await col("report_schedules").updateOne(
@@ -74,7 +74,7 @@ router.patch("/report-schedules/:id", requireAuth, async (req, res) => {
 
 router.delete("/report-schedules/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { unscheduleReport } = await import("../services/scheduler");
     unscheduleReport(id);
     await col("report_schedules").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
@@ -88,7 +88,7 @@ router.delete("/report-schedules/:id", requireAuth, async (req, res) => {
 // Send a test/manual report immediately
 router.post("/report-schedules/:id/send-now", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const schedule = await col("report_schedules").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!schedule) return res.status(404).json({ error: "Schedule not found" });
 

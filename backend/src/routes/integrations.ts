@@ -214,7 +214,7 @@ router.post("/integrations/jira/create-issue", requireAdmin, async (req, res) =>
 
     if (!resp.ok) {
       const err = await resp.json() as Record<string, unknown>;
-      const msg = (err["errors"] as any)?.description ?? String(err["errorMessages"]?.[0] ?? "Jira API error");
+      const msg = (err["errors"] as any)?.description ?? String((err["errorMessages"] as string[] | undefined)?.[0] ?? "Jira API error");
       return res.status(resp.status).json({ error: msg });
     }
 
@@ -245,8 +245,8 @@ router.get("/integrations/connections", requireAuth, async (req, res) => {
 
 router.delete("/integrations/connections/:id", requireAuth, async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) return res.status(404).json({ error: "Not found" });
-    await col("integration_connections").deleteOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>);
+    if (!ObjectId.isValid(String(req.params["id"]))) return res.status(404).json({ error: "Not found" });
+    await col("integration_connections").deleteOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>);
     res.json({ ok: true });
   } catch { res.status(500).json({ error: "Internal server error" }); }
 });
@@ -313,7 +313,7 @@ const OAUTH_CONFIGS: Record<string, { authUrl: string; tokenUrl: string; scopes:
 
 // BEGIN OAuth flow
 router.get("/integrations/oauth/:service/begin", requireAuth, (req, res) => {
-  const { service } = req.params;
+  const service = String(req.params["service"]);
   const config = OAUTH_CONFIGS[service];
   if (!config) return res.status(400).json({ error: "Unknown integration" });
 
@@ -344,7 +344,7 @@ router.get("/integrations/oauth/:service/begin", requireAuth, (req, res) => {
 
 // CALLBACK handler
 router.get("/integrations/oauth/:service/callback", async (req, res) => {
-  const { service } = req.params;
+  const service = String(req.params["service"]);
   const { code, state, error } = req.query as Record<string, string>;
 
   if (error) return res.redirect(`/integrations?error=${encodeURIComponent(error)}`);
@@ -658,7 +658,7 @@ async function logWebhookDelivery(
 // GET /integrations/webhooks/:webhookId/deliveries — last 50 delivery logs
 router.get("/integrations/webhooks/:webhookId/deliveries", requireAuth, async (req, res) => {
   try {
-    const { webhookId } = req.params;
+    const webhookId = String(req.params["webhookId"]);
     const deliveries = await col("webhook_deliveries")
       .find({ webhook_id: webhookId } as Record<string, unknown>)
       .sort({ delivered_at: -1 })
@@ -673,7 +673,7 @@ router.get("/integrations/webhooks/:webhookId/deliveries", requireAuth, async (r
 
 // POST /integrations/webhooks/:webhookId/deliveries/:deliveryId/retry — re-fire original payload
 router.post("/integrations/webhooks/:webhookId/deliveries/:deliveryId/retry", requireAuth, async (req, res) => {
-  const { webhookId, deliveryId } = req.params;
+  const webhookId = String(req.params["webhookId"]); const deliveryId = String(req.params["deliveryId"]);
 
   try {
     if (!ObjectId.isValid(deliveryId)) return res.status(404).json({ error: "Delivery not found" });

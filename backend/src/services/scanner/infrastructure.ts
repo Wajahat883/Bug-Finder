@@ -34,7 +34,7 @@ export async function runInfrastructureCheck(ctx: ScanContext): Promise<ScanFind
     return findings;
   }
 
-  const headerDump = [...res.headers.entries()].map(([k, v]) => `${k}: ${v}`).join("\n");
+  const headerDump = (Object.entries((res.headers as unknown as Record<string, string>))).map(([k, v]) => `${k}: ${v}`).join("\n");
   const cookies = res.headers.get("set-cookie") ?? "";
 
   // WAF detection

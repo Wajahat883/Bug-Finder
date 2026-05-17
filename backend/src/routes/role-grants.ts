@@ -45,10 +45,10 @@ router.post("/role-grants", requireAdmin, async (req, res) => {
 router.delete("/role-grants/:id", requireAdmin, async (req, res) => {
   try {
     await col("role_grants").updateOne(
-      { _id: new ObjectId(req.params.id) } as Record<string, unknown>,
+      { _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>,
       { $set: { active: false, revoked_at: new Date() } }
     );
-    await auditFromReq(req, "role_grant.revoke", "role_grants", req.params.id);
+    await auditFromReq(req, "role_grant.revoke", "role_grants", String(req.params["id"]));
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: "Internal server error" });

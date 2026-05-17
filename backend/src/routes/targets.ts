@@ -43,7 +43,7 @@ router.get("/targets", requireAuth, async (req, res) => {
     if (search) query["domain"] = { $regex: search, $options: "i" };
     if (tag) query["tags"] = tag;
 
-    const sortField: Record<string, unknown> = {};
+    const sortField: Record<string, 1 | -1> = {};
     const allowed = ["last_scanned", "risk_score", "total_findings", "domain", "total_scans"];
     sortField[allowed.includes(sortBy) ? sortBy : "last_scanned"] = sortDir;
 
@@ -65,7 +65,7 @@ router.get("/targets", requireAuth, async (req, res) => {
 
 router.get("/targets/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
@@ -155,7 +155,7 @@ router.post("/targets/bulk-import", requireAuth, async (req, res) => {
 
 router.patch("/targets/:id/tags", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const { tags } = req.body as { tags?: string[] };
@@ -176,7 +176,7 @@ router.patch("/targets/:id/tags", requireAuth, async (req, res) => {
 
 router.delete("/targets/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
@@ -195,7 +195,7 @@ router.delete("/targets/:id", requireAuth, async (req, res) => {
 
 router.get("/targets/:id/risk-trend", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const target = (await col("targets").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -228,7 +228,7 @@ router.get("/targets/:id/risk-trend", requireAuth, async (req, res) => {
 
 router.get("/targets/:id/recurring-findings", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const target = (await col("targets").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -416,7 +416,7 @@ router.get("/attack-surface", requireAuth, async (req, res) => {
 // POST /targets/:id/monitor — manually trigger attack surface monitoring for a target
 router.post("/targets/:id/monitor", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const target = (await col("targets").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!target) return res.status(404).json({ error: "Target not found" });

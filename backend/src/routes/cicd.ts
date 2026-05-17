@@ -20,7 +20,7 @@ router.use(requireAuth);
 
 router.get("/scan-jobs/:id/sarif", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
 
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
@@ -143,7 +143,7 @@ router.get("/scan-jobs/:id/sarif", async (req, res) => {
 
 router.get("/scan-jobs/:id/exit-code", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
 
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
@@ -192,7 +192,7 @@ router.get("/scan-jobs/:id/exit-code", async (req, res) => {
 
 router.post("/scan-jobs/:id/set-baseline", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
 
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
@@ -240,7 +240,7 @@ router.post("/scan-jobs/:id/set-baseline", async (req, res) => {
 
 router.get("/scan-jobs/:id/diff", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
 
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;

@@ -65,7 +65,7 @@ services:
     command: >
       node -e "
         const http = require('http');
-        const { chromium } = require('playwright');
+        const { chromium } = require('playwright-core');
         const server = http.createServer(async (req, res) => {
           const chunks = [];
           req.on('data', d => chunks.push(d));

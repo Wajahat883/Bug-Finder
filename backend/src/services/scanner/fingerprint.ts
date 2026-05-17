@@ -202,7 +202,7 @@ export async function runFingerprintCheck(ctx: ScanContext): Promise<ScanFinding
         severity: sig.severity,
         endpoint: targetUrl,
         description: sig.description,
-        evidence: `Fingerprint matched for ${sig.name}\nURL: ${targetUrl}\nResponse headers:\n${[...res.headers.entries()].map(([k, v]) => `${k}: ${v}`).join("\n")}`,
+        evidence: `Fingerprint matched for ${sig.name}\nURL: ${targetUrl}\nResponse headers:\n${(Object.entries((res.headers as unknown as Record<string, string>))).map(([k, v]) => `${k}: ${v}`).join("\n")}`,
         recommended_fix: sig.fix,
         cvss_score: sig.cvss,
         cwe_id: sig.cwe,

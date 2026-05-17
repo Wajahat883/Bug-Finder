@@ -70,7 +70,7 @@ function matchesQuery(doc: Doc, query: Record<string, unknown>): boolean {
       if (!(v as Record<string, unknown>[]).some(clause => matchesQuery(doc, clause))) return false;
       continue;
     }
-    if (v !== null && typeof v === "object" && !ObjectId.isValid(v as string)) {
+    if (v !== null && typeof v === "object" && !ObjectId.isValid(v as unknown as string)) {
       const ops = v as Record<string, unknown>;
       if ("$in" in ops) {
         if (!(ops["$in"] as unknown[]).includes(doc[k])) return false;

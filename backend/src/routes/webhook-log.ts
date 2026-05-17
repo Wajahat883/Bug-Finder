@@ -39,7 +39,7 @@ router.get("/webhooks/delivery-log", async (req, res) => {
 // POST /webhooks/delivery-log/retry/:id — Retry a failed delivery
 router.post("/webhooks/delivery-log/retry/:id", async (req, res) => {
   try {
-    const delivery = await col("webhook_deliveries").findOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    const delivery = await col("webhook_deliveries").findOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!delivery) return res.status(404).json({ error: "Delivery not found" });
 
     const url = String(delivery["url"] ?? "");
@@ -62,13 +62,13 @@ router.post("/webhooks/delivery-log/retry/:id", async (req, res) => {
       });
       const body = await response.text().catch(() => "");
       await col("webhook_deliveries").updateOne(
-        { _id: new ObjectId(req.params.id) } as Record<string, unknown>,
+        { _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>,
         { $set: { status_code: response.status, success: response.ok, response_body: body, retry_count: (Number(delivery["retry_count"]) || 0) + 1, duration_ms: Date.now() - startTime, sent_at: new Date(), error: null } }
       );
       res.json({ ok: response.ok, status: response.status });
     } catch (err) {
       await col("webhook_deliveries").updateOne(
-        { _id: new ObjectId(req.params.id) } as Record<string, unknown>,
+        { _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>,
         { $set: { error: err instanceof Error ? err.message : "Retry failed", retry_count: (Number(delivery["retry_count"]) || 0) + 1, sent_at: new Date() } }
       );
       res.json({ ok: false, error: err instanceof Error ? err.message : "Unknown" });

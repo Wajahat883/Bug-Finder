@@ -26,7 +26,7 @@ router.get("/findings", requireAuth, async (req, res) => {
     const suppressFp = req.query["suppress_fp"] === "true";
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    let query: Record<string, unknown> = withTenant({}, req.tenantId);
+    let query: Record<string, unknown> = withTenant({}, (req as unknown as { tenantId?: string }).tenantId);
     if (session.role !== "admin") query["user_id"] = session.userId ?? null;
     // Apply engagement-level RBAC scope filter
     const scopeFilter = engagementScopeFilter(req);
@@ -115,7 +115,7 @@ router.post("/findings/saved-filters", requireAuth, async (req, res) => {
 
 router.get("/findings/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
@@ -184,7 +184,7 @@ router.patch("/findings/bulk", requireAuth, async (req, res) => {
 
 router.patch("/findings/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const body = req.body as {
@@ -244,7 +244,7 @@ router.patch("/findings/:id", requireAuth, async (req, res) => {
               endpoint: finding["endpoint"],
               category: finding["category"],
               reason: body.fp_reason ?? "Manually marked as false positive",
-              created_by: (req.session as Record<string, unknown>)["username"] ?? "unknown",
+              created_by: (req.session as unknown as Record<string, unknown>)["username"] ?? "unknown",
               updated_at: new Date(),
             },
             $setOnInsert: { created_at: new Date() },
@@ -311,7 +311,7 @@ router.get("/fp-suppressions", requireAuth, async (req, res) => {
 
 router.delete("/fp-suppressions/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     await col("fp_suppressions").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     res.json({ ok: true });
@@ -399,7 +399,7 @@ router.post("/findings/bulk", requireAuth, async (req, res) => {
 
 router.get("/scan-jobs/:id/diff", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const currentScan = (await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -588,7 +588,7 @@ router.get("/scan-jobs/export/:format", requireAuth, async (req, res) => {
 
 router.post("/scan-jobs/:id/cancel", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const job = (await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -724,7 +724,7 @@ router.get("/findings/enrich-all", requireAuth, async (req, res) => {
 
 router.get("/findings/:id/cve-details", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
@@ -755,7 +755,7 @@ router.get("/findings/:id/cve-details", requireAuth, async (req, res) => {
 
 router.get("/findings/:id/cve", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const finding = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -815,7 +815,7 @@ router.get("/findings/:id/cve", requireAuth, async (req, res) => {
 
 router.get("/scan-jobs/:id/kill-chains", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const findings = (await col("findings")
@@ -939,7 +939,7 @@ function detectKillChains(findings: Array<Record<string, unknown>>): KillChain[]
 // ── Deduplicate scan findings ─────────────────────────────────────────────────
 router.post("/scan-jobs/:id/deduplicate", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const { clusterFindings } = await import("../services/dedup");
     const clusters = await clusterFindings(id);
@@ -966,7 +966,7 @@ router.post("/scan-jobs/:id/deduplicate", requireAuth, async (req, res) => {
 // ── Retest finding ────────────────────────────────────────────────────────────
 router.post("/findings/:id/retest", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const finding = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string,unknown>) as Record<string,unknown> | null;
     if (!finding) return res.status(404).json({ error: "Finding not found" });
@@ -997,7 +997,7 @@ router.post("/findings/:id/retest", requireAuth, async (req, res) => {
 // ── Raw evidence (full untruncated evidence for critical/high findings) ───────
 router.get("/findings/:id/raw-evidence", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
@@ -1036,7 +1036,7 @@ router.get("/findings/:id/raw-evidence", requireAuth, async (req, res) => {
 // ── Finding status history ────────────────────────────────────────────────────
 router.get("/findings/:id/history", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const finding = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!finding) return res.status(404).json({ error: "Finding not found" });
@@ -1050,7 +1050,7 @@ router.get("/findings/:id/history", requireAuth, async (req, res) => {
 // ── Enrich finding with EPSS + CISA KEV ──────────────────────────────────────
 router.post("/findings/:id/enrich", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const { enrichFindingWithIntel } = await import("../services/vuln-intel");
     await enrichFindingWithIntel(id);
@@ -1065,7 +1065,7 @@ router.post("/findings/:id/enrich", requireAuth, async (req, res) => {
 // ── Assign finding ────────────────────────────────────────────────────────────
 router.post("/findings/:id/assign", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const { assignee } = req.body as { assignee?: string };
     await col("findings").updateOne({ _id: new ObjectId(id) } as Record<string,unknown>, { $set: { assignee: assignee ?? null, assigned_at: assignee ? new Date() : null } });
@@ -1076,7 +1076,7 @@ router.post("/findings/:id/assign", requireAuth, async (req, res) => {
 // ── Enterprise: Assign finding to a user ─────────────────────────────────────
 router.patch("/findings/:id/assign", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { assignee_id } = req.body as { assignee_id?: string };
     if (!assignee_id) return res.status(400).json({ error: "assignee_id is required" });
     // Verify assignee exists
@@ -1097,7 +1097,7 @@ router.patch("/findings/:id/assign", requireAuth, async (req, res) => {
 // ── Enterprise: Formal risk acceptance ───────────────────────────────────────
 router.post("/findings/:id/accept-risk", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { justification, owner_name, review_date } = req.body as {
       justification?: string;
       owner_name?: string;
@@ -1129,7 +1129,7 @@ router.post("/findings/:id/accept-risk", requireAuth, async (req, res) => {
 // ── Enterprise: Mark as verified false negative ───────────────────────────────
 router.post("/findings/:id/false-negative", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { reason } = req.body as { reason?: string };
     const sess = req.session as unknown as { userId?: string; username?: string };
     await col("findings").updateOne(
@@ -1141,7 +1141,7 @@ router.post("/findings/:id/false-negative", requireAuth, async (req, res) => {
         fn_reason: reason ?? "Verified real vulnerability missed by scanner",
         triage_status: "confirmed",
         updated_at: new Date(),
-      }, $inc: { fn_count: 1 } as Record<string, unknown> }
+      }, $inc: { fn_count: 1 } }
     );
     await auditFromReq(req, "finding.false_negative", "findings", id, { reason });
     res.json({ ok: true });
@@ -1153,7 +1153,7 @@ router.post("/findings/:id/false-negative", requireAuth, async (req, res) => {
 // ── Enterprise: Upload evidence file (base64) ─────────────────────────────────
 router.post("/findings/:id/evidence", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { filename, content_type, data, description } = req.body as {
       filename?: string;
       content_type?: string;
@@ -1186,7 +1186,7 @@ router.post("/findings/:id/evidence", requireAuth, async (req, res) => {
 // ── Enterprise: List evidence files for a finding ─────────────────────────────
 router.get("/findings/:id/evidence", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const files = await col("evidence_files").find({ finding_id: id } as Record<string, unknown>).sort({ created_at: -1 }).toArray();
     res.json(files.map(f => ({ id: String(f["_id"]), filename: f["filename"], content_type: f["content_type"], size_bytes: f["size_bytes"], description: f["description"], created_at: f["created_at"] })));
   } catch {
@@ -1219,7 +1219,7 @@ router.post("/findings/saved-filters", requireAuth, async (req, res) => {
 
 router.delete("/findings/saved-filters/:id", requireAuth, async (req, res) => {
   try {
-    await col("saved_filters").deleteOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>);
+    await col("saved_filters").deleteOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>);
     res.json({ ok: true });
   } catch {
     res.status(500).json({ error: "Internal server error" });
@@ -1229,7 +1229,7 @@ router.delete("/findings/saved-filters/:id", requireAuth, async (req, res) => {
 // ── Vulnerability intelligence (cached enrichment data) ───────────────────────
 router.get("/findings/:id/vuln-intel", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const finding = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!finding) return res.status(404).json({ error: "Not found" });

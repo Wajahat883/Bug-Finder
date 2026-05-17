@@ -219,7 +219,6 @@ function estimateConfidence(text: string, inputLength: number): number {
 
 const router = Router();
 
-// Apply AI-specific rate limiting (30 req/min) and require authentication
 router.use(aiLimiter);
 router.use(requireAuth);
 
@@ -273,7 +272,7 @@ async function getUserModel(userId: string): Promise<string> {
 
 // ── Scan Summary ──────────────────────────────────────────────────────────────
 router.post("/ai/scan-summary/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   const cacheKey = `scan-summary:${id}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -320,7 +319,7 @@ router.post("/ai/scan-summary/:id", async (req, res) => {
 
 // ── Finding Advice ────────────────────────────────────────────────────────────
 router.post("/ai/finding-advice/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   const cacheKey = `finding-advice:${id}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -410,7 +409,7 @@ router.post("/ai/chat", async (req, res) => {
 
 // ── Payloads ──────────────────────────────────────────────────────────────────
 router.post("/ai/payloads/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   const cacheKey = `payloads:${id}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -448,7 +447,7 @@ router.post("/ai/payloads/:id", async (req, res) => {
 
 // ── Patch ─────────────────────────────────────────────────────────────────────
 router.post("/ai/patch/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   const { tech_stack } = req.body as { tech_stack?: string };
   const cacheKey = `patch:${id}:${tech_stack ?? ""}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
@@ -487,7 +486,7 @@ router.post("/ai/patch/:id", async (req, res) => {
 
 // ── Executive Narrative ───────────────────────────────────────────────────────
 router.post("/ai/executive-narrative/:id", async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   const cacheKey = `exec-narrative:${id}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -565,7 +564,7 @@ router.post("/ai/attack-chain/:scanId", async (req, res) => {
 
 // ── PoC Generation ────────────────────────────────────────────────────────────
 router.post("/ai/poc/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `poc:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -623,7 +622,7 @@ router.post("/ai/scan-config", async (req, res) => {
 
 // ── Patch Diff ────────────────────────────────────────────────────────────────
 router.post("/ai/patch-diff/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `patch-diff:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -657,7 +656,7 @@ router.post("/ai/patch-diff/:findingId", async (req, res) => {
 
 // ── Bug Bounty Report ─────────────────────────────────────────────────────────
 router.post("/ai/bug-bounty-report/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `bb-report:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -691,7 +690,7 @@ router.post("/ai/bug-bounty-report/:findingId", async (req, res) => {
 
 // ── Attack Narrative ──────────────────────────────────────────────────────────
 router.post("/ai/attack-narrative/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `attack-narrative:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -725,7 +724,7 @@ router.post("/ai/attack-narrative/:findingId", async (req, res) => {
 
 // ── Tool Recommendations ──────────────────────────────────────────────────────
 router.post("/ai/tools/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `tools:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -798,7 +797,7 @@ router.post("/ai/remediation-plan/:scanId", async (req, res) => {
 
 // ── False Positive Analysis ───────────────────────────────────────────────────
 router.post("/ai/false-positive/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `fp-analysis:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -832,7 +831,7 @@ router.post("/ai/false-positive/:findingId", async (req, res) => {
 
 // ── CVSS Breakdown ────────────────────────────────────────────────────────────
 router.post("/ai/cvss-breakdown/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `cvss-breakdown:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -1011,7 +1010,7 @@ router.post("/ai/autonomous-pentest/:targetId", async (req, res) => {
 
 // ── Safe Exploit Verification ───────────────────────────────────────────────
 router.post("/ai/verify-finding/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `verify:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -1055,7 +1054,7 @@ router.post("/ai/verify-finding/:findingId", async (req, res) => {
 
 // ── Enhanced Auto-Patch Generator ────────────────────────────────────────────
 router.post("/ai/generate-patch/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const { tech_stack } = req.body as { tech_stack?: string };
   const cacheKey = `generate-patch:${findingId}:${tech_stack ?? "auto"}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
@@ -1099,7 +1098,7 @@ router.post("/ai/generate-patch/:findingId", async (req, res) => {
 
 // ── Explainable AI Reasoning Chain ───────────────────────────────────────────
 router.post("/ai/reasoning-chain/:findingId", async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   const cacheKey = `reasoning:${findingId}`;
   if (await serveCacheIfHit(res, cacheKey)) return;
 
@@ -1145,7 +1144,7 @@ router.post("/ai/reasoning-chain/:findingId", async (req, res) => {
 
 // POST /ai/code-fix/:findingId — REST (non-streaming) code patch via ai-remediation service
 router.post("/ai/code-fix/:findingId", requireAuth, async (req, res) => {
-  const { findingId } = req.params;
+  const findingId = String(req.params["findingId"]);
   if (!ObjectId.isValid(findingId)) return res.status(404).json({ error: "Not found" });
   try {
     const finding = await col("findings").findOne({ _id: new ObjectId(findingId) } as Record<string, unknown>) as Record<string, unknown> | null;

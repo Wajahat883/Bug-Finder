@@ -184,7 +184,7 @@ router.patch("/users/:id/role", requireAdmin, async (req, res) => {
     }
 
     await col("users").updateOne(
-      { _id: new ObjectId(req.params.id) } as Record<string, unknown>,
+      { _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>,
       { $set: { role, updated_at: new Date() } }
     );
 

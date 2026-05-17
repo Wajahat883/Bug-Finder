@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Bash(perl -i -pe 's/new ObjectId\\\\\\(req\\\\.params\\\\.\\(\\\\w+\\)\\\\\\)/new ObjectId\\(String\\(req.params.$1\\)\\)/g' ai.ts api-keys.ts auth.ts comments.ts compliance.ts engagements.ts enterprise-admin.ts findings.ts integrations.ts notifications.ts oidc.ts project-rbac.ts remediations.ts report-schedules.ts reports.ts role-grants.ts sbom.ts scanner-rules.ts scans.ts stream.ts targets.ts triage.ts webhooks.ts certs.ts webhook-log.ts scheduled-scans.ts)",
+      "Bash(perl -i -pe 's/router\\\\.use\\\\\\(\"\\\\/scan-jobs\", requireAuth\\\\\\);/router.use\\(requireAuth\\);/' cicd.ts)",
+      "Bash(perl -i -pe 's/router\\\\.use\\\\\\(\"\\\\/compliance\", requireAuth\\\\\\);/router.use\\(requireAuth\\);/' compliance-reports.ts)",
+      "Bash(perl -i -pe 's/router\\\\.use\\\\\\(\"\\\\/dashboard\", requireAuth\\\\\\);/router.use\\(requireAuth\\);/' dashboard-layout.ts)",
+      "Bash(perl -i -pe 's/router\\\\.use\\\\\\(\"\\\\/reports\", requireAuth\\\\\\);/router.use\\(requireAuth\\);/' reports.ts)",
+      "Bash(perl -i -pe 's/router\\\\.use\\\\\\(\"\\\\/scanner-rules\", requireAuth\\\\\\);/router.use\\(requireAuth\\);/' scanner-rules.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ id \\\\} = req\\\\.params;/const id = String\\(req.params[\"id\"]\\);/g' ai.ts api-keys.ts auth.ts comments.ts compliance.ts engagements.ts enterprise-admin.ts findings.ts integrations.ts notifications.ts oidc.ts project-rbac.ts remediations.ts report-schedules.ts reports.ts role-grants.ts sbom.ts scanner-rules.ts scans.ts stream.ts targets.ts triage.ts webhooks.ts certs.ts webhook-log.ts scheduled-scans.ts compliance-reports.ts dashboard-layout.ts search.ts sla.ts suppression.ts tests.ts cicd.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ findingId \\\\} = req\\\\.params;/const findingId = String\\(req.params[\"findingId\"]\\);/' \"C:/Users/waji2/OneDrive/Desktop/Bug-finder/Bug-Finder/backend/src/routes/ai.ts\")",
+      "Bash(perl -i -pe 's/const \\\\{ framework \\\\} = req\\\\.params;/const framework = String\\(req.params[\"framework\"]\\);/' \"C:/Users/waji2/OneDrive/Desktop/Bug-finder/Bug-Finder/backend/src/routes/compliance.ts\")",
+      "Bash(perl -i -pe 's/const \\\\{ controlId \\\\} = req\\\\.params;/const controlId = String\\(req.params[\"controlId\"]\\);/g' \"C:/Users/waji2/OneDrive/Desktop/Bug-finder/Bug-Finder/backend/src/routes/compliance.ts\")",
+      "Bash(perl -i -pe 's/const \\\\{ service \\\\} = req\\\\.params;/const service = String\\(req.params[\"service\"]\\);/g' integrations.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ webhookId \\\\} = req\\\\.params;/const webhookId = String\\(req.params[\"webhookId\"]\\);/g' integrations.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ webhookId, deliveryId \\\\} = req\\\\.params;/const webhookId = String\\(req.params[\"webhookId\"]\\); const deliveryId = String\\(req.params[\"deliveryId\"]\\);/g' integrations.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ evidenceId \\\\} = req\\\\.params;/const evidenceId = String\\(req.params[\"evidenceId\"]\\);/g' remediations.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ scanId \\\\} = req\\\\.params;/const scanId = String\\(req.params[\"scanId\"]\\);/g' sbom.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ findingId \\\\} = req\\\\.params;/const findingId = String\\(req.params[\"findingId\"]\\);/g' triage.ts)",
+      "Bash(perl -i -pe 's/body: grpcWebFrame\\\\\\(new Uint8Array\\\\\\(\\\\[0\\\\]\\\\\\)\\\\\\),/body: grpcWebFrame\\(new Uint8Array\\([0]\\)\\) as unknown as BodyInit,/g' grpc.ts)",
+      "Bash(perl -i -pe 's/body: grpcWebFrame\\\\\\(new Uint8Array\\\\\\(\\\\[0\\\\]\\\\\\)\\\\\\), \\\\/\\\\/ empty message/body: grpcWebFrame\\(new Uint8Array\\([0]\\)\\) as unknown as BodyInit, \\\\/\\\\/ empty message/g' grpc.ts)",
+      "Bash(perl -i -pe 's/body: grpcWebFrame\\\\\\(protoMsg\\\\\\),/body: grpcWebFrame\\(protoMsg\\) as unknown as BodyInit,/g' grpc.ts)",
+      "Bash(perl -i -pe 's/\\\\[\\\\.\\\\.\\\\.\\(res|r\\)\\\\.headers\\\\.entries\\\\\\(\\\\\\)\\\\]/\\(Object.entries\\(\\($1.headers as unknown as Record<string, string>\\)\\)\\)/g' fingerprint.ts headers.ts infrastructure.ts tls.ts)",
+      "Bash(perl -i -pe 's/req\\\\.session as Record<string, unknown>/req.session as unknown as Record<string, unknown>/g' oidc.ts)",
+      "Bash(perl -i -pe 's/const \\\\{ commentId \\\\} = req\\\\.params;/const commentId = String\\(req.params[\"commentId\"]\\);/g' comments.ts)",
+      "Bash(node build.mjs)"
+    ]
+  }
+}

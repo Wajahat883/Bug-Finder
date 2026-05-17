@@ -66,7 +66,7 @@ router.post("/remediations", async (req, res) => {
 
 router.get("/remediations/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const rem = (await col("remediations").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -81,7 +81,7 @@ router.get("/remediations/:id", async (req, res) => {
 
 router.patch("/remediations/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const body = req.body as { status?: string };
@@ -118,7 +118,7 @@ router.post("/remediations/:id/evidence", requireAuth, async (req, res) => {
 
 router.delete("/remediations/:id/evidence/:evidenceId", requireAuth, async (req, res) => {
   try {
-    const { evidenceId } = req.params;
+    const evidenceId = String(req.params["evidenceId"]);
     if (!ObjectId.isValid(evidenceId)) return res.status(404).json({ error: "Not found" });
     await col("remediation_evidence").deleteOne({ _id: new ObjectId(evidenceId) } as Record<string, unknown>);
     res.json({ ok: true });

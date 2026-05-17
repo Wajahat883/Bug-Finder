@@ -535,7 +535,7 @@ router.get("/admin/users", requireAdmin, async (req, res) => {
 
 router.patch("/admin/users/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { role } = req.body as { role?: string };
     if (!role || !["admin", "analyst", "viewer"].includes(role)) {
       return res.status(400).json({ error: "role must be admin, analyst, or viewer" });
@@ -561,7 +561,7 @@ router.patch("/admin/users/:id", requireAdmin, async (req, res) => {
 
 router.delete("/admin/users/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const session = (req as unknown as { session: SessionData }).session;
     if (session.userId === id) return res.status(400).json({ error: "Cannot delete your own account" });
     await col("users").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);

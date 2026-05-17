@@ -99,7 +99,7 @@ router.get("/sla/summary", async (req, res) => {
 // GET /sla/finding/:id — SLA info for a specific finding
 router.get("/sla/finding/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const f = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
@@ -130,7 +130,7 @@ router.get("/sla/finding/:id", async (req, res) => {
 // POST /sla/finding/:id/resolve — Mark a finding as resolved
 router.post("/sla/finding/:id/resolve", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     await col("findings").updateOne(
@@ -267,7 +267,7 @@ router.post("/sla/exceptions", async (req, res) => {
 // PATCH /sla/exceptions/:id — approve or deny
 router.patch("/sla/exceptions/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { status, reviewer_note, reviewer } = req.body as { status?: string; reviewer_note?: string; reviewer?: string };
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     await col("sla_exceptions").updateOne(

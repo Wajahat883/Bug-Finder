@@ -2,9 +2,9 @@
 import type { Request, Response, NextFunction } from "express";
 import { randomUUID } from "crypto";
 
-declare module "express-serve-static-core" {
+declare module "express" {
   interface Request {
-    correlationId: string;
+    correlationId?: string;
   }
 }
 

@@ -23,7 +23,7 @@ router.get(["/stream/:id", "/scan-jobs/:id/stream"], requireAuth, async (req, re
     return errorResponse(res, 429, "Too Many Connections", `Max ${MAX_SSE_PER_USER} concurrent SSE streams per user`);
   }
   sseConnections.set(userId, current + 1);
-  const { id } = req.params;
+  const id = String(req.params["id"]);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -132,7 +132,7 @@ router.get(["/stream/:id", "/scan-jobs/:id/stream"], requireAuth, async (req, re
 });
 
 router.post("/scan-jobs/:id/start-simulation", requireAuth, async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   try {
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan job not found" });
     const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;

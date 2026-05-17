@@ -174,7 +174,7 @@ export async function runRateLimitCheck(ctx: ScanContext): Promise<ScanFinding[]
 
     if (!confirmedRateLimit) continue; // no rate limit active — bypass test irrelevant
 
-    const bypassHeaders = [
+    const bypassHeaders: Record<string, string>[] = [
       { "X-Forwarded-For": "10.0.0.1" },
       { "X-Real-IP": "10.0.0.2" },
       { "X-Originating-IP": "192.168.1.1" },

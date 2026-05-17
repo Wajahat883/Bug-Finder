@@ -226,7 +226,7 @@ router.get("/auth/oidc/:provider/callback", async (req, res) => {
     if (!user) return res.redirect("/login?error=user_creation_failed");
 
     // Establish session
-    const sess = req.session as Record<string, unknown>;
+    const sess = req.session as unknown as Record<string, unknown>;
     sess["userId"] = String(user["_id"]);
     sess["username"] = String(user["username"] ?? email);
     sess["role"] = String(user["role"] ?? provider.default_role ?? "analyst");
@@ -393,7 +393,7 @@ router.post("/auth/saml/:provider/acs", async (req, res) => {
 
     if (!user) return res.redirect("/login?error=user_creation_failed");
 
-    const sess = req.session as Record<string, unknown>;
+    const sess = req.session as unknown as Record<string, unknown>;
     sess["userId"] = String(user["_id"]);
     sess["username"] = String(user["username"] ?? email);
     sess["role"] = String(user["role"] ?? provider.default_role ?? "analyst");

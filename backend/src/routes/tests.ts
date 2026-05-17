@@ -108,7 +108,7 @@ router.get("/tests/runs", async (req, res) => {
 
 // GET /tests/runs/:id/stream — SSE stream for real-time test progress
 router.get("/tests/runs/:id/stream", (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");

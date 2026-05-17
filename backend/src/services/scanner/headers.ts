@@ -94,7 +94,7 @@ export async function runHeaderCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     return findings;
   }
 
-  const allHeaders = [...res.headers.entries()];
+  const allHeaders = (Object.entries((res.headers as unknown as Record<string, string>)));
   const headerDump = allHeaders.map(([k, v]) => `${k}: ${v}`).join("\n");
 
   // Check server header leaks

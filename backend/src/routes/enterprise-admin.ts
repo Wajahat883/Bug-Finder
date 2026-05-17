@@ -36,7 +36,7 @@ router.get("/admin/anomaly-alerts", requireAdmin, async (req, res) => {
 
 router.post("/admin/anomaly-alerts/:id/acknowledge", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return errorResponse(res, 404, "Not Found");
     await col("anomaly_alerts").updateOne(
       { _id: new ObjectId(id) } as Record<string, unknown>,
@@ -84,7 +84,7 @@ router.post("/admin/ip-allowlist", requireAdmin, async (req, res) => {
 
 router.delete("/admin/ip-allowlist/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return errorResponse(res, 404, "Not Found");
     await col("ip_allowlist").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     res.json({ ok: true });
@@ -117,7 +117,7 @@ router.get("/admin/sessions", requireAdmin, async (_req, res) => {
 
 router.delete("/admin/sessions/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     await col("sessions").deleteOne({ _id: id as unknown } as Record<string, unknown>);
     res.json({ ok: true });
   } catch (err) {
@@ -311,7 +311,7 @@ router.post("/admin/tenants", requireAdmin, async (req, res) => {
 
 router.patch("/admin/tenants/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return errorResponse(res, 404, "Not Found");
     const { active } = req.body as { active?: boolean };
     const update: Record<string, unknown> = { updated_at: new Date() };
@@ -326,7 +326,7 @@ router.patch("/admin/tenants/:id", requireAdmin, async (req, res) => {
 
 router.delete("/admin/tenants/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return errorResponse(res, 404, "Not Found");
     await col("tenants").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     res.json({ ok: true });
@@ -338,7 +338,7 @@ router.delete("/admin/tenants/:id", requireAdmin, async (req, res) => {
 
 router.put("/admin/tenants/:tenantId/quota", requireAdmin, async (req, res) => {
   try {
-    const { tenantId } = req.params;
+    const tenantId = String(req.params["tenantId"]);
     if (!ObjectId.isValid(tenantId)) return errorResponse(res, 404, "Not Found");
     const { max_concurrent_scans, max_findings_stored, storage_limit_gb } = req.body as {
       max_concurrent_scans?: number; max_findings_stored?: number; storage_limit_gb?: number;

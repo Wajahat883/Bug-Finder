@@ -84,7 +84,7 @@ router.post("/api-keys", requireAdmin, async (req, res) => {
 // PATCH /api-keys/:id — Toggle active/update name
 router.patch("/api-keys/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const parsed = patchKeySchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error.errors[0]?.message ?? "Validation failed" });
@@ -103,7 +103,7 @@ router.patch("/api-keys/:id", requireAdmin, async (req, res) => {
 // DELETE /api-keys/:id — Revoke API key
 router.delete("/api-keys/:id", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     await col("api_keys").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     res.json({ ok: true });
@@ -116,7 +116,7 @@ router.delete("/api-keys/:id", requireAdmin, async (req, res) => {
 // POST /api-keys/:id/rotate — Generate new secret, mark old one expired, return new key
 router.post("/api-keys/:id/rotate", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const newKey = generateKey(); // bfp_<48 hex chars>

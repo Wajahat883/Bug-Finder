@@ -233,7 +233,7 @@ router.get("/compliance/report", async (req, res) => {
 // GET /compliance/findings/:id — Get compliance tags for a specific finding
 router.get("/compliance/findings/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const finding = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
@@ -377,7 +377,7 @@ router.get("/compliance/mapping", requireAuth, async (req, res) => {
 // GET /compliance/report/:framework — per-framework compliance score
 router.get("/compliance/report/:framework", requireAuth, async (req, res) => {
   try {
-    const { framework } = req.params;
+    const framework = String(req.params["framework"]);
     if (!["soc2", "iso27001", "pci"].includes(framework)) {
       return res.status(400).json({ error: "framework must be one of: soc2, iso27001, pci" });
     }
@@ -429,7 +429,7 @@ router.get("/compliance/report/:framework", requireAuth, async (req, res) => {
 // POST /compliance/evidence/:controlId — upload evidence text/file for a control
 router.post("/compliance/evidence/:controlId", requireAuth, async (req, res) => {
   try {
-    const { controlId } = req.params;
+    const controlId = String(req.params["controlId"]);
     const sess = (req as unknown as { session: { userId?: string } }).session;
     const { framework, evidence_text, file_name, file_url, notes } = req.body as {
       framework?: string; evidence_text?: string; file_name?: string; file_url?: string; notes?: string;
@@ -457,7 +457,7 @@ router.post("/compliance/evidence/:controlId", requireAuth, async (req, res) => 
 
 router.get("/compliance/controls/:controlId/findings", requireAuth, async (req, res) => {
   try {
-    const { controlId } = req.params;
+    const controlId = String(req.params["controlId"]);
     const sess = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const userFilter = sess?.role !== "admin" ? { user_id: sess?.userId ?? null } : {};
 
@@ -542,7 +542,7 @@ async function generateAttestationData(
 // GET /compliance/attestation/:framework — JSON attestation document
 router.get("/compliance/attestation/:framework", requireAuth, async (req, res) => {
   try {
-    const { framework } = req.params;
+    const framework = String(req.params["framework"]);
     if (!["soc2", "iso27001", "pci"].includes(framework)) {
       return res.status(400).json({ error: "framework must be one of: soc2, iso27001, pci" });
     }
@@ -589,7 +589,7 @@ router.get("/compliance/attestation/:framework", requireAuth, async (req, res) =
 // GET /compliance/attestation/:framework/pdf — PDF attestation document
 router.get("/compliance/attestation/:framework/pdf", requireAuth, async (req, res) => {
   try {
-    const { framework } = req.params;
+    const framework = String(req.params["framework"]);
     const validFrameworks = ["soc2", "iso27001", "pci"];
     if (!validFrameworks.includes(framework)) return res.status(400).json({ error: "Invalid framework" });
 
@@ -649,7 +649,7 @@ router.get("/compliance/attestation/:framework/pdf", requireAuth, async (req, re
 // DELETE /compliance/attestations/:id
 router.delete("/compliance/attestations/:id", async (req, res) => {
   try {
-    await col("compliance_attestations").deleteOne({ _id: new ObjectId(req.params.id) } as Record<string, unknown>);
+    await col("compliance_attestations").deleteOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>);
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err }, "Delete attestation error");
@@ -660,7 +660,7 @@ router.delete("/compliance/attestations/:id", async (req, res) => {
 // GET /compliance/export/:framework — export audit pack as JSON
 router.get("/compliance/export/:framework", async (req, res) => {
   try {
-    const { framework } = req.params;
+    const framework = String(req.params["framework"]);
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
     const findings = await col("findings").find(userFilter).toArray() as Array<Record<string, unknown>>;

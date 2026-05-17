@@ -179,7 +179,7 @@ router.get("/suppression-rules", async (req, res) => {
 router.delete("/suppression-rules/:id", async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const rule = await col("suppression_rules").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;

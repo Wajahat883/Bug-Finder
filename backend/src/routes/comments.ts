@@ -21,7 +21,7 @@ function mapComment(c: Record<string, unknown>) {
 
 router.get("/findings/:id/comments", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const comments = await col("finding_comments").find({ finding_id: id }).sort({ created_at: 1 }).toArray() as Array<Record<string,unknown>>;
     res.json(comments.map(mapComment));
   } catch(err) { logger.error({err},"list comments error"); res.status(500).json({ error: "Internal server error" }); }
@@ -29,7 +29,7 @@ router.get("/findings/:id/comments", requireAuth, async (req, res) => {
 
 router.post("/findings/:id/comments", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { text, author } = req.body as { text?: string; author?: string };
     if (!text) return res.status(400).json({ error: "text required" });
     const insert = await col("finding_comments").insertOne({ finding_id: id, text, author: author ?? "Unknown", created_at: new Date() });
@@ -40,7 +40,7 @@ router.post("/findings/:id/comments", requireAuth, async (req, res) => {
 
 router.delete("/findings/:findingId/comments/:commentId", requireAuth, async (req, res) => {
   try {
-    const { commentId } = req.params;
+    const commentId = String(req.params["commentId"]);
     await col("finding_comments").deleteOne({ _id: new ObjectId(commentId) } as Record<string,unknown>);
     res.json({ ok: true });
   } catch(err) { logger.error({err},"delete comment error"); res.status(500).json({ error: "Internal server error" }); }
@@ -82,7 +82,7 @@ router.post("/comments", requireAuth, async (req, res) => {
 
 router.delete("/comments/:commentId", requireAuth, async (req, res) => {
   try {
-    const { commentId } = req.params;
+    const commentId = String(req.params["commentId"]);
     const result = await col("finding_comments").deleteOne({ _id: new ObjectId(commentId) } as Record<string,unknown>);
     if (result.deletedCount === 0) return res.status(404).json({ error: "Comment not found" });
     res.json({ ok: true });

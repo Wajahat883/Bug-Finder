@@ -136,7 +136,7 @@ router.post("/notifications/mark-all-read", requireAuth, async (req, res) => {
 // PATCH /notifications/:id/read — mark a single notification as read
 router.patch("/notifications/:id/read", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     await col("notifications").updateOne(
       { _id: new ObjectId(id) } as Record<string, unknown>,
@@ -167,7 +167,7 @@ router.post("/notifications/read-all", requireAuth, async (req, res) => {
 // DELETE /notifications/:id — delete a single notification
 router.delete("/notifications/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     await col("notifications").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     res.json({ ok: true });

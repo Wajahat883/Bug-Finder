@@ -43,7 +43,7 @@ export async function runFileUploadCheck(ctx: ScanContext): Promise<ScanFinding[
       const uploadRes = await ctxFetch(ctx, url, {
         method: "POST",
         headers: { "Content-Type": `multipart/form-data; boundary=${boundary.slice(2)}` },
-        body,
+        body: body as unknown as BodyInit,
       });
 
       if (!uploadRes) continue;

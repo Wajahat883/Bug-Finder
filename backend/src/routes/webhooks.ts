@@ -320,7 +320,7 @@ router.post("/webhooks", requireAuth, async (req, res) => {
 // Enable / disable webhook
 router.patch("/webhooks/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const parsed = patchWebhookSchema.safeParse(req.body);
     if (!parsed.success)
       return res
@@ -345,7 +345,7 @@ router.patch("/webhooks/:id", requireAuth, async (req, res) => {
 router.delete("/webhooks/:id", requireAuth, async (req, res) => {
   try {
     await col("webhooks").deleteOne(
-      { _id: new ObjectId(req.params.id) } as Record<string, unknown>
+      { _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>
     );
     res.json({ ok: true });
   } catch {
@@ -357,7 +357,7 @@ router.delete("/webhooks/:id", requireAuth, async (req, res) => {
 router.post("/webhooks/:id/test", requireAuth, async (req, res) => {
   try {
     const hook = (await col("webhooks").findOne({
-      _id: new ObjectId(req.params.id),
+      _id: new ObjectId(String(req.params.id)),
     } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!hook) return res.status(404).json({ error: "Not found" });
 
@@ -395,12 +395,12 @@ router.post(
   async (req, res) => {
     try {
       const delivery = (await col("webhook_deliveries").findOne({
-        _id: new ObjectId(req.params.deliveryId),
+        _id: new ObjectId(String(req.params.deliveryId)),
       } as Record<string, unknown>)) as Record<string, unknown> | null;
       if (!delivery) return res.status(404).json({ error: "Delivery not found" });
 
       const hook = (await col("webhooks").findOne({
-        _id: new ObjectId(req.params.id),
+        _id: new ObjectId(String(req.params.id)),
       } as Record<string, unknown>)) as Record<string, unknown> | null;
       if (!hook) return res.status(404).json({ error: "Webhook not found" });
 
@@ -420,7 +420,7 @@ router.post(
 // Rotate webhook secret — generates a new random secret and re-encrypts it
 router.post("/webhooks/:id/rotate-secret", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const newSecret = crypto.randomBytes(32).toString("hex");

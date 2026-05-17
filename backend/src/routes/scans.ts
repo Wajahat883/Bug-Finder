@@ -191,7 +191,7 @@ router.post("/scan-jobs", async (req, res) => {
 
 router.get("/scan-jobs/:id", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const job = (await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -212,7 +212,7 @@ router.get("/scan-jobs/:id", async (req, res) => {
 
 router.get("/scan-jobs/:id/findings", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const query: Record<string, unknown> = { scan_job_id: new ObjectId(id) };
@@ -231,7 +231,7 @@ router.get("/scan-jobs/:id/findings", async (req, res) => {
 
 router.get("/scan-jobs/:id/attack-surface", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
 
     const job = (await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
@@ -241,7 +241,7 @@ router.get("/scan-jobs/:id/attack-surface", async (req, res) => {
     const targetUrl = job["target_url"] as string;
     const domain = new URL(targetUrl).hostname;
 
-    const nodes = [
+    const nodes: Array<{ id: string; label: string; type: string; severity: string | null }> = [
       { id: "domain_0", label: domain, type: "domain", severity: null },
     ];
 
@@ -254,7 +254,7 @@ router.get("/scan-jobs/:id/attack-surface", async (req, res) => {
       nodes.push({ id: `finding_${i}`, label: f["title"] as string, type: "finding", severity: f["severity"] as string });
     });
 
-    const edges = [];
+    const edges: Array<{ source: string; target: string; type: string }> = [];
     endpoints.slice(0, 6).forEach((_, i) => {
       edges.push({ source: "domain_0", target: `ep_${i}`, type: "depends-on" });
     });
@@ -285,7 +285,7 @@ router.get("/scan-jobs/:id/attack-surface", async (req, res) => {
 
 router.get("/scan-jobs/:id/engines", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!job) return res.status(404).json({ error: "Scan job not found" });
@@ -345,7 +345,7 @@ function formatFinding(f: Record<string, unknown>) {
 // Pause a running scan
 router.post("/scan-jobs/:id/pause", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const result = await col("scan_jobs").findOneAndUpdate(
       { _id: new ObjectId(id), status: "running" } as Record<string, unknown>,
@@ -362,7 +362,7 @@ router.post("/scan-jobs/:id/pause", async (req, res) => {
 // Resume a paused scan
 router.post("/scan-jobs/:id/resume", async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const result = await col("scan_jobs").findOneAndUpdate(
       { _id: new ObjectId(id), status: "paused" } as Record<string, unknown>,
@@ -379,7 +379,7 @@ router.post("/scan-jobs/:id/resume", async (req, res) => {
 // DELETE /scan-jobs/:id — Abort/cancel a running scan
 router.delete("/scan-jobs/:id", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!scan) return res.status(404).json({ error: "Scan not found" });
@@ -406,7 +406,7 @@ router.delete("/scan-jobs/:id", requireAuth, async (req, res) => {
 
 // GET /scan-jobs/:id/progress — SSE stream for real-time scan progress
 router.get("/scan-jobs/:id/progress", requireAuth, async (req, res) => {
-  const { id } = req.params;
+  const id = String(req.params["id"]);
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -445,7 +445,7 @@ router.get("/scan-jobs/:id/progress", requireAuth, async (req, res) => {
 // PATCH /scan-jobs/:id/priority — Set scan priority (admin)
 router.patch("/scan-jobs/:id/priority", requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { priority } = req.body as { priority?: number };
     if (priority === undefined || priority < 1 || priority > 10) {
       return res.status(400).json({ error: "priority must be 1-10 (10 = highest)" });
@@ -527,7 +527,7 @@ router.get("/scan-jobs/queue", requireAdmin, async (_req, res) => {
 
 router.patch("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { redisSet } = await import("../lib/redis");
     await redisSet(`scan:paused:${id}`, "1", 24 * 3600);
     await col("scan_jobs").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: { paused: true, paused_at: new Date() } });
@@ -539,7 +539,7 @@ router.patch("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
 
 router.patch("/scan-jobs/:id/resume", requireAuth, async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = String(req.params["id"]);
     const { redisDel } = await import("../lib/redis");
     await redisDel(`scan:paused:${id}`);
     await col("scan_jobs").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: { paused: false, resumed_at: new Date() } });
