@@ -29,6 +29,7 @@ interface ScanJob {
   authToken?: string;
   customHeaders?: Record<string, string>;
   scopeHosts?: string[];
+  openapiSpecUrl?: string;
   retryCount?: number;
   enqueuedAt?: number;
 }
@@ -184,6 +185,7 @@ async function runOneScan(job: ScanJob): Promise<void> {
       authToken: job.authToken,
       customHeaders: job.customHeaders,
       scopeHosts: job.scopeHosts,
+      openapiSpecUrl: job.openapiSpecUrl,
     });
 
     logger.info({ jobId: job.jobId }, "Scan completed");

@@ -72,6 +72,7 @@ export interface ScanJobOptions {
   customHeaders?: Record<string, string>;
   repoUrl?: string;
   githubToken?: string;
+  openapiSpecUrl?: string;
 }
 
 // ─── Scanner Pipeline Definitions ────────────────────────────────────────────
@@ -268,7 +269,16 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     dedup_key: dedupKey,
     has_raw_evidence: (sev === "critical" || sev === "high") && finding.evidence.length > 200,
     source_location: finding.source_location ?? null,
+    cve_id: (finding as unknown as Record<string, unknown>)["cve_id"] as string ?? null,
   });
+
+  // Non-blocking CVE/EPSS enrichment — triggered whenever finding has a cve_id
+  const cveId = (finding as unknown as Record<string, unknown>)["cve_id"] as string | undefined;
+  if (cveId) {
+    import("../../routes/findings").then(({ enrichFindingWithCVEExport }) => {
+      enrichFindingWithCVEExport(String(insertResult.insertedId), cveId).catch(() => {});
+    }).catch(() => {});
+  }
 
   // For critical/high findings, store the complete untruncated evidence in a
   // dedicated collection with a 30-day TTL so analysts can fully reproduce issues.
@@ -336,7 +346,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
 }
 
 export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
-  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode, sessionCookie, authToken, customHeaders, scopeHosts, targetId } = opts;
+  const { jobId, targetUrl, profile, validationEnabled, fuzzingEnabled, bugBountyMode, sessionCookie, authToken, customHeaders, scopeHosts, targetId, openapiSpecUrl } = opts;
 
   const emit = (event: ScannerEvent) => {
     scanEvents.emit(`scan:${jobId}`, event);
@@ -385,6 +395,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     authHeaders,
     scopeHosts: scopeHosts ?? [],
     sessionStore: createSessionStore(),
+    openapiSpecUrl,
     // Re-authentication: if login credentials were provided, re-run the login
     // flow when a module gets a 401 mid-scan (expired JWT / session rotation).
     reauthenticate: (authToken || sessionCookie)

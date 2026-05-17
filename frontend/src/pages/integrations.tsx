@@ -1,16 +1,17 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import {
   Github, Slack, Link, Plug, Plus, Trash2, Play, Pause,
   Mail, Calendar, Send, CheckCircle2, XCircle, AlertTriangle, Globe,
-  Activity, Clock, BarChart2,
+  Activity, Clock, BarChart2, RefreshCw, List,
 } from "lucide-react";
 
 // ── helpers ───────────────────────────────────────────────────────────────
@@ -289,6 +290,141 @@ interface Webhook {
 
 const WEBHOOK_EVENTS = ["finding.created", "scan.completed", "scan.failed", "remediation.updated", "sla.breach"];
 
+// ── Webhook Delivery Log ──────────────────────────────────────────────────
+
+interface WebhookDelivery {
+  id: string;
+  webhook_id: string;
+  event: string;
+  status_code: number | null;
+  duration_ms: number | null;
+  success: boolean;
+  created_at: string;
+}
+
+function WebhookDeliveryLogDialog({ webhookId, webhookName, open, onClose }: {
+  webhookId: string;
+  webhookName: string;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const { toast } = useToast();
+
+  const { data: deliveries = [], isLoading, refetch } = useQuery<WebhookDelivery[]>({
+    queryKey: ["/api/integrations/webhooks", webhookId, "deliveries"],
+    queryFn: () =>
+      fetch(`/api/integrations/webhooks/${webhookId}/deliveries`, { credentials: "include" }).then(r => r.json()),
+    enabled: open,
+    refetchInterval: open ? 30000 : false,
+  });
+
+  // Restart auto-refresh interval when dialog opens
+  useEffect(() => {
+    if (open) refetch();
+  }, [open, refetch]);
+
+  const retryDelivery = useMutation({
+    mutationFn: (deliveryId: string) =>
+      fetch(`/api/integrations/webhooks/${webhookId}/deliveries/${deliveryId}/retry`, {
+        method: "POST",
+        credentials: "include",
+      }).then(r => r.json()),
+    onSuccess: () => {
+      refetch();
+      toast({ title: "Delivery retried" });
+    },
+    onError: () => toast({ title: "Retry failed", variant: "destructive" }),
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <List className="w-4 h-4 text-primary" />
+            Delivery Log — {webhookName}
+          </DialogTitle>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex justify-center py-10">
+            <RefreshCw className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : deliveries.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            No deliveries recorded yet for this webhook.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted-foreground">
+                  <th className="text-left px-3 py-2 font-medium">Time</th>
+                  <th className="text-left px-3 py-2 font-medium">Event</th>
+                  <th className="text-right px-3 py-2 font-medium">Status</th>
+                  <th className="text-right px-3 py-2 font-medium">Duration</th>
+                  <th className="text-center px-3 py-2 font-medium">Result</th>
+                  <th className="px-3 py-2" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {deliveries.map(d => (
+                  <tr key={d.id} className="hover:bg-accent/20 transition-colors">
+                    <td className="px-3 py-2 text-xs text-muted-foreground whitespace-nowrap">
+                      {format(new Date(d.created_at), "MMM d, HH:mm:ss")}
+                    </td>
+                    <td className="px-3 py-2">
+                      <code className="text-[11px] font-mono text-primary/80">{d.event}</code>
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono text-xs">
+                      {d.status_code != null ? (
+                        <span className={d.status_code >= 200 && d.status_code < 300 ? "text-green-400" : "text-red-400"}>
+                          {d.status_code}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs text-muted-foreground">
+                      {d.duration_ms != null ? `${d.duration_ms}ms` : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {d.success ? (
+                        <Badge className="text-[10px] bg-green-500/15 text-green-500 border-green-500/30 gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> OK
+                        </Badge>
+                      ) : (
+                        <Badge className="text-[10px] bg-red-500/15 text-red-400 border-red-500/30 gap-1">
+                          <XCircle className="w-3 h-3" /> Failed
+                        </Badge>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {!d.success && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs"
+                          onClick={() => retryDelivery.mutate(d.id)}
+                          disabled={retryDelivery.isPending}
+                        >
+                          <RefreshCw className="w-3 h-3 mr-1" /> Retry
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted-foreground text-right mt-1">Auto-refreshes every 30s while open.</p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function WebhookManagerPanel() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -296,6 +432,7 @@ function WebhookManagerPanel() {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [events, setEvents] = useState<string[]>(["finding.created"]);
+  const [deliveryLogWebhook, setDeliveryLogWebhook] = useState<{ id: string; name: string } | null>(null);
 
   const { data: webhooks = [] } = useQuery<Webhook[]>({
     queryKey: ["/api/webhooks"],
@@ -413,6 +550,10 @@ function WebhookManagerPanel() {
                 <p className="text-xs text-muted-foreground mt-0.5">{w.events.join(", ")}</p>
               </div>
               <div className="flex items-center gap-1.5 flex-shrink-0">
+                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" title="View delivery log"
+                  onClick={() => setDeliveryLogWebhook({ id: w.id, name: w.name })}>
+                  <List className="w-3.5 h-3.5" /> Deliveries
+                </Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7" title="Send test" onClick={() => testHook.mutate(w.id)}>
                   <Send className="w-3.5 h-3.5" />
                 </Button>
@@ -429,6 +570,15 @@ function WebhookManagerPanel() {
           ))
         )}
       </CardContent>
+
+      {deliveryLogWebhook && (
+        <WebhookDeliveryLogDialog
+          webhookId={deliveryLogWebhook.id}
+          webhookName={deliveryLogWebhook.name}
+          open={!!deliveryLogWebhook}
+          onClose={() => setDeliveryLogWebhook(null)}
+        />
+      )}
     </Card>
   );
 }

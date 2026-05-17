@@ -85,6 +85,7 @@ router.post("/scan-jobs", async (req, res) => {
       auth_token?: string;
       custom_headers?: Record<string, string>;
       scope_hosts?: string[];
+      openapi_spec_url?: string;
     };
 
     if (!body.target_url || !body.scan_profile) {
@@ -146,6 +147,7 @@ router.post("/scan-jobs", async (req, res) => {
       auth_token: body.auth_token ?? null,
       custom_headers: body.custom_headers ?? (templateSettings["auth_headers"] as Record<string, string> | undefined) ?? {},
       scope_hosts: body.scope_hosts ?? (templateSettings["scope_hosts"] as string[] | undefined) ?? [],
+      openapi_spec_url: body.openapi_spec_url ?? null,
       error_message: null,
     });
 
@@ -171,6 +173,7 @@ router.post("/scan-jobs", async (req, res) => {
       authToken: body.auth_token,
       customHeaders: body.custom_headers ?? (templateSettings["auth_headers"] as Record<string, string> | undefined),
       scopeHosts: body.scope_hosts ?? (templateSettings["scope_hosts"] as string[] | undefined),
+      openapiSpecUrl: body.openapi_spec_url ?? undefined,
     });
     if (!enqueueResult.ok) {
       // Remove the scan job we just created since it can't be queued

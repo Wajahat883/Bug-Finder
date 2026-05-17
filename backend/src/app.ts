@@ -47,18 +47,27 @@ app.use(helmet({
   } : false,  // Disable CSP in dev — avoids blocking localhost cross-port requests
   crossOriginEmbedderPolicy: false,
   crossOriginResourcePolicy: { policy: "cross-origin" },
+  // HSTS: 1 year, include subdomains, eligible for preload list
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
 }));
 
 // POINT 2: CORS — allow configured origins, never throw (return 403 instead)
 const allowedOrigins = (process.env["ALLOWED_ORIGINS"] ?? "")
   .split(",").map(o => o.trim()).filter(Boolean);
 
+const REDACTED_HEADERS = ["authorization", "cookie", "x-api-key"];
+
 app.use(
   pinoHttp({
     logger,
     serializers: {
       req(req) {
-        return { id: req.id, method: req.method, url: req.url?.split("?")[0] };
+        // Redact sensitive headers before logging
+        const safeHeaders: Record<string, string> = {};
+        for (const [k, v] of Object.entries(req.headers as Record<string, string>)) {
+          safeHeaders[k] = REDACTED_HEADERS.includes(k.toLowerCase()) ? "[REDACTED]" : v;
+        }
+        return { id: req.id, method: req.method, url: req.url?.split("?")[0], headers: safeHeaders };
       },
       res(res) {
         return { statusCode: res.statusCode };

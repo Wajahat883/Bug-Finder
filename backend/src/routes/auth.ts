@@ -11,6 +11,37 @@ import { redisGet, redisSet, redisDel } from "../lib/redis";
 
 const router = Router();
 
+// In-memory brute-force protection (supplements Redis-based lockout)
+const loginAttempts = new Map<string, { count: number; lastAttempt: number }>();
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+
+function checkLoginAttempts(email: string): boolean {
+  const now = Date.now();
+  const entry = loginAttempts.get(email);
+  if (!entry) return false;
+  // Reset window if expired
+  if (now - entry.lastAttempt > LOGIN_WINDOW_MS) {
+    loginAttempts.delete(email);
+    return false;
+  }
+  return entry.count >= LOGIN_MAX_ATTEMPTS;
+}
+
+function recordFailedAttempt(email: string): void {
+  const now = Date.now();
+  const entry = loginAttempts.get(email);
+  if (!entry || now - entry.lastAttempt > LOGIN_WINDOW_MS) {
+    loginAttempts.set(email, { count: 1, lastAttempt: now });
+  } else {
+    loginAttempts.set(email, { count: entry.count + 1, lastAttempt: now });
+  }
+}
+
+function clearLoginAttempts(email: string): void {
+  loginAttempts.delete(email);
+}
+
 const DEFAULT_ADMIN_EMAIL = process.env["ADMIN_EMAIL"] ?? "admin@bugfinder.local";
 let DEFAULT_ADMIN_PASSWORD = process.env["ADMIN_PASSWORD"] ?? "";
 if (!DEFAULT_ADMIN_PASSWORD) { DEFAULT_ADMIN_PASSWORD = crypto.randomBytes(12).toString("hex"); logger.warn("ADMIN_PASSWORD not set — auto-generated a random password (will be printed once)"); console.log(`=== Auto-generated admin password: ${DEFAULT_ADMIN_PASSWORD} ===`); }
@@ -19,6 +50,8 @@ interface SessionData {
   userId?: string;
   username?: string;
   role?: string;
+  created_at?: number;
+  rememberMe?: boolean;
 }
 
 function generateId(): string {
@@ -76,7 +109,12 @@ router.post("/auth/login", authLimiter, async (req, res) => {
       return res.status(400).json({ error: "email and password are required" });
     }
 
-    // Account lockout check
+    // In-memory brute-force check
+    if (checkLoginAttempts(email)) {
+      return res.status(429).json({ error: "Account temporarily locked. Try again in 15 minutes." });
+    }
+
+    // Redis-backed account lockout check
     const lockoutKey = `lockout:${email}`;
     const lockoutVal = await redisGet(lockoutKey);
     if (lockoutVal !== null && parseInt(lockoutVal, 10) >= 5) {
@@ -101,7 +139,8 @@ router.post("/auth/login", authLimiter, async (req, res) => {
     }
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      // Increment failed attempts counter
+      // Increment both in-memory and Redis failed attempts counters
+      recordFailedAttempt(email);
       const currentVal = await redisGet(lockoutKey);
       const attempts = currentVal !== null ? parseInt(currentVal, 10) + 1 : 1;
       await redisSet(lockoutKey, String(attempts), 15 * 60); // 15-minute TTL
@@ -110,7 +149,8 @@ router.post("/auth/login", authLimiter, async (req, res) => {
 
     const id = user._id.toHexString();
 
-    // Clear lockout key on successful login
+    // Clear lockout keys on successful login
+    clearLoginAttempts(email);
     await redisDel(lockoutKey);
 
     // Max 3 concurrent sessions — evict oldest if at limit
@@ -127,6 +167,14 @@ router.post("/auth/login", authLimiter, async (req, res) => {
 
     if (requireMfaRoles.includes(user["role"] as string)) {
       const fullUser = await col("users").findOne({ _id: user._id }) as Record<string, unknown> | null;
+      // Strict TOTP-enabled check per compliance spec
+      if (fullUser?.["totp_enabled"] !== true) {
+        return res.status(403).json({
+          error: "MFA required for your role",
+          mfa_required: true,
+        });
+      }
+      // Also allow WebAuthn as an alternative MFA factor
       const hasMfa = !!(fullUser?.["totp_secret"] || (fullUser?.["webauthn_credentials"] as unknown[])?.length);
       if (!hasMfa) {
         const createdAt = fullUser?.["created_at"] ? new Date(fullUser["created_at"] as string) : new Date();
@@ -143,6 +191,7 @@ router.post("/auth/login", authLimiter, async (req, res) => {
 
     const session = (req as unknown as { session: SessionData }).session;
     session.userId = id; session.username = user.username; session.role = user.role;
+    session.created_at = Date.now();
 
     const rememberMe = req.body?.remember_me === true;
     if (rememberMe) {

@@ -510,6 +510,144 @@ router.post("/scan-jobs/:id/cancel", requireAuth, async (req, res) => {
   }
 });
 
+// ── CVE/EPSS background enrichment ───────────────────────────────────────────
+
+/**
+ * Fetches NVD v2 + EPSS data for a specific CVE ID and persists it onto the
+ * finding document. Designed to be called non-blocking after insert:
+ *   enrichFindingWithCVE(id, cveId).catch(() => {})
+ */
+export async function enrichFindingWithCVEExport(findingId: string, cveId: string): Promise<void> {
+  return enrichFindingWithCVE(findingId, cveId);
+}
+
+async function enrichFindingWithCVE(findingId: string, cveId: string): Promise<void> {
+  if (!ObjectId.isValid(findingId)) return;
+
+  const updates: Record<string, unknown> = { cve_enriched_at: new Date() };
+
+  // ── NVD API v2 ────────────────────────────────────────────────────────────
+  try {
+    const nvdUrl = `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=${encodeURIComponent(cveId)}`;
+    const nvdRes = await fetch(nvdUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10000),
+    });
+    if (nvdRes.ok) {
+      const data = await nvdRes.json() as Record<string, unknown>;
+      const vulns = (data["vulnerabilities"] as Array<Record<string, unknown>>) ?? [];
+      const first = vulns[0];
+      if (first) {
+        const cve = first["cve"] as Record<string, unknown>;
+        const descriptions = (cve["descriptions"] as Array<Record<string, unknown>>) ?? [];
+        const enDesc = descriptions.find((d) => d["lang"] === "en");
+        if (enDesc?.["value"]) updates["nvd_description"] = enDesc["value"];
+
+        const metrics = (cve["metrics"] as Record<string, unknown>) ?? {};
+        const cvssV31 = ((metrics["cvssMetricV31"] as Array<Record<string, unknown>>) ?? [])[0];
+        if (cvssV31) {
+          const cvssData = cvssV31["cvssData"] as Record<string, unknown> | undefined;
+          if (cvssData?.["baseScore"]) updates["cvss_v3_score"] = cvssData["baseScore"];
+        }
+
+        // Check for known exploits (CISA KEV references or vuln references tagged "Exploit")
+        const refs = (cve["references"] as Array<Record<string, unknown>>) ?? [];
+        const hasExploit = refs.some((r) => {
+          const tags = (r["tags"] as string[]) ?? [];
+          return tags.some((t) => t.toLowerCase().includes("exploit"));
+        });
+        updates["known_exploits"] = hasExploit;
+      }
+    }
+  } catch { /* NVD unavailable — skip */ }
+
+  // ── EPSS (Exploit Prediction Scoring System) ──────────────────────────────
+  try {
+    const epssUrl = `https://api.first.org/data/v1/epss?cve=${encodeURIComponent(cveId)}`;
+    const epssRes = await fetch(epssUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (epssRes.ok) {
+      const epssData = await epssRes.json() as Record<string, unknown>;
+      const dataArr = (epssData["data"] as Array<Record<string, unknown>>) ?? [];
+      const epssEntry = dataArr[0];
+      if (epssEntry) {
+        const epssScore = parseFloat(String(epssEntry["epss"] ?? "0"));
+        const epssPercentile = parseFloat(String(epssEntry["percentile"] ?? "0"));
+        if (!isNaN(epssScore)) updates["epss_score"] = epssScore;
+        if (!isNaN(epssPercentile)) updates["epss_percentile"] = epssPercentile;
+      }
+    }
+  } catch { /* EPSS unavailable — skip */ }
+
+  if (Object.keys(updates).length > 1) { // more than just cve_enriched_at
+    await col("findings").updateOne(
+      { _id: new ObjectId(findingId) } as Record<string, unknown>,
+      { $set: updates }
+    );
+  }
+}
+
+// ── Admin: Bulk CVE/EPSS enrichment ──────────────────────────────────────────
+
+router.get("/findings/enrich-all", requireAuth, async (req, res) => {
+  try {
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    if (session.role !== "admin") return res.status(403).json({ error: "Admin only" });
+
+    // Find all findings with a cve_id but no epss_score yet
+    const pending = await col("findings")
+      .find({ cve_id: { $exists: true, $ne: null }, epss_score: { $exists: false } } as Record<string, unknown>)
+      .project({ _id: 1, cve_id: 1 })
+      .limit(500)
+      .toArray() as Array<Record<string, unknown>>;
+
+    // Kick off enrichment non-blocking — each promise is individually caught
+    for (const f of pending) {
+      const id = String(f["_id"]);
+      const cveId = String(f["cve_id"] ?? "");
+      if (cveId) enrichFindingWithCVE(id, cveId).catch(() => {});
+    }
+
+    res.json({ ok: true, queued: pending.length });
+  } catch (err) {
+    logger.error({ err }, "Bulk CVE enrichment error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Get stored CVE enrichment data for a finding ──────────────────────────────
+
+router.get("/findings/:id/cve-details", requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
+
+    const finding = (await col("findings").findOne(
+      { _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>
+    )) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    res.json({
+      finding_id: id,
+      cve_id: finding["cve_id"] ?? null,
+      nvd_description: finding["nvd_description"] ?? null,
+      cvss_v3_score: finding["cvss_v3_score"] ?? null,
+      epss_score: finding["epss_score"] ?? null,
+      epss_percentile: finding["epss_percentile"] ?? null,
+      known_exploits: finding["known_exploits"] ?? null,
+      cve_enriched_at: finding["cve_enriched_at"] ?? null,
+    });
+  } catch (err) {
+    logger.error({ err }, "CVE details fetch error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 // ── CVE enrichment for a finding ─────────────────────────────────────────────
 
 router.get("/findings/:id/cve", requireAuth, async (req, res) => {

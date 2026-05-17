@@ -10,7 +10,7 @@ import { Slider } from "@/components/ui/slider";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Save, Key, Webhook, Bell, BrainCircuit, Activity, Mail, RefreshCw, Eye, EyeOff, ShieldCheck, QrCode, Smartphone, Send, Loader2, BookOpen } from "lucide-react";
+import { Save, Key, Webhook, Bell, BrainCircuit, Activity, Mail, RefreshCw, Eye, EyeOff, ShieldCheck, QrCode, Smartphone, Send, Loader2, BookOpen, Palette, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 const AI_MODELS = [
@@ -306,6 +306,9 @@ export default function Settings() {
           </CardContent>
         </Card>
 
+        {/* Report Branding */}
+        <ReportBrandingCard />
+
         {/* 2FA Setup */}
         <TwoFactorCard />
 
@@ -344,6 +347,156 @@ export default function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+function ReportBrandingCard() {
+  const { toast } = useToast();
+  const [brandingForm, setBrandingForm] = useState({
+    report_company_name: "",
+    report_primary_color: "#7c3aed",
+    report_logo_base64: "",
+    report_footer_text: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  const { data: settings } = useQuery<Record<string, unknown>>({
+    queryKey: ["/api/settings", "branding"],
+    queryFn: () => fetch("/api/settings", { credentials: "include" }).then(r => r.json()),
+  });
+
+  useEffect(() => {
+    if (settings) {
+      setBrandingForm({
+        report_company_name: (settings.report_company_name as string) ?? "",
+        report_primary_color: (settings.report_primary_color as string) ?? "#7c3aed",
+        report_logo_base64: (settings.report_logo_base64 as string) ?? "",
+        report_footer_text: (settings.report_footer_text as string) ?? "",
+      });
+    }
+  }, [settings]);
+
+  function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const b64 = ev.target?.result as string;
+      setBrandingForm(f => ({ ...f, report_logo_base64: b64 }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function saveBranding() {
+    setSaving(true);
+    try {
+      const r = await fetch("/api/settings", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(brandingForm),
+      });
+      if (!r.ok) throw new Error("Failed");
+      toast({ title: "Report branding saved" });
+    } catch {
+      toast({ title: "Failed to save branding", variant: "destructive" });
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center"><Palette className="w-5 h-5 mr-2 text-primary" />Report Branding</CardTitle>
+        <CardDescription>Customize how PDF reports look for your organization</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>Company Name</Label>
+            <Input
+              placeholder="Acme Security Corp"
+              value={brandingForm.report_company_name}
+              onChange={e => setBrandingForm(f => ({ ...f, report_company_name: e.target.value }))}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Primary Color</Label>
+            <div className="flex items-center gap-3">
+              <input
+                type="color"
+                value={brandingForm.report_primary_color}
+                onChange={e => setBrandingForm(f => ({ ...f, report_primary_color: e.target.value }))}
+                className="w-10 h-10 rounded border border-border cursor-pointer p-0.5 bg-transparent"
+              />
+              <span className="font-mono text-sm text-muted-foreground">{brandingForm.report_primary_color}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Company Logo</Label>
+          <div className="flex items-center gap-4">
+            {brandingForm.report_logo_base64 && (
+              <img
+                src={brandingForm.report_logo_base64}
+                alt="Company logo preview"
+                className="w-12 h-12 object-contain rounded border border-border bg-muted/30"
+              />
+            )}
+            <div>
+              <input
+                type="file"
+                accept="image/*"
+                id="logo-upload"
+                className="hidden"
+                onChange={handleLogoUpload}
+              />
+              <label
+                htmlFor="logo-upload"
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm rounded-md border border-border cursor-pointer hover:bg-accent transition-colors"
+              >
+                {brandingForm.report_logo_base64 ? "Change Logo" : "Upload Logo"}
+              </label>
+              {brandingForm.report_logo_base64 && (
+                <button
+                  onClick={() => setBrandingForm(f => ({ ...f, report_logo_base64: "" }))}
+                  className="ml-2 text-xs text-destructive hover:underline"
+                >
+                  Remove
+                </button>
+              )}
+              <p className="text-xs text-muted-foreground mt-1">PNG or SVG recommended. Will be embedded in PDF reports.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>PDF Footer Text</Label>
+          <Input
+            placeholder="Confidential — Bug Finder Pro Security Report"
+            value={brandingForm.report_footer_text}
+            onChange={e => setBrandingForm(f => ({ ...f, report_footer_text: e.target.value }))}
+          />
+          <p className="text-xs text-muted-foreground">One line of text shown at the bottom of every report page.</p>
+        </div>
+
+        <div className="flex items-center gap-3 pt-1">
+          <Button onClick={saveBranding} disabled={saving} size="sm" className="gap-2">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Branding
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2"
+            onClick={() => window.open("/api/reports/preview", "_blank")}
+          >
+            <ExternalLink className="w-4 h-4" />
+            Preview Report Style
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

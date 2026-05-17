@@ -206,6 +206,15 @@ async function serveCacheIfHit(res: import("express").Response, cacheKey: string
   return false;
 }
 
+// ── Confidence scoring ────────────────────────────────────────────────────────
+
+function estimateConfidence(text: string, inputLength: number): number {
+  const hedgeWords = ["might", "could", "possibly", "uncertain", "unclear", "may", "perhaps"];
+  const hedgeCount = hedgeWords.filter(w => text.toLowerCase().includes(w)).length;
+  const lengthRatio = Math.min(text.length / Math.max(inputLength, 1), 2);
+  return Math.round(Math.min(95, Math.max(40, 85 - hedgeCount * 4 + lengthRatio * 3)));
+}
+
 // ── Routes ───────────────────────────────────────────────────────────────────
 
 const router = Router();
@@ -251,6 +260,17 @@ router.get("/ai/usage/all", async (req, res) => {
   res.json(agg);
 });
 
+// ── User model preference helper ──────────────────────────────────────────────
+
+async function getUserModel(userId: string): Promise<string> {
+  try {
+    const userSettings = await col("users").findOne({ _id: new ObjectId(userId) });
+    return (userSettings?.["settings"]?.["ai_model"] as string) || getModel();
+  } catch {
+    return getModel();
+  }
+}
+
 // ── Scan Summary ──────────────────────────────────────────────────────────────
 router.post("/ai/scan-summary/:id", async (req, res) => {
   const { id } = req.params;
@@ -259,6 +279,9 @@ router.post("/ai/scan-summary/:id", async (req, res) => {
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
+
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
 
   try {
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>);
@@ -273,16 +296,21 @@ router.post("/ai/scan-summary/:id", async (req, res) => {
     ).join("\n");
     const categories = [...new Set(findings.map((f: Record<string, unknown>) => f.category))].filter(Boolean);
 
+    const userContent = `## Security Assessment Summary Request\n\n**Target:** ${scan.target_url}\n**Risk Score:** ${scan.risk_score}/100\n**Findings:** ${findings.length} total — Critical: ${criticals.length}, High: ${highs.length}, Medium: ${mediums.length}\n**Vulnerability Categories:** ${categories.join(", ") || "N/A"}\n\n**Top Critical/High Findings:**\n${topFindings || "No critical/high findings."}\n\nWrite a professional **3-paragraph executive summary**:\n\n**Paragraph 1 — Security Posture:** Overall risk level, attack surface assessment, and how this compares to industry benchmarks.\n\n**Paragraph 2 — Critical Issues & Business Impact:** The most dangerous findings, their real-world exploitability, potential data exposure, and regulatory implications (GDPR, PCI-DSS, SOC2 where relevant).\n\n**Paragraph 3 — Immediate Actions:** Specific, prioritized remediation steps with rough effort estimates. Lead with highest-impact quick wins.\n\nWrite in flowing paragraphs. No bullet points. Professional tone suitable for a CISO briefing.`;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: securityExpertSystem() },
-      { role: "user", content: `## Security Assessment Summary Request\n\n**Target:** ${scan.target_url}\n**Risk Score:** ${scan.risk_score}/100\n**Findings:** ${findings.length} total — Critical: ${criticals.length}, High: ${highs.length}, Medium: ${mediums.length}\n**Vulnerability Categories:** ${categories.join(", ") || "N/A"}\n\n**Top Critical/High Findings:**\n${topFindings || "No critical/high findings."}\n\nWrite a professional **3-paragraph executive summary**:\n\n**Paragraph 1 — Security Posture:** Overall risk level, attack surface assessment, and how this compares to industry benchmarks.\n\n**Paragraph 2 — Critical Issues & Business Impact:** The most dangerous findings, their real-world exploitability, potential data exposure, and regulatory implications (GDPR, PCI-DSS, SOC2 where relevant).\n\n**Paragraph 3 — Immediate Actions:** Specific, prioritized remediation steps with rough effort estimates. Lead with highest-impact quick wins.\n\nWrite in flowing paragraphs. No bullet points. Professional tone suitable for a CISO briefing.` },
+      { role: "user", content: userContent },
     ];
 
     setupSse(res);
     const hb = startSseHeartbeat(res);
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 1800, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("scan-summary", id, text); }
+      const text = await streamWithRetry(res, () => ({ model, max_tokens: 1800, messages }), 2, abort.signal);
+      if (text) {
+        setCached(cacheKey, text).catch(() => {});
+        logUsage("scan-summary", id, text);
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ done: true, confidence: estimateConfidence(text, userContent.length) })}\n\n`);
+      }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI summary error");
@@ -299,20 +327,28 @@ router.post("/ai/finding-advice/:id", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     const finding = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     if (!finding) { res.status(404).json({ error: "Finding not found" }); return; }
 
+    const userContent = `## Remediation Guidance Request\n\n**Vulnerability:** ${sanitize(String(finding.title), 200)}\n**Severity:** ${finding.severity} | **CVSS:** ${finding.cvss_score ?? "N/A"} | **CWE:** ${finding.cwe_id ?? "N/A"}\n**Endpoint:** ${sanitize(String(finding.endpoint), 200)}\n**Description:** ${sanitize(String(finding.description ?? ""), 500)}\n**Evidence:** ${sanitize(String(finding.evidence ?? ""), 300)}\n\n## Root Cause Analysis\nExplain the underlying programming mistake or architectural flaw. Be specific about the code pattern.\n\n## Step-by-Step Fix\nShow:\n- Vulnerable code snippet (labeled \`// VULNERABLE\`)\n- Fixed code snippet (labeled \`// FIXED\`) with inline comments\n\n## Verification Steps\nHow to confirm the fix works — include a specific test case or curl command.\n\n## Prevention Measures\n3-4 concrete engineering controls (input validation library, security header, framework config, CI/CD check).\n\n## Related Vulnerabilities to Check\nList 2-3 related CWEs or attack variants to audit in the same codebase.`;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: securityExpertSystem() },
-      { role: "user", content: `## Remediation Guidance Request\n\n**Vulnerability:** ${sanitize(String(finding.title), 200)}\n**Severity:** ${finding.severity} | **CVSS:** ${finding.cvss_score ?? "N/A"} | **CWE:** ${finding.cwe_id ?? "N/A"}\n**Endpoint:** ${sanitize(String(finding.endpoint), 200)}\n**Description:** ${sanitize(String(finding.description ?? ""), 500)}\n**Evidence:** ${sanitize(String(finding.evidence ?? ""), 300)}\n\n## Root Cause Analysis\nExplain the underlying programming mistake or architectural flaw. Be specific about the code pattern.\n\n## Step-by-Step Fix\nShow:\n- Vulnerable code snippet (labeled \`// VULNERABLE\`)\n- Fixed code snippet (labeled \`// FIXED\`) with inline comments\n\n## Verification Steps\nHow to confirm the fix works — include a specific test case or curl command.\n\n## Prevention Measures\n3-4 concrete engineering controls (input validation library, security header, framework config, CI/CD check).\n\n## Related Vulnerabilities to Check\nList 2-3 related CWEs or attack variants to audit in the same codebase.` },
+      { role: "user", content: userContent },
     ];
 
     setupSse(res);
     const hb = startSseHeartbeat(res);
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 2000, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("finding-advice", id, text); }
+      const text = await streamWithRetry(res, () => ({ model, max_tokens: 2000, messages }), 2, abort.signal);
+      if (text) {
+        setCached(cacheKey, text).catch(() => {});
+        logUsage("finding-advice", id, text);
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ done: true, confidence: estimateConfidence(text, userContent.length) })}\n\n`);
+      }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI advice error");
@@ -324,6 +360,9 @@ router.post("/ai/finding-advice/:id", async (req, res) => {
 router.post("/ai/chat", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
+
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
 
   try {
     const { message, system, history = [], scan_id, context } = req.body as {
@@ -347,17 +386,21 @@ router.post("/ai/chat", async (req, res) => {
     }
 
     const systemPrompt = system ?? `${securityExpertSystem()}${contextBlock}\n\nYou are the AI assistant embedded in Bug Finder Pro. Users are security engineers, pentesters, and developers. Give concrete technical answers — not generic advice.`;
+    const sanitizedMsg = sanitize(message, 2000);
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: systemPrompt },
       ...history.slice(-12),
-      { role: "user", content: sanitize(message, 2000) },
+      { role: "user", content: sanitizedMsg },
     ];
 
     setupSse(res);
     const hb = startSseHeartbeat(res);
     try {
-      await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 2500, messages }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, max_tokens: 2500, messages }), 2, abort.signal);
+      if (text && !res.writableEnded) {
+        res.write(`data: ${JSON.stringify({ done: true, confidence: estimateConfidence(text, sanitizedMsg.length) })}\n\n`);
+      }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI chat error");
@@ -374,20 +417,28 @@ router.post("/ai/payloads/:id", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     const finding = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     if (!finding) { res.status(404).json({ error: "Finding not found" }); return; }
 
+    const userContent = buildPayloadPrompt(finding as Record<string, unknown>);
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: securityExpertSystem() },
-      { role: "user", content: buildPayloadPrompt(finding as Record<string, unknown>) },
+      { role: "user", content: userContent },
     ];
 
     setupSse(res);
     const hb = startSseHeartbeat(res);
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 2500, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("payloads", id, text); }
+      const text = await streamWithRetry(res, () => ({ model, max_tokens: 2500, messages }), 2, abort.signal);
+      if (text) {
+        setCached(cacheKey, text).catch(() => {});
+        logUsage("payloads", id, text);
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ done: true, confidence: estimateConfidence(text, userContent.length) })}\n\n`);
+      }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI payloads error");
@@ -405,20 +456,28 @@ router.post("/ai/patch/:id", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     const finding = await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     if (!finding) { res.status(404).json({ error: "Finding not found" }); return; }
 
+    const userContent = `## Production-Ready Security Patch Request\n\n**Vulnerability:** ${sanitize(String(finding.title), 200)}\n**CWE:** ${finding.cwe_id ?? "N/A"} | **CVSS:** ${finding.cvss_score ?? "N/A"}\n**Endpoint:** ${sanitize(String(finding.endpoint), 200)}\n**Recommended Fix:** ${sanitize(String(finding.recommended_fix ?? ""), 300)}${tech_stack ? `\n**Tech Stack:** ${tech_stack}` : ""}\n\n## Vulnerable Code\nShow a realistic snippet demonstrating the vulnerability.\n\n## Fixed Code\nPatched version with inline comments explaining each security control.\n\n## Security Unit Test\nA specific test case verifying the fix prevents exploitation.\n\n## Deployment Checklist\n- [ ] items the developer must verify before deploying.\n\n## References\nCWE link, OWASP cheat sheet link, relevant CVEs.`;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: securityExpertSystem() },
-      { role: "user", content: `## Production-Ready Security Patch Request\n\n**Vulnerability:** ${sanitize(String(finding.title), 200)}\n**CWE:** ${finding.cwe_id ?? "N/A"} | **CVSS:** ${finding.cvss_score ?? "N/A"}\n**Endpoint:** ${sanitize(String(finding.endpoint), 200)}\n**Recommended Fix:** ${sanitize(String(finding.recommended_fix ?? ""), 300)}${tech_stack ? `\n**Tech Stack:** ${tech_stack}` : ""}\n\n## Vulnerable Code\nShow a realistic snippet demonstrating the vulnerability.\n\n## Fixed Code\nPatched version with inline comments explaining each security control.\n\n## Security Unit Test\nA specific test case verifying the fix prevents exploitation.\n\n## Deployment Checklist\n- [ ] items the developer must verify before deploying.\n\n## References\nCWE link, OWASP cheat sheet link, relevant CVEs.` },
+      { role: "user", content: userContent },
     ];
 
     setupSse(res);
     const hb = startSseHeartbeat(res);
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 3000, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("patch", id, text); }
+      const text = await streamWithRetry(res, () => ({ model, max_tokens: 3000, messages }), 2, abort.signal);
+      if (text) {
+        setCached(cacheKey, text).catch(() => {});
+        logUsage("patch", id, text);
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ done: true, confidence: estimateConfidence(text, userContent.length) })}\n\n`);
+      }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI patch error");
@@ -435,6 +494,9 @@ router.post("/ai/executive-narrative/:id", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>);
     if (!scan) { res.status(404).json({ error: "Scan not found" }); return; }
@@ -444,16 +506,21 @@ router.post("/ai/executive-narrative/:id", async (req, res) => {
     const highs = findings.filter((f: Record<string, unknown>) => f.severity === "high");
     const categories = [...new Set(findings.map((f: Record<string, unknown>) => f.category))].slice(0, 6);
 
+    const userContent = `## Executive Security Briefing Request\n\n**Target:** ${scan.target_url} | **Risk Score:** ${scan.risk_score ?? 0}/100\n**Findings:** ${findings.length} total (${criticals.length} critical, ${highs.length} high)\n**Categories:** ${categories.join(", ")}\n**Critical Issues:** ${criticals.slice(0, 3).map((f: Record<string, unknown>) => sanitize(String(f.title), 80)).join("; ") || "None"}\n\nWrite 4 C-suite paragraphs in plain business English:\n\n1) **Executive Summary** — What was assessed, bottom-line risk verdict, urgency level.\n2) **Business Risk** — Financial/reputational/regulatory exposure. Reference GDPR, PCI-DSS, SOC 2 where relevant.\n3) **Key Findings (Non-Technical)** — 2-3 most important vulnerabilities using analogies a CEO understands.\n4) **Recommended Actions & Timeline** — Prioritized plan with realistic milestones (Week 1, Month 1, Quarter 1).\n\nNo bullet points. No jargon. Written for a board audience.`;
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: "system", content: securityExpertSystem() },
-      { role: "user", content: `## Executive Security Briefing Request\n\n**Target:** ${scan.target_url} | **Risk Score:** ${scan.risk_score ?? 0}/100\n**Findings:** ${findings.length} total (${criticals.length} critical, ${highs.length} high)\n**Categories:** ${categories.join(", ")}\n**Critical Issues:** ${criticals.slice(0, 3).map((f: Record<string, unknown>) => sanitize(String(f.title), 80)).join("; ") || "None"}\n\nWrite 4 C-suite paragraphs in plain business English:\n\n1) **Executive Summary** — What was assessed, bottom-line risk verdict, urgency level.\n2) **Business Risk** — Financial/reputational/regulatory exposure. Reference GDPR, PCI-DSS, SOC 2 where relevant.\n3) **Key Findings (Non-Technical)** — 2-3 most important vulnerabilities using analogies a CEO understands.\n4) **Recommended Actions & Timeline** — Prioritized plan with realistic milestones (Week 1, Month 1, Quarter 1).\n\nNo bullet points. No jargon. Written for a board audience.` },
+      { role: "user", content: userContent },
     ];
 
     setupSse(res);
     const hb = startSseHeartbeat(res);
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), max_tokens: 1800, messages }), 2, abort.signal);
-      if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("exec-narrative", id, text); }
+      const text = await streamWithRetry(res, () => ({ model, max_tokens: 1800, messages }), 2, abort.signal);
+      if (text) {
+        setCached(cacheKey, text).catch(() => {});
+        logUsage("exec-narrative", id, text);
+        if (!res.writableEnded) res.write(`data: ${JSON.stringify({ done: true, confidence: estimateConfidence(text, userContent.length) })}\n\n`);
+      }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
     logger.error({ err }, "AI executive narrative error");
@@ -470,6 +537,9 @@ router.post("/ai/attack-chain/:scanId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -483,7 +553,7 @@ router.post("/ai/attack-chain/:scanId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 1800 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("attack-chain", scanId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -502,6 +572,9 @@ router.post("/ai/poc/:findingId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -514,7 +587,7 @@ router.post("/ai/poc/:findingId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 1800 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("poc", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -557,6 +630,9 @@ router.post("/ai/patch-diff/:findingId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -569,7 +645,7 @@ router.post("/ai/patch-diff/:findingId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1200 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 1200 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("patch-diff", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -588,6 +664,9 @@ router.post("/ai/bug-bounty-report/:findingId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -600,7 +679,7 @@ router.post("/ai/bug-bounty-report/:findingId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 2000 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 2000 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("bb-report", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -619,6 +698,9 @@ router.post("/ai/attack-narrative/:findingId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -631,7 +713,7 @@ router.post("/ai/attack-narrative/:findingId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 900 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 900 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("attack-narrative", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -650,6 +732,9 @@ router.post("/ai/tools/:findingId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -662,7 +747,7 @@ router.post("/ai/tools/:findingId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 1800 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("tools", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -681,6 +766,9 @@ router.post("/ai/remediation-plan/:scanId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -698,7 +786,7 @@ router.post("/ai/remediation-plan/:scanId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 2500 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 2500 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("remediation-plan", scanId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -717,6 +805,9 @@ router.post("/ai/false-positive/:findingId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -729,7 +820,7 @@ router.post("/ai/false-positive/:findingId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1400 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 1400 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("fp-analysis", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -748,6 +839,9 @@ router.post("/ai/cvss-breakdown/:findingId", async (req, res) => {
   const abort = new AbortController();
   req.on("close", () => abort.abort());
 
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
+
   try {
     setupSse(res);
     const hb = startSseHeartbeat(res);
@@ -760,7 +854,7 @@ router.post("/ai/cvss-breakdown/:findingId", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1400 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 1400 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("cvss-breakdown", findingId, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -778,6 +872,9 @@ router.post("/ai/scan-compare/:scanId1/:scanId2", async (req, res) => {
 
   const abort = new AbortController();
   req.on("close", () => abort.abort());
+
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  const model = await getUserModel(session.userId ?? "");
 
   try {
     setupSse(res);
@@ -804,7 +901,7 @@ router.post("/ai/scan-compare/:scanId1/:scanId2", async (req, res) => {
     ];
 
     try {
-      const text = await streamWithRetry(res, () => ({ model: getModel(), messages, max_tokens: 1800 }), 2, abort.signal);
+      const text = await streamWithRetry(res, () => ({ model, messages, max_tokens: 1800 }), 2, abort.signal);
       if (text) { setCached(cacheKey, text).catch(() => {}); logUsage("scan-compare", scanId1, text); }
     } finally { clearInterval(hb); if (!res.writableEnded) res.end(); }
   } catch (err) {
@@ -1061,6 +1158,41 @@ router.post("/ai/code-fix/:findingId", requireAuth, async (req, res) => {
     res.json(patch);
   } catch (err) {
     logger.error({ err }, "Code fix error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Feedback Stats ────────────────────────────────────────────────────────────
+router.get("/ai/feedback/stats", async (_req, res) => {
+  try {
+    const stats = await col("ai_feedback").aggregate([
+      { $group: { _id: { type: "$type", vote: "$vote" }, count: { $sum: 1 } } }
+    ]).toArray() as Array<Record<string, unknown>>;
+
+    let total = 0;
+    let positive = 0;
+    let negative = 0;
+    const by_type: Record<string, { positive: number; negative: number }> = {};
+
+    for (const entry of stats) {
+      const id = entry["_id"] as { type?: string; vote?: string };
+      const count = Number(entry["count"] ?? 0);
+      const type = String(id?.type ?? "unknown");
+      const vote = String(id?.vote ?? "");
+
+      total += count;
+      if (vote === "up" || vote === "positive") positive += count;
+      else if (vote === "down" || vote === "negative") negative += count;
+
+      if (!by_type[type]) by_type[type] = { positive: 0, negative: 0 };
+      if (vote === "up" || vote === "positive") by_type[type].positive += count;
+      else if (vote === "down" || vote === "negative") by_type[type].negative += count;
+    }
+
+    const accuracy_rate = total > 0 ? `${Math.round((positive / total) * 100)}%` : "N/A";
+    res.json({ total, positive, negative, by_type, accuracy_rate });
+  } catch (err) {
+    logger.error({ err }, "Feedback stats error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -63,6 +63,8 @@ import ReportSchedules from "@/pages/report-schedules";
 import SecretsPage from "@/pages/secrets";
 import ScannerRulesPage from "@/pages/scanner-rules";
 import AdminLoginHistory from "@/pages/admin-login-history";
+import SbomPage from "@/pages/sbom";
+import ApiDocs from "@/pages/api-docs";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30000 } },
@@ -197,6 +199,8 @@ function Router() {
               {() => <AdminRoute component={AdminLoginHistory} />}
             </Route>
 
+            <Route path="/scans/:id/sbom" component={SbomPage} />
+            <Route path="/api-docs" component={ApiDocs} />
             <Route path="/report-schedules" component={ReportSchedules} />
             <Route path="/status" component={StatusPage} />
             <Route path="/forbidden" component={Forbidden} />

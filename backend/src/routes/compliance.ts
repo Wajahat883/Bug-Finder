@@ -2,6 +2,31 @@ import { Router } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
+import { requireAuth } from "../middlewares/rbac";
+
+// SOC2 / ISO 27001 / PCI-DSS control mappings keyed by finding category
+const CONTROL_MAPPINGS: Record<string, { soc2: string[]; iso27001: string[]; pci: string[] }> = {
+  "injection":  { soc2: ["CC6.1","CC6.6"], iso27001: ["A.14.2.5","A.8.28"], pci: ["6.3.1","6.3.2"] },
+  "xss":        { soc2: ["CC6.1"],          iso27001: ["A.14.2.5"],          pci: ["6.3.1"] },
+  "auth":       { soc2: ["CC6.2","CC6.3"],  iso27001: ["A.9.2.1","A.9.4.2"], pci: ["8.2.1","8.3.1"] },
+  "crypto":     { soc2: ["CC9.1"],          iso27001: ["A.10.1.1"],          pci: ["3.4.1","4.2.1"] },
+  "config":     { soc2: ["CC7.1"],          iso27001: ["A.12.1.1"],          pci: ["2.2.1"] },
+  "exposure":   { soc2: ["CC6.7"],          iso27001: ["A.13.2.3"],          pci: ["4.1.1"] },
+  "secrets":    { soc2: ["CC6.1","CC6.7"], iso27001: ["A.10.1.1"],          pci: ["3.4.1"] },
+};
+
+// Normalise a finding category string to a CONTROL_MAPPINGS key
+function normaliseCategoryKey(category: string): string {
+  const c = category.toLowerCase();
+  if (c.includes("inject") || c.includes("sqli") || c.includes("nosql") || c.includes("template")) return "injection";
+  if (c.includes("xss") || c.includes("cross-site scripting")) return "xss";
+  if (c.includes("auth") || c.includes("jwt") || c.includes("session")) return "auth";
+  if (c.includes("crypto") || c.includes("tls") || c.includes("certif") || c.includes("encrypt")) return "crypto";
+  if (c.includes("config") || c.includes("cors") || c.includes("misconfigur")) return "config";
+  if (c.includes("secret") || c.includes("hardcoded") || c.includes("api_key") || c.includes("credential")) return "secrets";
+  if (c.includes("expos") || c.includes("disclosure") || c.includes("leak")) return "exposure";
+  return "";
+}
 
 const router = Router();
 
@@ -313,6 +338,165 @@ router.post("/compliance/attestations", async (req, res) => {
     res.status(201).json({ ...saved, id: String(saved["_id"]) });
   } catch (err) {
     logger.error({ err }, "Create attestation error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── SOC2 / ISO 27001 / PCI-DSS framework endpoints ──────────────────────────
+
+// GET /compliance/mapping — findings grouped by framework control
+router.get("/compliance/mapping", requireAuth, async (req, res) => {
+  try {
+    const sess = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = sess?.role !== "admin" ? { user_id: sess?.userId } : {};
+    const findings = await col("findings").find({ ...userFilter, status: { $nin: ["resolved", "false_positive"] } }).toArray() as Array<Record<string, unknown>>;
+
+    // Build control → findings map for each framework
+    const soc2Map: Record<string, Array<Record<string, unknown>>> = {};
+    const iso27001Map: Record<string, Array<Record<string, unknown>>> = {};
+    const pciMap: Record<string, Array<Record<string, unknown>>> = {};
+
+    for (const f of findings) {
+      const key = normaliseCategoryKey(String(f["category"] ?? ""));
+      const controls = CONTROL_MAPPINGS[key];
+      if (!controls) continue;
+      const summary = { id: String(f["_id"]), title: f["title"], severity: f["severity"], category: f["category"] };
+      for (const ctrl of controls.soc2) { (soc2Map[ctrl] ??= []).push(summary); }
+      for (const ctrl of controls.iso27001) { (iso27001Map[ctrl] ??= []).push(summary); }
+      for (const ctrl of controls.pci) { (pciMap[ctrl] ??= []).push(summary); }
+    }
+
+    res.json({ soc2: soc2Map, iso27001: iso27001Map, pci: pciMap });
+  } catch (err) {
+    logger.error({ err }, "Compliance mapping error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /compliance/report/:framework — per-framework compliance score
+router.get("/compliance/report/:framework", requireAuth, async (req, res) => {
+  try {
+    const { framework } = req.params;
+    if (!["soc2", "iso27001", "pci"].includes(framework)) {
+      return res.status(400).json({ error: "framework must be one of: soc2, iso27001, pci" });
+    }
+
+    const sess = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = sess?.role !== "admin" ? { user_id: sess?.userId } : {};
+    const findings = await col("findings").find({ ...userFilter, status: { $nin: ["resolved", "false_positive"] } }).toArray() as Array<Record<string, unknown>>;
+
+    // Collect all controls for this framework
+    const allControls = new Set<string>();
+    for (const mapping of Object.values(CONTROL_MAPPINGS)) {
+      const fw = framework as "soc2" | "iso27001" | "pci";
+      for (const ctrl of mapping[fw]) allControls.add(ctrl);
+    }
+
+    // Map control → open critical/high findings
+    const failingControls: Record<string, Array<{ id: string; title: unknown; severity: unknown }>> = {};
+    for (const f of findings) {
+      if (!["critical", "high"].includes(String(f["severity"] ?? ""))) continue;
+      const key = normaliseCategoryKey(String(f["category"] ?? ""));
+      const mapping = CONTROL_MAPPINGS[key];
+      if (!mapping) continue;
+      const fw = framework as "soc2" | "iso27001" | "pci";
+      for (const ctrl of mapping[fw]) {
+        (failingControls[ctrl] ??= []).push({ id: String(f["_id"]), title: f["title"], severity: f["severity"] });
+      }
+    }
+
+    const totalControls = allControls.size;
+    const failingCount = Object.keys(failingControls).length;
+    const passingCount = totalControls - failingCount;
+    const score = totalControls > 0 ? Math.round((passingCount / totalControls) * 100) : 100;
+
+    res.json({
+      framework,
+      generated_at: new Date().toISOString(),
+      total_controls: totalControls,
+      passing_controls: passingCount,
+      failing_controls: failingCount,
+      compliance_score_pct: score,
+      failing: Object.entries(failingControls).map(([control, linked]) => ({ control, linked_findings: linked })),
+    });
+  } catch (err) {
+    logger.error({ err }, "Framework report error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /compliance/evidence/:controlId — upload evidence text/file for a control
+router.post("/compliance/evidence/:controlId", requireAuth, async (req, res) => {
+  try {
+    const { controlId } = req.params;
+    const sess = (req as unknown as { session: { userId?: string } }).session;
+    const { framework, evidence_text, file_name, file_url, notes } = req.body as {
+      framework?: string; evidence_text?: string; file_name?: string; file_url?: string; notes?: string;
+    };
+    if (!framework || !evidence_text) {
+      return res.status(400).json({ error: "framework and evidence_text are required" });
+    }
+    const doc = {
+      control_id: controlId,
+      framework,
+      evidence_text,
+      file_name: file_name ?? null,
+      file_url: file_url ?? null,
+      notes: notes ?? null,
+      uploaded_by: sess?.userId ?? "unknown",
+      created_at: new Date(),
+    };
+    const result = await col("compliance_evidence").insertOne(doc);
+    res.status(201).json({ id: String(result.insertedId), ...doc });
+  } catch (err) {
+    logger.error({ err }, "Upload evidence error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /compliance/attestation/:framework — JSON attestation document
+router.get("/compliance/attestation/:framework", requireAuth, async (req, res) => {
+  try {
+    const { framework } = req.params;
+    if (!["soc2", "iso27001", "pci"].includes(framework)) {
+      return res.status(400).json({ error: "framework must be one of: soc2, iso27001, pci" });
+    }
+
+    const sess = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const userFilter = sess?.role !== "admin" ? { user_id: sess?.userId } : {};
+    const findings = await col("findings").find({ ...userFilter, status: { $nin: ["resolved", "false_positive"] } }).toArray() as Array<Record<string, unknown>>;
+    const evidenceList = await col("compliance_evidence").find({ framework }).sort({ created_at: -1 }).toArray() as Array<Record<string, unknown>>;
+
+    const fw = framework as "soc2" | "iso27001" | "pci";
+    const allControls = new Set<string>();
+    for (const m of Object.values(CONTROL_MAPPINGS)) for (const ctrl of m[fw]) allControls.add(ctrl);
+
+    const failingControls = new Set<string>();
+    for (const f of findings) {
+      if (!["critical", "high"].includes(String(f["severity"] ?? ""))) continue;
+      const key = normaliseCategoryKey(String(f["category"] ?? ""));
+      const mapping = CONTROL_MAPPINGS[key];
+      if (!mapping) continue;
+      for (const ctrl of mapping[fw]) failingControls.add(ctrl);
+    }
+
+    const controlStatuses = Array.from(allControls).map(ctrl => ({
+      control: ctrl,
+      status: failingControls.has(ctrl) ? "failing" : "passing",
+      evidence_links: evidenceList
+        .filter(e => String(e["control_id"]) === ctrl)
+        .map(e => ({ id: String(e["_id"]), file_name: e["file_name"], file_url: e["file_url"], created_at: e["created_at"] })),
+    }));
+
+    res.json({
+      framework,
+      generated_at: new Date().toISOString(),
+      attested_by: sess?.userId ?? "unknown",
+      control_statuses: controlStatuses,
+      evidence_count: evidenceList.length,
+    });
+  } catch (err) {
+    logger.error({ err }, "Attestation document error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

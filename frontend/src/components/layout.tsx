@@ -8,7 +8,7 @@ import {
   ChevronDown, ChevronRight, Bookmark, GitCompare, ClipboardCheck,
   Timer, Sparkles, Moon, Sun, X, Contrast, ExternalLink,
   UserCircle, KeyRound, BarChart2, Briefcase, Key, Building2,
-  Code2,
+  Code2, BookOpen,
 } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { CommandPalette } from "./command-palette";
@@ -89,6 +89,7 @@ function pageName(loc: string): string {
   if (loc.startsWith("/secrets")) return "Exposed Secrets";
   if (loc.startsWith("/scanner-rules")) return "Scanner Rules";
   if (loc.startsWith("/admin/login-history")) return "Login History";
+  if (loc.startsWith("/api-docs")) return "API Documentation";
   return "Dashboard";
 }
 
@@ -137,6 +138,12 @@ const NAV_GROUPS = [
       { href: "/scans/compare",  label: "Scan Compare",icon: GitCompare,shortcut: null },
       { href: "/scan-templates", label: "Templates",   icon: Bookmark,  shortcut: null },
       { href: "/cvss",           label: "CVSS Calc",   icon: Calculator,shortcut: null },
+    ],
+  },
+  {
+    label: "Developer",
+    items: [
+      { href: "/api-docs", label: "API Documentation", icon: BookOpen, shortcut: null },
     ],
   },
   {
@@ -214,6 +221,24 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   const { notifications, markRead, markAllRead } = useNotifications();
   const notifRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
+
+  const [sessionWarning, setSessionWarning] = useState<number | null>(null);
+
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try {
+        const r = await fetch("/api/auth/me", { credentials: "include" });
+        if (r.status === 401) {
+          const data = await r.json();
+          if (data.code === "SESSION_EXPIRED") { window.location.href = "/login?reason=expired"; }
+        }
+        const expiresIn = r.headers.get("X-Session-Expires-In");
+        if (expiresIn && parseInt(expiresIn) < 300) setSessionWarning(parseInt(expiresIn));
+        else setSessionWarning(null);
+      } catch {}
+    }, 240000);
+    return () => clearInterval(id);
+  }, []);
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -768,6 +793,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
+        {sessionWarning !== null && (
+          <div className="bg-yellow-500/10 border-b border-yellow-500/30 px-4 py-2 flex items-center justify-between text-sm">
+            <span className="text-yellow-400">&#x26A0; Your session expires in {Math.round(sessionWarning / 60)} minutes.</span>
+            <button onClick={() => fetch("/api/auth/extend-session", { method: "POST", credentials: "include" }).then(() => setSessionWarning(null))} className="text-xs underline text-yellow-400">Extend Session</button>
+          </div>
+        )}
         <main className="flex-1 overflow-y-auto p-6">
           {children}
         </main>

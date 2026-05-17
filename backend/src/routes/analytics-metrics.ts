@@ -236,6 +236,22 @@ router.get("/analytics/metrics/executive", requireAuth, async (req, res) => {
     }
     const topTargets = Object.entries(targetMap).sort(([, a], [, b]) => b - a).slice(0, 5).map(([url, count]) => ({ url, finding_count: count, risk_score: Math.min(10, count * 0.5) }));
 
+    // by_severity breakdown
+    const bySeverity: Record<string, any> = {};
+    for (const sev of ["critical","high","medium","low"]) {
+      const sevFindings = await col("findings").find({ severity: sev } as Record<string, unknown>).toArray() as any[];
+      const open = sevFindings.filter((f: any) => !["resolved","false_positive"].includes(f.status)).length;
+      const slaBreached = sevFindings.filter((f: any) => f.sla_breached).length;
+      const mttds = sevFindings.filter((f: any) => f.detected_at && f.created_at).map((f: any) => (new Date(f.detected_at).getTime() - new Date(f.created_at).getTime()) / 3600000);
+      const mttrs = sevFindings.filter((f: any) => f.resolved_at && f.created_at).map((f: any) => (new Date(f.resolved_at).getTime() - new Date(f.created_at).getTime()) / 86400000);
+      bySeverity[sev] = {
+        mttd_hours: mttds.length ? Math.round(mttds.reduce((a: number,b: number)=>a+b,0)/mttds.length) : null,
+        mttr_days: mttrs.length ? Math.round(mttrs.reduce((a: number,b: number)=>a+b,0)/mttrs.length) : null,
+        open,
+        sla_breached: slaBreached,
+      };
+    }
+
     res.json({
       mttd_hours: Math.round(mttdMs / 3600000 * 10) / 10,
       mttr_days: Math.round(mttrMs / 86400000 * 10) / 10,
@@ -243,9 +259,45 @@ router.get("/analytics/metrics/executive", requireAuth, async (req, res) => {
       vulnerability_density: Math.round(allFindings.length / Math.max(targets.length, 1) * 10) / 10,
       open_critical: allFindings.filter(f => f["severity"] === "critical" && f["status"] !== "resolved").length,
       top_targets: topTargets,
+      by_severity: bySeverity,
     });
   } catch (err) {
     logger.error({ err }, "Executive metrics error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// GET /analytics/anomalies — spike detection vs 30-day baseline
+router.get("/analytics/anomalies", requireAuth, async (req, res) => {
+  try {
+    const now = new Date();
+    const day7ago = new Date(now.getTime() - 7 * 86400000);
+    const day30ago = new Date(now.getTime() - 30 * 86400000);
+
+    const [recent7, baseline30, recentFails, baselineFails] = await Promise.all([
+      col("findings").countDocuments({ severity: "critical", created_at: { $gte: day7ago } }),
+      col("findings").countDocuments({ severity: "critical", created_at: { $gte: day30ago, $lt: day7ago } }),
+      col("scan_jobs").countDocuments({ status: "failed", completed_at: { $gte: day7ago } }),
+      col("scan_jobs").countDocuments({ status: "failed", completed_at: { $gte: day30ago, $lt: day7ago } }),
+    ]);
+
+    const anomalies: Array<{ metric: string; current: number; baseline: number; spike_pct: number; message: string }> = [];
+    const baseline7 = baseline30 * (7/30);
+
+    if (recent7 > baseline7 * 1.5 && recent7 > 2) {
+      const spike = Math.round(((recent7 - baseline7) / Math.max(baseline7, 1)) * 100);
+      anomalies.push({ metric: "critical_findings", current: recent7, baseline: Math.round(baseline7), spike_pct: spike, message: `Critical findings ${spike}% above 30-day average (${recent7} vs ${Math.round(baseline7)} expected)` });
+    }
+
+    const failBaseline7 = baselineFails * (7/30);
+    if (recentFails > failBaseline7 * 1.5 && recentFails > 1) {
+      const spike = Math.round(((recentFails - failBaseline7) / Math.max(failBaseline7, 1)) * 100);
+      anomalies.push({ metric: "scan_failures", current: recentFails, baseline: Math.round(failBaseline7), spike_pct: spike, message: `Scan failures ${spike}% above 30-day average` });
+    }
+
+    res.json({ anomalies });
+  } catch (err) {
+    logger.error({ err }, "Anomaly detection error");
     res.status(500).json({ error: "Internal server error" });
   }
 });

@@ -65,6 +65,9 @@ export interface ScanContext {
   // Cross-module session store — modules write discovered credentials/tokens here
   // so downstream modules can reuse them without re-discovering.
   sessionStore: SessionStore;
+  // Optional OpenAPI/Swagger spec URL — when set, nuclei will scan each discovered path
+  // with api/ templates in addition to the standard full-target scan.
+  openapiSpecUrl?: string;
 }
 
 // Cross-module session store for sharing discovered tokens across scanner modules

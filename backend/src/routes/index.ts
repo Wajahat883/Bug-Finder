@@ -54,6 +54,8 @@ import slaEnforcementRouter from "./sla-enforcement";
 import roleGrantsRouter from "./role-grants";
 import aiFeedbackRouter from "./ai-feedback";
 import targetsImportRouter from "./targets-import";
+import sbomRouter from "./sbom";
+import openapiRouter from "./openapi";
 
 const router: IRouter = Router();
 
@@ -112,5 +114,7 @@ router.use(slaEnforcementRouter);
 router.use(roleGrantsRouter);
 router.use(aiFeedbackRouter);
 router.use(targetsImportRouter);
+router.use(sbomRouter);
+router.use(openapiRouter);
 
 export default router;

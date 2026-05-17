@@ -32,6 +32,7 @@ interface Finding {
   target_url: string;
   endpoint?: string;
   cvss_score?: number;
+  epss_score?: number;
   validation_status: string;
   assignee?: string;
   created_at: string;
@@ -45,11 +46,12 @@ interface SavedFilter {
 
 // ─── Column config ────────────────────────────────────────────────────────────
 
-const COLUMN_KEYS = ["cvss", "category", "target_url", "validation_status", "assignee", "created_at"] as const;
+const COLUMN_KEYS = ["cvss", "epss", "category", "target_url", "validation_status", "assignee", "created_at"] as const;
 type ColumnKey = typeof COLUMN_KEYS[number];
 
 const COLUMN_LABELS: Record<ColumnKey, string> = {
   cvss: "CVSS Score",
+  epss: "EPSS Score",
   category: "Category",
   target_url: "Target URL",
   validation_status: "Validation Status",
@@ -118,6 +120,7 @@ export default function Findings() {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("default");
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 25;
 
@@ -156,6 +159,7 @@ export default function Findings() {
     ...(search ? { search } : {}),
     ...(severityFilter !== "all" ? { severity: severityFilter } : {}),
     ...(statusFilter !== "all" ? { validation_status: statusFilter } : {}),
+    ...(sortBy !== "default" ? { sort: sortBy } : {}),
   });
 
   // ── Findings query ────────────────────────────────────────────────────────
@@ -167,7 +171,12 @@ export default function Findings() {
     staleTime: 10000,
   });
 
-  const findings: Finding[] = data?.items ?? [];
+  const rawFindings: Finding[] = data?.items ?? [];
+  const findings: Finding[] = sortBy === "epss_desc"
+    ? [...rawFindings].sort((a, b) => (b.epss_score || 0) - (a.epss_score || 0))
+    : sortBy === "epss_asc"
+    ? [...rawFindings].sort((a, b) => (a.epss_score || 0) - (b.epss_score || 0))
+    : rawFindings;
   const totalPages = Math.ceil((data?.total ?? 0) / PAGE_SIZE);
 
   // ── Saved filters query ───────────────────────────────────────────────────
@@ -387,6 +396,16 @@ export default function Findings() {
                   <SelectItem value="informational">Informational</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={sortBy} onValueChange={(v) => { setSortBy(v); setPage(1); }}>
+                <SelectTrigger className="w-[170px]">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Default Sort</SelectItem>
+                  <SelectItem value="epss_desc">EPSS (High→Low)</SelectItem>
+                  <SelectItem value="epss_asc">EPSS (Low→High)</SelectItem>
+                </SelectContent>
+              </Select>
 
               {/* ── Saved Filters dropdown ── */}
               {savedFilters.length > 0 && (
@@ -454,6 +473,7 @@ export default function Findings() {
                   <th className="px-4 py-3">Severity</th>
                   <th className="px-4 py-3">Title</th>
                   {columns.cvss && <th className="px-4 py-3">CVSS</th>}
+                  {columns.epss && <th className="px-4 py-3">EPSS</th>}
                   {columns.category && <th className="px-4 py-3">Category</th>}
                   {columns.target_url && <th className="px-4 py-3">Target / Endpoint</th>}
                   {columns.validation_status && <th className="px-4 py-3">Status</th>}
@@ -509,6 +529,24 @@ export default function Findings() {
                       {columns.cvss && (
                         <td className="px-4 py-3 font-mono text-xs">
                           {finding.cvss_score ? finding.cvss_score.toFixed(1) : "-"}
+                        </td>
+                      )}
+                      {columns.epss && (
+                        <td className="px-4 py-3 font-mono text-xs">
+                          {(() => {
+                            const score = finding.epss_score || 0;
+                            const pct = (score * 100).toFixed(1);
+                            const colorClass = score > 0.5
+                              ? "text-red-400"
+                              : score > 0.2
+                              ? "text-orange-400"
+                              : "text-muted-foreground";
+                            return (
+                              <span className={colorClass}>
+                                {score > 0.7 ? "🔥 " : ""}{pct}%
+                              </span>
+                            );
+                          })()}
                         </td>
                       )}
                       {columns.category && (

@@ -5,7 +5,12 @@ import { ObjectId } from "mongodb";
 interface SessionData {
   userId?: string;
   role?: string;
+  created_at?: number;
+  rememberMe?: boolean;
 }
+
+// Default idle timeout in minutes — overridden by platform_policy.session_timeout_minutes
+const DEFAULT_SESSION_TIMEOUT_MINUTES = 30;
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const session = (req as unknown as { session: SessionData }).session;
@@ -13,6 +18,22 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     res.status(401).json({ error: "Authentication required" });
     return;
   }
+
+  // Session idle-timeout enforcement (skip for remember-me sessions)
+  if (!session.rememberMe && session.created_at !== undefined) {
+    // Pull timeout from cached policy if available; default otherwise
+    const timeoutMinutes: number = (req as unknown as Record<string, unknown>)["sessionTimeoutMinutes"] as number
+      ?? DEFAULT_SESSION_TIMEOUT_MINUTES;
+    const maxIdleMs = timeoutMinutes * 60 * 1000;
+    if (Date.now() - session.created_at > maxIdleMs) {
+      req.session.destroy(() => {/* noop */});
+      res.status(401).json({ error: "Session expired", code: "SESSION_EXPIRED" });
+      return;
+    }
+    // Slide the window on each authenticated request
+    session.created_at = Date.now();
+  }
+
   next();
 }
 

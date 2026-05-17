@@ -300,7 +300,7 @@ const OAUTH_CONFIGS: Record<string, { authUrl: string; tokenUrl: string; scopes:
   linear: {
     authUrl: "https://linear.app/oauth/authorize",
     tokenUrl: "https://api.linear.app/oauth/token",
-    scopes: "issues:create",
+    scopes: "read,write",
     clientIdEnv: "LINEAR_CLIENT_ID",
     clientSecretEnv: "LINEAR_CLIENT_SECRET",
   },
@@ -528,5 +528,169 @@ router.post("/integrations/slack/notify", requireAuth, async (req, res) => {
     res.status(500).json({ error: "Failed to send Slack notification" });
   }
 });
+
+// ── Linear: Create issue from finding ─────────────────────────────────────────
+
+router.post("/integrations/linear/create-issue", requireAuth, async (req, res) => {
+  const { finding_id, team_id } = req.body as { finding_id?: string; team_id?: string };
+  if (!finding_id) return res.status(400).json({ error: "finding_id required" });
+
+  try {
+    const conn = await col("integration_connections").findOne({ service: "linear" }) as Record<string, unknown> | null;
+    if (!conn?.["access_token"]) return res.status(400).json({ error: "Linear not connected" });
+
+    const finding = await col("findings").findOne({ _id: new ObjectId(finding_id) }) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    const priorityMap: Record<string, number> = { critical: 1, high: 2, medium: 3, low: 4 };
+    const resolvedTeamId = team_id || String(conn["default_team_id"] ?? "");
+    const priority = priorityMap[String(finding["severity"] ?? "")] ?? 3;
+    const title = String(finding["title"] ?? "").replace(/"/g, '\\"');
+    const description = String(finding["description"] ?? "").replace(/"/g, '\\"');
+
+    const response = await fetch("https://api.linear.app/graphql", {
+      method: "POST",
+      headers: {
+        "Authorization": String(conn["access_token"]),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        query: `mutation { issueCreate(input: { title: "${title}", description: "${description}", teamId: "${resolvedTeamId}", priority: ${priority} }) { success issue { id identifier url } } }`,
+      }),
+    });
+
+    const data = await response.json() as Record<string, unknown>;
+    const issueCreate = (data?.["data"] as Record<string, unknown>)?.["issueCreate"] as Record<string, unknown> | undefined;
+
+    if (issueCreate?.["success"]) {
+      const issue = issueCreate["issue"] as Record<string, unknown>;
+      await col("findings").updateOne(
+        { _id: new ObjectId(finding_id) } as Record<string, unknown>,
+        { $set: { linear_issue_id: issue["id"], linear_issue_url: issue["url"] } }
+      );
+      res.json({ ok: true, issueId: issue["id"], issueUrl: issue["url"] });
+    } else {
+      res.status(500).json({ error: "Linear issue creation failed", details: data });
+    }
+  } catch (err) {
+    logger.error({ err }, "Linear create issue error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── PagerDuty: Auto-escalation helper ─────────────────────────────────────────
+
+export async function triggerPagerDutyIncident(finding: Record<string, unknown>): Promise<void> {
+  const conn = await col("integration_connections").findOne({ service: "pagerduty" }) as Record<string, unknown> | null;
+  const routingKey = String(conn?.["routing_key"] ?? "") || process.env["PAGERDUTY_ROUTING_KEY"] ?? "";
+  if (!routingKey) return;
+
+  await fetch("https://events.pagerduty.com/v2/enqueue", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      routing_key: routingKey,
+      event_action: "trigger",
+      payload: {
+        summary: `[${String(finding["severity"] ?? "").toUpperCase()}] ${finding["title"]}`,
+        severity: finding["severity"] === "critical" ? "critical" : "error",
+        source: String(finding["endpoint"] ?? "") || "Bug Finder Pro",
+        custom_details: {
+          finding_id: finding["_id"],
+          cvss: finding["cvss_score"],
+          endpoint: finding["endpoint"],
+        },
+      },
+    }),
+  }).catch(() => {});
+}
+
+router.post("/integrations/pagerduty/trigger", requireAuth, async (req, res) => {
+  const { finding_id } = req.body as { finding_id?: string };
+  if (!finding_id) return res.status(400).json({ error: "finding_id required" });
+
+  try {
+    const finding = await col("findings").findOne({ _id: new ObjectId(finding_id) }) as Record<string, unknown> | null;
+    if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    await triggerPagerDutyIncident(finding);
+    res.json({ ok: true });
+  } catch (err) {
+    logger.error({ err }, "PagerDuty trigger error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// ── Webhook delivery logging ───────────────────────────────────────────────────
+
+async function logWebhookDelivery(
+  webhookId: string,
+  event: string,
+  payload: unknown,
+  response: Response,
+  durationMs: number
+): Promise<void> {
+  await col("webhook_deliveries").insertOne({
+    webhook_id: webhookId,
+    event,
+    payload_summary: JSON.stringify(payload).slice(0, 200),
+    status_code: response.status,
+    success: response.ok,
+    delivered_at: new Date(),
+    duration_ms: durationMs,
+  }).catch(() => {});
+}
+
+// GET /integrations/webhooks/:webhookId/deliveries — last 50 delivery logs
+router.get("/integrations/webhooks/:webhookId/deliveries", requireAuth, async (req, res) => {
+  try {
+    const { webhookId } = req.params;
+    const deliveries = await col("webhook_deliveries")
+      .find({ webhook_id: webhookId } as Record<string, unknown>)
+      .sort({ delivered_at: -1 })
+      .limit(50)
+      .toArray();
+    res.json(deliveries);
+  } catch (err) {
+    logger.error({ err }, "Webhook deliveries fetch error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// POST /integrations/webhooks/:webhookId/deliveries/:deliveryId/retry — re-fire original payload
+router.post("/integrations/webhooks/:webhookId/deliveries/:deliveryId/retry", requireAuth, async (req, res) => {
+  const { webhookId, deliveryId } = req.params;
+
+  try {
+    if (!ObjectId.isValid(deliveryId)) return res.status(404).json({ error: "Delivery not found" });
+
+    const delivery = await col("webhook_deliveries").findOne({ _id: new ObjectId(deliveryId), webhook_id: webhookId } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!delivery) return res.status(404).json({ error: "Delivery not found" });
+
+    const webhook = await col("webhooks").findOne({ _id: new ObjectId(webhookId) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!webhook?.["url"]) return res.status(404).json({ error: "Webhook not found or has no URL" });
+
+    const payloadSummary = String(delivery["payload_summary"] ?? "{}");
+    let payload: unknown;
+    try { payload = JSON.parse(payloadSummary); } catch { payload = {}; }
+
+    const start = Date.now();
+    const retryRes = await fetch(String(webhook["url"]), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(webhook["secret"] ? { "X-Webhook-Secret": String(webhook["secret"]) } : {}) },
+      body: JSON.stringify(payload),
+    });
+    const durationMs = Date.now() - start;
+
+    await logWebhookDelivery(webhookId, String(delivery["event"] ?? "retry"), payload, retryRes, durationMs);
+
+    res.json({ ok: true, status_code: retryRes.status, success: retryRes.ok, duration_ms: durationMs });
+  } catch (err) {
+    logger.error({ err }, "Webhook retry error");
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+export { logWebhookDelivery };
 
 export default router;

@@ -9,7 +9,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { Building, Users2, MoreVertical, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Building, Users2, MoreVertical, Plus, RefreshCw, Trash2, Gauge } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,17 @@ interface Tenant {
   finding_count: number;
   created_at: string;
   active: boolean;
+  scans_used?: number;
+  scan_quota?: number;
+  max_concurrent_scans?: number;
+  max_findings_stored?: number;
+  storage_limit_gb?: number;
+}
+
+interface QuotaForm {
+  max_concurrent_scans: number;
+  max_findings_stored: number;
+  storage_limit_gb: number;
 }
 
 // ── 3-dot action menu ─────────────────────────────────────────────────────────
@@ -31,10 +42,12 @@ function TenantActionMenu({
   tenant,
   onToggle,
   onDelete,
+  onSetQuota,
 }: {
   tenant: Tenant;
   onToggle: () => void;
   onDelete: () => void;
+  onSetQuota: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -50,12 +63,18 @@ function TenantActionMenu({
       {open && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-8 z-20 w-40 rounded-lg shadow-xl border border-border bg-card py-1">
+          <div className="absolute right-0 top-8 z-20 w-44 rounded-lg shadow-xl border border-border bg-card py-1">
             <button
               className="w-full text-left px-3 py-2 text-sm hover:bg-accent/50 transition-colors"
               onClick={() => { onToggle(); setOpen(false); }}
             >
               {tenant.active ? "Deactivate" : "Activate"}
+            </button>
+            <button
+              className="w-full text-left px-3 py-2 text-sm hover:bg-accent/50 transition-colors flex items-center gap-2"
+              onClick={() => { onSetQuota(); setOpen(false); }}
+            >
+              <Gauge className="w-3.5 h-3.5" /> Set Quota
             </button>
             <button
               className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors flex items-center gap-2"
@@ -77,6 +96,8 @@ export default function AdminTenants() {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ name: "", owner_email: "" });
+  const [quotaDialogTenant, setQuotaDialogTenant] = useState<Tenant | null>(null);
+  const [quotaForm, setQuotaForm] = useState<QuotaForm>({ max_concurrent_scans: 5, max_findings_stored: 10000, storage_limit_gb: 10 });
 
   const { data: tenants = [], isLoading, refetch } = useQuery<Tenant[]>({
     queryKey: ["/api/admin/tenants"],
@@ -132,11 +153,37 @@ export default function AdminTenants() {
     },
   });
 
+  const saveQuota = useMutation({
+    mutationFn: ({ tenantId, quota }: { tenantId: string; quota: QuotaForm }) =>
+      fetch(`/api/admin/tenants/${tenantId}/quota`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(quota),
+      }).then(r => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/admin/tenants"] });
+      toast({ title: "Quota updated" });
+      setQuotaDialogTenant(null);
+    },
+    onError: () => toast({ title: "Failed to update quota", variant: "destructive" }),
+  });
+
+  function openQuotaDialog(t: Tenant) {
+    setQuotaForm({
+      max_concurrent_scans: t.max_concurrent_scans ?? 5,
+      max_findings_stored: t.max_findings_stored ?? 10000,
+      storage_limit_gb: t.storage_limit_gb ?? 10,
+    });
+    setQuotaDialogTenant(t);
+  }
+
   // Stats
   const totalOrgs = tenants.length;
   const activeOrgs = tenants.filter(t => t.active).length;
   const totalMembers = tenants.reduce((sum, t) => sum + t.member_count, 0);
   const totalScans = tenants.reduce((sum, t) => sum + t.scan_count, 0);
+  const tenantsAtQuota = tenants.filter(t => t.scan_quota != null && (t.scans_used ?? 0) >= t.scan_quota).length;
 
   const handleCreate = () => {
     if (!form.name.trim() || !form.owner_email.trim()) return;
@@ -175,12 +222,13 @@ export default function AdminTenants() {
       </div>
 
       {/* Stats bar */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
-          { label: "Total Orgs",    value: totalOrgs,    icon: Building },
-          { label: "Active",        value: activeOrgs,   icon: Building },
-          { label: "Total Members", value: totalMembers, icon: Users2 },
-          { label: "Total Scans",   value: totalScans,   icon: RefreshCw },
+          { label: "Total Orgs",       value: totalOrgs,       icon: Building },
+          { label: "Active",           value: activeOrgs,      icon: Building },
+          { label: "Total Members",    value: totalMembers,    icon: Users2 },
+          { label: "Total Scans",      value: totalScans,      icon: RefreshCw },
+          { label: "Tenants at Quota", value: tenantsAtQuota,  icon: Gauge },
         ].map(({ label, value, icon: Icon }) => (
           <Card key={label}>
             <CardContent className="pt-5 pb-4">
@@ -217,6 +265,7 @@ export default function AdminTenants() {
                     <th className="text-right px-3 py-3 font-medium">Findings</th>
                     <th className="text-left px-3 py-3 font-medium">Created</th>
                     <th className="text-left px-3 py-3 font-medium">Status</th>
+                    <th className="text-left px-3 py-3 font-medium">Quota</th>
                     <th className="px-3 py-3" />
                   </tr>
                 </thead>
@@ -249,6 +298,21 @@ export default function AdminTenants() {
                         </Badge>
                       </td>
                       <td className="px-3 py-3">
+                        <div className="flex flex-col gap-1 min-w-[80px]">
+                          <span className="text-xs font-mono">
+                            {t.scans_used ?? 0}/{t.scan_quota ?? "∞"}
+                          </span>
+                          {t.scan_quota != null && (
+                            <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-primary transition-all"
+                                style={{ width: `${Math.min(100, ((t.scans_used ?? 0) / t.scan_quota) * 100)}%` }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
                         <TenantActionMenu
                           tenant={t}
                           onToggle={() => toggleActive.mutate({ id: t.id, active: !t.active })}
@@ -257,6 +321,7 @@ export default function AdminTenants() {
                               deleteTenant.mutate(t.id);
                             }
                           }}
+                          onSetQuota={() => openQuotaDialog(t)}
                         />
                       </td>
                     </tr>
@@ -267,6 +332,53 @@ export default function AdminTenants() {
           )}
         </CardContent>
       </Card>
+
+      {/* Set Quota Dialog */}
+      <Dialog open={!!quotaDialogTenant} onOpenChange={v => { if (!v) setQuotaDialogTenant(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Set Tenant Quota — {quotaDialogTenant?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label>Max Concurrent Scans</Label>
+              <Input
+                type="number"
+                min={1}
+                value={quotaForm.max_concurrent_scans}
+                onChange={e => setQuotaForm(f => ({ ...f, max_concurrent_scans: +e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Max Findings Stored</Label>
+              <Input
+                type="number"
+                min={1}
+                value={quotaForm.max_findings_stored}
+                onChange={e => setQuotaForm(f => ({ ...f, max_findings_stored: +e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Storage Limit (GB)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={quotaForm.storage_limit_gb}
+                onChange={e => setQuotaForm(f => ({ ...f, storage_limit_gb: +e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setQuotaDialogTenant(null)}>Cancel</Button>
+            <Button
+              onClick={() => quotaDialogTenant && saveQuota.mutate({ tenantId: quotaDialogTenant.id, quota: quotaForm })}
+              disabled={saveQuota.isPending}
+            >
+              {saveQuota.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* New Tenant Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

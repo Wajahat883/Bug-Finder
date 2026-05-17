@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Lock, Save, Loader2, Shield, ShieldCheck, Database, AlertTriangle } from "lucide-react";
+import { Lock, Save, Loader2, Shield, ShieldCheck, Database, AlertTriangle, Timer, ShieldX } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Policy {
@@ -19,6 +19,15 @@ interface Policy {
 interface MfaPolicy {
   require_mfa_roles: string[];
   mfa_grace_days: number;
+}
+
+interface SessionTimeoutForm {
+  session_timeout_minutes: number;
+}
+
+interface BruteForceForm {
+  max_failed_login_attempts: number;
+  lockout_duration_minutes: number;
 }
 
 const MFA_ROLES = ["viewer", "analyst", "senior", "admin"] as const;
@@ -116,6 +125,76 @@ export default function AdminPolicy() {
   });
 
   useEffect(() => { if (mfaPolicy) setMfaForm(mfaPolicy); }, [mfaPolicy]);
+
+  // Session Timeout state
+  const [sessionTimeoutForm, setSessionTimeoutForm] = useState<SessionTimeoutForm>({ session_timeout_minutes: 60 });
+
+  const { data: sessionTimeoutPolicy } = useQuery<SessionTimeoutForm>({
+    queryKey: ["/api/admin/policy", "session-timeout"],
+    queryFn: () =>
+      fetch("/api/admin/policy", { credentials: "include" })
+        .then(r => r.json())
+        .then((d: Record<string, unknown>) => ({
+          session_timeout_minutes: (d["session_timeout_minutes"] as number) ?? 60,
+        })),
+  });
+
+  useEffect(() => { if (sessionTimeoutPolicy) setSessionTimeoutForm(sessionTimeoutPolicy); }, [sessionTimeoutPolicy]);
+
+  const saveSessionTimeoutMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/admin/policy", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sessionTimeoutForm),
+      }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/policy"] }); toast({ title: "Session timeout policy saved" }); },
+    onError: () => toast({ title: "Failed to save session timeout policy", variant: "destructive" }),
+  });
+
+  // Brute Force Protection state
+  const [bruteForceForm, setBruteForceForm] = useState<BruteForceForm>({ max_failed_login_attempts: 5, lockout_duration_minutes: 15 });
+
+  const { data: bruteForcePolicy } = useQuery<BruteForceForm>({
+    queryKey: ["/api/admin/policy", "brute-force"],
+    queryFn: () =>
+      fetch("/api/admin/policy", { credentials: "include" })
+        .then(r => r.json())
+        .then((d: Record<string, unknown>) => ({
+          max_failed_login_attempts: (d["max_failed_login_attempts"] as number) ?? 5,
+          lockout_duration_minutes: (d["lockout_duration_minutes"] as number) ?? 15,
+        })),
+  });
+
+  useEffect(() => { if (bruteForcePolicy) setBruteForceForm(bruteForcePolicy); }, [bruteForcePolicy]);
+
+  const saveBruteForceMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/admin/policy", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bruteForceForm),
+      }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/policy"] }); toast({ title: "Brute force protection policy saved" }); },
+    onError: () => toast({ title: "Failed to save brute force policy", variant: "destructive" }),
+  });
+
+  // Unified Session Security form
+  const [sessionForm, setSessionForm] = useState({ session_timeout_minutes: 60, max_login_attempts: 5, lockout_minutes: 15 });
+
+  const saveSessionMutation = useMutation({
+    mutationFn: (data: { session_timeout_minutes: number; max_login_attempts: number; lockout_minutes: number }) =>
+      fetch("/api/admin/policy", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(r => r.json()),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/admin/policy"] }); toast({ title: "Session policy saved" }); },
+    onError: () => toast({ title: "Failed to save session policy", variant: "destructive" }),
+  });
 
   const saveMfaMutation = useMutation({
     mutationFn: () =>
@@ -310,12 +389,23 @@ export default function AdminPolicy() {
             />
           </div>
 
-          {mfaForm.require_mfa_roles.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Currently enforced for:{" "}
-              <span className="text-foreground font-medium">{mfaForm.require_mfa_roles.join(", ")}</span>
-              {" "}({mfaForm.mfa_grace_days} day grace period)
-            </p>
+          {/* Enforcement status summary badge */}
+          {mfaForm.require_mfa_roles.length > 0 ? (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">Enforced for:</span>
+              {mfaForm.require_mfa_roles.map(role => (
+                <Badge key={role} className="text-[11px] bg-blue-500/15 text-blue-400 border-blue-500/30 capitalize">
+                  {role}
+                </Badge>
+              ))}
+              <span className="text-xs text-muted-foreground">({mfaForm.mfa_grace_days}d grace)</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-[11px] text-muted-foreground gap-1">
+                <ShieldX className="w-3 h-3" /> Not enforced for any role
+              </Badge>
+            </div>
           )}
 
           <div className="flex justify-end">
@@ -326,6 +416,85 @@ export default function AdminPolicy() {
             >
               {saveMfaMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
               Save MFA Policy
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Session Security (consolidated: timeout + login attempts + lockout) */}
+      <Card>
+        <CardHeader><CardTitle className="text-base">Session Security</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm font-medium">Idle Session Timeout (minutes)</label>
+              <Input type="number" min={15} max={480} value={sessionForm.session_timeout_minutes}
+                onChange={e => setSessionForm(f => ({ ...f, session_timeout_minutes: +e.target.value }))} />
+              <p className="text-xs text-muted-foreground mt-1">Range: 15–480 min. Default: 60.</p>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Max Failed Login Attempts</label>
+              <Input type="number" min={3} max={10} value={sessionForm.max_login_attempts}
+                onChange={e => setSessionForm(f => ({ ...f, max_login_attempts: +e.target.value }))} />
+            </div>
+            <div>
+              <label className="text-sm font-medium">Account Lockout Duration (minutes)</label>
+              <Input type="number" min={5} max={60} value={sessionForm.lockout_minutes}
+                onChange={e => setSessionForm(f => ({ ...f, lockout_minutes: +e.target.value }))} />
+            </div>
+          </div>
+          <Button onClick={() => saveSessionMutation.mutate(sessionForm)}>Save Session Policy</Button>
+        </CardContent>
+      </Card>
+
+      {/* Brute Force Protection */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <ShieldX className="w-4 h-4 text-red-400" /> Brute Force Protection
+          </CardTitle>
+          <CardDescription>
+            Limit failed login attempts and lock out accounts to prevent brute force attacks.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="flex items-center justify-between py-2 border-b" style={{ borderColor: "hsl(var(--border))" }}>
+            <div>
+              <p className="text-sm font-medium">Max Failed Login Attempts</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Lock account after this many consecutive failures. Range: 3–10.</p>
+            </div>
+            <Input
+              type="number"
+              min={3}
+              max={10}
+              value={bruteForceForm.max_failed_login_attempts}
+              onChange={e => setBruteForceForm(f => ({ ...f, max_failed_login_attempts: Math.min(10, Math.max(3, parseInt(e.target.value) || 3)) }))}
+              className="w-24 font-mono"
+            />
+          </div>
+
+          <div className="flex items-center justify-between py-2">
+            <div>
+              <p className="text-sm font-medium">Lockout Duration (minutes)</p>
+              <p className="text-xs text-muted-foreground mt-0.5">How long a locked account remains inaccessible. Range: 5–60 minutes.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={5}
+                max={60}
+                value={bruteForceForm.lockout_duration_minutes}
+                onChange={e => setBruteForceForm(f => ({ ...f, lockout_duration_minutes: Math.min(60, Math.max(5, parseInt(e.target.value) || 5)) }))}
+                className="w-24 font-mono"
+              />
+              <span className="text-xs text-muted-foreground">min</span>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={() => saveBruteForceMutation.mutate()} disabled={saveBruteForceMutation.isPending} variant="outline">
+              {saveBruteForceMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Shield className="w-4 h-4 mr-2" />}
+              Save Brute Force Policy
             </Button>
           </div>
         </CardContent>
