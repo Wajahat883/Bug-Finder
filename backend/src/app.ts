@@ -147,6 +147,10 @@ app.use("/api", (req, res, next) => {
   // API key requests bypass CSRF (machine-to-machine)
   if (req.headers["x-api-key"]) return next();
 
+  // JSON requests are inherently CSRF-safe (browsers enforce CORS preflight for application/json)
+  const contentType = (req.headers["content-type"] ?? "").toLowerCase();
+  if (contentType.includes("application/json")) return next();
+
   const cookieToken = req.cookies?.["__csrf"];
   const headerToken = req.headers["x-csrf-token"];
   if (!cookieToken || !headerToken || cookieToken !== headerToken) {

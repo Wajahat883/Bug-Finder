@@ -126,7 +126,6 @@ services:
     container_name: bug-finder-interactsh
     command: >
       -domain ${INTERACTSH_DOMAIN:-oast.local}
-      -port 8193
       -http-port 8194
       -token ${INTERACTSH_TOKEN:-changeme}
       -debug
