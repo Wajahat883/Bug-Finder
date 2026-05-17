@@ -139,7 +139,10 @@ describe("OnboardingWizard", () => {
         <OnboardingWizard onDismiss={onDismiss} />
       </WouterRouter>
     );
-    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    // The wizard renders its own X button (aria-label="Close") plus Radix UI
+    // adds a second sr-only Close button. Click the first one (our custom X).
+    const closeButtons = screen.getAllByRole("button", { name: /close/i });
+    fireEvent.click(closeButtons[0]);
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 

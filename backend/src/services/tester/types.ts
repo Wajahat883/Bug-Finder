@@ -1,4 +1,4 @@
-export type TestSeverity = "pass" | "fail" | "warn" | "error" | "skipped";
+export type TestSeverity = "pass" | "fail" | "warn" | "error" | "skipped" | "info";
 
 export type TestCategory =
   | "auth"

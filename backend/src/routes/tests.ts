@@ -93,11 +93,13 @@ router.get("/tests/runs", async (req, res) => {
     const history = await getTestRunHistory(limit);
     res.json(history.map(r => ({
       id: r.id,
+      runId: r.id,
       startedAt: r.startedAt,
       completedAt: r.completedAt,
       status: r.status,
       summary: r.summary,
       suites: r.suites,
+      results: r.results,
     })));
   } catch (err) {
     res.status(500).json({ error: "Failed to load test history" });

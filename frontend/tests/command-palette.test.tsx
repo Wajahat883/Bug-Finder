@@ -72,12 +72,14 @@ describe("CommandPalette", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows 'Type to search…' hint when query is empty", async () => {
+  it("shows page results when query is empty (not a 'Type to search' hint)", async () => {
     const { CommandPalette } = await import("@/components/command-palette");
     render(<CommandPalette open={true} onClose={vi.fn()} />, {
       wrapper: makeWrapper(),
     });
-    expect(screen.getByText(/type to search/i)).toBeInTheDocument();
+    // When the query is empty, the component shows all pages (not the hint).
+    // Verify at least one page result is visible.
+    expect(screen.getByText("Dashboard")).toBeInTheDocument();
   });
 
   it("shows default page suggestions after typing a query that matches pages", async () => {
@@ -136,9 +138,11 @@ describe("CommandPalette", () => {
     render(<CommandPalette open={true} onClose={onClose} />, {
       wrapper: makeWrapper(),
     });
-    // The X button is rendered next to the search input
-    const xButton = screen.getByRole("button");
-    fireEvent.click(xButton);
+    // The X button is in the search bar header — it's the only button NOT inside the results list.
+    // It has no text, so we find all buttons and pick the one in the input row (first button).
+    const allButtons = screen.getAllByRole("button");
+    // The X close button in the header is the first button rendered (before result rows).
+    fireEvent.click(allButtons[0]);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 

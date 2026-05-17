@@ -24,6 +24,7 @@ async function ensurePlaywright(): Promise<boolean> {
 
   // Try local check
   try {
+    // @ts-expect-error - optional dependency, may not be installed
     const puppeteer = await import("puppeteer").catch(() => null);
     if (puppeteer) {
       playwrightAvailable = true;
@@ -90,6 +91,7 @@ export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]
 
   // Try local Puppeteer
   try {
+    // @ts-expect-error - optional dependency, may not be installed
     const puppeteer = await import("puppeteer");
     ctx.emit({ type: "engine_start", engine: "Playwright", message: "Launching headless browser..." });
 
@@ -103,7 +105,7 @@ export async function runPlaywrightScan(ctx: ScanContext): Promise<ScanFinding[]
     const html = await page.content();
 
     const consoleLogs: string[] = [];
-    page.on("console", msg => consoleLogs.push(msg.text()));
+    page.on("console", (msg: { text(): string }) => consoleLogs.push(msg.text()));
 
     const findings: ScanFinding[] = [];
 

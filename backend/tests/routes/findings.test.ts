@@ -325,6 +325,33 @@ describe("PATCH /api/findings/:id", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "findings") {
+        return {
+          findOne: vi.fn().mockResolvedValue(mockFinding),
+          find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }) }) }) }),
+          insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+          updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          updateMany: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+          deleteMany: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+          countDocuments: vi.fn().mockResolvedValue(1),
+          aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+        } as never;
+      }
+      return {
+        findOne: vi.fn().mockResolvedValue(null),
+        find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        deleteMany: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+        countDocuments: vi.fn().mockResolvedValue(0),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    });
     app = await buildApp();
     unauthApp = await buildUnauthApp();
   });
@@ -382,6 +409,30 @@ describe("POST /api/findings/bulk (POST version)", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "findings") {
+        return {
+          findOne: vi.fn().mockResolvedValue(mockFinding),
+          find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }) }) }) }),
+          updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          updateMany: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          deleteMany: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+          countDocuments: vi.fn().mockResolvedValue(1),
+        } as never;
+      }
+      return {
+        findOne: vi.fn().mockResolvedValue(null),
+        find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        deleteMany: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+        countDocuments: vi.fn().mockResolvedValue(0),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    });
     app = await buildApp();
   });
 
@@ -454,6 +505,28 @@ describe("PATCH /api/findings/bulk (PATCH version)", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "findings") {
+        return {
+          findOne: vi.fn().mockResolvedValue(mockFinding),
+          updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          updateMany: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          deleteMany: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+          countDocuments: vi.fn().mockResolvedValue(1),
+        } as never;
+      }
+      return {
+        findOne: vi.fn().mockResolvedValue(null),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        deleteMany: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+        countDocuments: vi.fn().mockResolvedValue(0),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    });
     app = await buildApp();
   });
 
@@ -508,6 +581,30 @@ describe("POST /api/findings/:id/evidence", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "findings") {
+        return {
+          findOne: vi.fn().mockResolvedValue(mockFinding),
+          updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        } as never;
+      }
+      if (name === "evidence_files") {
+        return {
+          findOne: vi.fn().mockResolvedValue(null),
+          find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }),
+          insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        } as never;
+      }
+      return {
+        findOne: vi.fn().mockResolvedValue(null),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        countDocuments: vi.fn().mockResolvedValue(0),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    });
     app = await buildApp();
   });
 
@@ -565,6 +662,26 @@ describe("GET /api/findings/:id/cve-details", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "findings") {
+        return {
+          findOne: vi.fn().mockResolvedValue(mockFinding),
+          find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }) }) }) }),
+          updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+          countDocuments: vi.fn().mockResolvedValue(1),
+        } as never;
+      }
+      return {
+        findOne: vi.fn().mockResolvedValue(null),
+        find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        countDocuments: vi.fn().mockResolvedValue(0),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    });
     app = await buildApp();
   });
 
@@ -671,6 +788,11 @@ describe("GET /api/findings/:id/history", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "findings") return { findOne: vi.fn().mockResolvedValue(mockFinding), find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }) }) }) }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(1) } as never;
+      return { findOne: vi.fn().mockResolvedValue(null), insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(0), aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) } as never;
+    });
     app = await buildApp();
   });
 
@@ -694,6 +816,11 @@ describe("POST /api/findings/:id/accept-risk", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "findings") return { findOne: vi.fn().mockResolvedValue(mockFinding), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(1) } as never;
+      return { findOne: vi.fn().mockResolvedValue(null), insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(0), aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) } as never;
+    });
     app = await buildApp();
   });
 
@@ -719,6 +846,12 @@ describe("GET /api/fp-suppressions", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "fp_suppressions") return { find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }), findOne: vi.fn().mockResolvedValue(null), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }) } as never;
+      if (name === "findings") return { findOne: vi.fn().mockResolvedValue(mockFinding), find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }) }) }) }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(1) } as never;
+      return { findOne: vi.fn().mockResolvedValue(null), insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(0), aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) } as never;
+    });
     app = await buildApp();
   });
 
@@ -736,6 +869,12 @@ describe("GET /api/findings/saved-filters", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "saved_filters") return { find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }), insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }) } as never;
+      if (name === "findings") return { findOne: vi.fn().mockResolvedValue(mockFinding), find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }) }) }) }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(1) } as never;
+      return { findOne: vi.fn().mockResolvedValue(null), insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(0), aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) } as never;
+    });
     app = await buildApp();
   });
 
@@ -751,6 +890,12 @@ describe("POST /api/findings/saved-filters", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    const { col } = await import("../../src/lib/db");
+    vi.mocked(col).mockImplementation((name: string) => {
+      if (name === "saved_filters") return { find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }), insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }) } as never;
+      if (name === "findings") return { findOne: vi.fn().mockResolvedValue(mockFinding), find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }) }) }) }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(1) } as never;
+      return { findOne: vi.fn().mockResolvedValue(null), insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }), updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }), deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }), countDocuments: vi.fn().mockResolvedValue(0), aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) } as never;
+    });
     app = await buildApp();
   });
 

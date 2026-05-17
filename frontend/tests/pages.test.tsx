@@ -31,18 +31,34 @@ describe("Login page", () => {
   it("renders the login form", async () => {
     const Login = (await import("@/pages/login")).default;
     renderWithRouter(<Login />);
-    expect(screen.getByPlaceholderText(/email/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/password/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
+    // The login page uses placeholder "you@example.com" and "••••••••"
+    expect(screen.getByPlaceholderText(/you@example\.com/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("••••••••")).toBeInTheDocument();
+    // Both the tab switcher and submit button say "Sign In" — verify at least one
+    const signInBtns = screen.getAllByRole("button", { name: /sign in/i });
+    expect(signInBtns.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("shows error on empty submit", async () => {
+  it("shows error on failed login attempt", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      json: async () => ({ error: "Invalid credentials" }),
+    } as Response);
     const Login = (await import("@/pages/login")).default;
     renderWithRouter(<Login />);
-    const btn = screen.getByRole("button", { name: /sign in/i });
-    fireEvent.click(btn);
+    fireEvent.change(screen.getByPlaceholderText(/you@example\.com/i), {
+      target: { value: "bad@example.com" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("••••••••"), {
+      target: { value: "wrongpass" },
+    });
+    // Click the submit (type="submit") button specifically
+    const submitBtn = screen.getAllByRole("button", { name: /sign in/i }).find(
+      (btn) => btn.getAttribute("type") === "submit"
+    )!;
+    fireEvent.click(submitBtn);
     await waitFor(() => {
-      expect(screen.getByText(/email and password are required/i)).toBeInTheDocument();
+      expect(screen.getByText(/invalid credentials/i)).toBeInTheDocument();
     });
   });
 });

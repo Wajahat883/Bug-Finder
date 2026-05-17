@@ -1,5 +1,5 @@
-import { ScanContext } from "../types";
-import { logger } from "../../../lib/logger";
+import { ScanContext } from "./types";
+import { logger } from "../../lib/logger";
 
 interface SessionState {
   cookies: Map<string, string>;

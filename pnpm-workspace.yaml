@@ -93,7 +93,7 @@ overrides:
   "esbuild>@esbuild/sunos-x64": "-"
   "esbuild>@esbuild/win32-arm64": "-"
   "esbuild>@esbuild/win32-ia32": "-"
-  "esbuild>@esbuild/win32-x64": "-"
+  "esbuild>@esbuild/linux-x64-musl": "-"
   "esbuild>@esbuild/aix-ppc64": '-'
   "esbuild>@esbuild/android-arm": '-'
   "esbuild>@esbuild/android-arm64": '-'
@@ -106,9 +106,6 @@ overrides:
   "lightningcss>lightningcss-linux-arm-gnueabihf": "-"
   "lightningcss>lightningcss-linux-arm64-gnu": "-"
   "lightningcss>lightningcss-linux-arm64-musl": "-"
-  # "lightningcss>lightningcss-linux-x64-musl": "-"  # re-enabled: needed for Alpine Docker builds
-  "lightningcss>lightningcss-win32-arm64-msvc": "-"
-  "lightningcss>lightningcss-win32-x64-msvc": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-android-arm64": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-darwin-arm64": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-darwin-x64": "-"
@@ -116,8 +113,6 @@ overrides:
   "@tailwindcss/oxide>@tailwindcss/oxide-linux-arm-gnueabihf": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-linux-arm64-gnu": "-"
   "@tailwindcss/oxide>@tailwindcss/oxide-linux-arm64-musl": "-"
-  "@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc": "-"
-  "@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc": "-"
   # "@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl": "-"  # re-enabled: needed for Alpine Docker builds
   "rollup>@rollup/rollup-android-arm-eabi": "-"
   "rollup>@rollup/rollup-android-arm64": "-"
@@ -158,7 +153,7 @@ overrides:
   esbuild: "0.27.3"
 
 allowBuilds:
-  core-js: set this to true or false
-  esbuild: set this to true or false
-  mongodb-memory-server: set this to true or false
-  protobufjs: set this to true or false
+  core-js: true
+  esbuild: true
+  mongodb-memory-server: true
+  protobufjs: true

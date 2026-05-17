@@ -73,6 +73,8 @@ export interface ScanJobOptions {
   repoUrl?: string;
   githubToken?: string;
   openapiSpecUrl?: string;
+  scopeHosts?: string[];
+  targetId?: string;
 }
 
 // ─── Scanner Pipeline Definitions ────────────────────────────────────────────

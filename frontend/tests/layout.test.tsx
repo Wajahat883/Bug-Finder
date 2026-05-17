@@ -178,8 +178,10 @@ describe("AppLayout — active route highlight", () => {
       </AppLayout>,
       { wrapper: makeWrapper() }
     );
-    // The pageName function returns "Dashboard" for /dashboard
-    expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    // The pageName function returns "Dashboard" for /dashboard.
+    // "Dashboard" appears in both the sidebar nav and the header — use getAllByText.
+    const dashboardElements = screen.getAllByText("Dashboard");
+    expect(dashboardElements.length).toBeGreaterThan(0);
   });
 
   it("renders correct page name for /findings route", async () => {

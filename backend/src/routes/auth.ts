@@ -104,7 +104,9 @@ router.post("/auth/register", authLimiter, async (req, res) => {
 
 router.post("/auth/login", authLimiter, async (req, res) => {
   try {
-    const { email, password } = req.body as { email?: string; password?: string };
+    const body = req.body as { email?: string; username?: string; password?: string };
+    const email = body.email ?? body.username;
+    const { password } = body;
     if (!email || !password) {
       return res.status(400).json({ error: "email and password are required" });
     }
@@ -209,6 +211,14 @@ router.post("/auth/login", authLimiter, async (req, res) => {
   }
 });
 
+router.post("/auth/extend-session", async (req, res) => {
+  const session = (req as unknown as { session: SessionData }).session;
+  if (!session.userId) return res.status(401).json({ error: "Not authenticated" });
+  session.created_at = Date.now();
+  req.session.cookie.maxAge = 7 * 24 * 60 * 60 * 1000;
+  res.json({ ok: true, expires_in: req.session.cookie.maxAge });
+});
+
 router.post("/auth/logout", async (req, res) => {
   const session = (req as unknown as { session: SessionData }).session;
   if (session.userId) await auditFromReq(req, "user.logout", "users", session.userId);
@@ -304,7 +314,7 @@ router.post("/auth/change-password", async (req, res) => {
 
     const { currentPassword, newPassword } = req.body as { currentPassword?: string; newPassword?: string };
     if (!currentPassword || !newPassword) return res.status(400).json({ error: "currentPassword and newPassword are required" });
-    if (newPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters" });
+    if (newPassword.length < 12) return res.status(400).json({ error: "New password must be at least 12 characters" });
 
     const user = await col("users").findOne({ _id: new ObjectId(session.userId) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -390,7 +400,7 @@ router.post("/auth/reset-password", async (req, res) => {
   try {
     const { token, password } = req.body as { token?: string; password?: string };
     if (!token || !password) return res.status(400).json({ error: "token and password are required" });
-    if (password.length < 6) return res.status(400).json({ error: "Password must be at least 6 characters" });
+    if (password.length < 12) return res.status(400).json({ error: "Password must be at least 12 characters" });
 
     const reset = await col("password_resets").findOne({ token, used: false }) as {
       _id: ObjectId; user_id: ObjectId; expires: Date; used: boolean;

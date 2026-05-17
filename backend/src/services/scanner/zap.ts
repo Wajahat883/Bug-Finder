@@ -82,7 +82,7 @@ async function startZapContainer(zapUrl: string): Promise<boolean> {
 }
 
 export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
-  const findings: ScanFindings[] = [];
+  const findings: ScanFinding[] = [];
   const zapUrl = process.env["ZAP_URL"] ?? "http://localhost:8080";
 
   const available = await ensureZapRunning();

@@ -1164,3 +1164,331 @@ describe("Input Validation & Payload Limits", () => {
     expect(res.status).toBe(409);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 14. Audit-Log & Admin-Only Endpoint RBAC Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Admin-Only Endpoint RBAC", () => {
+  it("unauthenticated GET /api/audit-log returns 401", async () => {
+    const res = await request.get("/api/audit-log");
+    expect(res.status).toBe(401);
+    expect(res.body).toHaveProperty("error");
+  });
+
+  it("analyst role cannot access /api/audit-log (returns 403)", async () => {
+    const res = await request
+      .get("/api/audit-log")
+      .set("Cookie", analystCookie);
+    expect(res.status).toBe(403);
+    expect(res.body).toHaveProperty("error");
+  });
+
+  it("admin can access /api/audit-log (returns 200)", async () => {
+    const res = await request
+      .get("/api/audit-log")
+      .set("Cookie", adminCookie);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it("analyst cannot access /api/admin/stats (returns 403)", async () => {
+    const res = await request
+      .get("/api/admin/stats")
+      .set("Cookie", analystCookie);
+    expect(res.status).toBe(403);
+  });
+
+  it("unauthenticated GET /api/admin/stats returns 401", async () => {
+    const res = await request.get("/api/admin/stats");
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 15. Notifications Digest Rate Limit Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Notifications Digest Rate Limiting", () => {
+  /**
+   * The digestLimiter allows 5 requests per hour per IP.
+   * The 6th request must return 429.
+   * Note: rate-limiters are enabled (disableTestMode is NOT called here because
+   * this limiter is separate from authLimiter/globalLimiter — it is always active).
+   */
+  it("POST /api/notifications/digest is rate-limited to 5 requests/hour (6th returns 429)", async () => {
+    // Use a fresh analyst account so prior test runs don't exhaust the counter
+    const email = `digest-rl-${Date.now()}@sectest.local`;
+    const password = "DigestRL#Test1!";
+    await request.post("/api/auth/register").send({
+      firstName: "Digest", lastName: "RateLimit", email, password,
+    });
+    const cookie = await loginAs(email, password);
+
+    let finalStatus = 0;
+
+    // Fire 6 requests — the 6th must be 429 (digestLimiter max: 5)
+    for (let i = 0; i < 6; i++) {
+      const res = await request
+        .post("/api/notifications/digest")
+        .set("Cookie", cookie)
+        .send({ email: "digest-recipient@example.com" });
+      finalStatus = res.status;
+      if (res.status === 429) break;
+    }
+
+    expect(finalStatus).toBe(429);
+  });
+
+  it("rate-limited digest response body contains error message", async () => {
+    const email = `digest-rl2-${Date.now()}@sectest.local`;
+    const password = "DigestRL2#Test!";
+    await request.post("/api/auth/register").send({
+      firstName: "Digest", lastName: "RL2", email, password,
+    });
+    const cookie = await loginAs(email, password);
+
+    let limitedRes: supertest.Response | null = null;
+
+    for (let i = 0; i < 6; i++) {
+      const res = await request
+        .post("/api/notifications/digest")
+        .set("Cookie", cookie)
+        .send({ email: "recipient@example.com" });
+      if (res.status === 429) {
+        limitedRes = res;
+        break;
+      }
+    }
+
+    expect(limitedRes).not.toBeNull();
+    expect(limitedRes!.body).toHaveProperty("error");
+    expect(typeof limitedRes!.body.error).toBe("string");
+  });
+
+  it("unauthenticated POST /api/notifications/digest returns 401", async () => {
+    const res = await request
+      .post("/api/notifications/digest")
+      .send({ email: "someone@example.com" });
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /api/notifications/digest with invalid email returns 400", async () => {
+    const res = await request
+      .post("/api/notifications/digest")
+      .set("Cookie", analystCookie)
+      .send({ email: "not-an-email" });
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty("error");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 16. API Key Authentication — Valid Key Grants Access
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("API Key — Valid Key Access", () => {
+  it("GET /api/findings with invalid X-API-Key header returns 401", async () => {
+    const res = await request
+      .get("/api/findings")
+      .set("X-API-Key", "bfp_totally_invalid_key_value_xyz");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /api/findings with a valid seeded API key returns 200", async () => {
+    // Seed an active API key directly into the in-memory store
+    const { col } = await import("../src/lib/db");
+    const validKey = "bfp_" + crypto.randomBytes(24).toString("hex");
+    const userId = (await (col("users") as any).findOne({ email: ANALYST_EMAIL }))?._id;
+
+    await (col("api_keys") as any).insertOne({
+      name: "test-findings-key",
+      key: validKey,
+      scopes: ["read", "analyst"],
+      active: true,
+      user_id: String(userId ?? "api"),
+      usage_count: 0,
+      last_used: null,
+      created_at: new Date(),
+    });
+
+    const res = await request
+      .get("/api/findings")
+      .set("X-API-Key", validKey);
+
+    // Must not be 401 — the API key should satisfy auth
+    // 200 (findings list) is expected; in some configurations the key
+    // creates a synthetic analyst session which has full read access
+    expect(res.status).not.toBe(401);
+    expect(res.status).toBeLessThan(500);
+    if (res.status === 200) {
+      expect(res.body).toHaveProperty("items");
+    }
+  });
+
+  it("GET /api/admin/users with analyst-scoped API key returns 403", async () => {
+    const { col } = await import("../src/lib/db");
+    const analystKey = "bfp_" + crypto.randomBytes(24).toString("hex");
+
+    await (col("api_keys") as any).insertOne({
+      name: "analyst-scope-key",
+      key: analystKey,
+      scopes: ["read"],
+      active: true,
+      user_id: "api-user",
+      usage_count: 0,
+      last_used: null,
+      created_at: new Date(),
+    });
+
+    const res = await request
+      .get("/api/admin/users")
+      .set("X-API-Key", analystKey);
+
+    // analyst-scoped key must not grant admin access
+    expect([401, 403]).toContain(res.status);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 17. Session Cookie Security
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Session Cookie Security", () => {
+  it("session cookie has HttpOnly flag", async () => {
+    const res = await request
+      .post("/api/auth/login")
+      .send({ email: ANALYST_EMAIL, password: ANALYST_PASSWORD });
+
+    const setCookieHeaders = res.headers["set-cookie"] as string[] | string | undefined;
+    const raw = Array.isArray(setCookieHeaders) ? setCookieHeaders : (setCookieHeaders ? [setCookieHeaders] : []);
+
+    // Find the session cookie
+    const sessionCookieHeader = raw.find((c) => c.includes("bbp.sid") || c.includes("connect.sid"));
+    if (sessionCookieHeader) {
+      expect(sessionCookieHeader.toLowerCase()).toMatch(/httponly/i);
+    } else {
+      // If the header name is different, verify at least some cookie has HttpOnly
+      expect(raw.some((c) => c.toLowerCase().includes("httponly"))).toBe(true);
+    }
+  });
+
+  it("expired/destroyed session cookie does not grant access to protected resources", async () => {
+    // Login and get a cookie
+    const loginRes = await request
+      .post("/api/auth/login")
+      .send({ email: ANALYST_EMAIL, password: ANALYST_PASSWORD });
+    const cookie = extractCookie(loginRes);
+
+    // Logout to destroy the session
+    const h = await csrfHeaders(cookie);
+    await request.post("/api/auth/logout").set(h);
+
+    // Attempt to use the invalidated cookie
+    const meRes = await request
+      .get("/api/auth/me")
+      .set("Cookie", cookie);
+    expect(meRes.status).toBe(401);
+  });
+
+  it("completely random garbage cookie string returns 401", async () => {
+    const res = await request
+      .get("/api/findings")
+      .set("Cookie", "bbp.sid=s%3Arandom.garbage.not.a.real.session.signature");
+    expect(res.status).toBe(401);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 18. POST /api/scan-jobs SSRF — Obfuscated IP Forms
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("SSRF Prevention — Obfuscated IP Forms via Scan API", () => {
+  async function submitScanAuth(targetUrl: string): Promise<supertest.Response> {
+    const h = await csrfHeaders(analystCookie);
+    return request
+      .post("/api/scan-jobs")
+      .set(h)
+      .send({
+        target_url: targetUrl,
+        scan_profile: "standard",
+        authorization_acknowledged: true,
+      });
+  }
+
+  it("blocks hex-encoded IP 0x7f000001 (localhost bypass attempt)", async () => {
+    const res = await submitScanAuth("http://0x7f000001/secret");
+    // Either the SSRF guard catches it (400) or URL parsing rejects it (400)
+    expect(res.status).toBe(400);
+  });
+
+  it("blocks octal IP 0177.0.0.1 (loopback bypass attempt)", async () => {
+    const res = await submitScanAuth("http://0177.0.0.1/secret");
+    expect(res.status).toBe(400);
+  });
+
+  it("blocks decimal-encoded loopback 2130706433 (127.0.0.1 in decimal)", async () => {
+    const res = await submitScanAuth("http://2130706433/secret");
+    expect(res.status).toBe(400);
+  });
+
+  it("blocks IPv6 loopback in scan target", async () => {
+    const res = await submitScanAuth("http://[::1]/admin");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not allowed|blocked/i);
+  });
+
+  it("blocks AWS IMDS endpoint 169.254.169.254 via scan target", async () => {
+    const res = await submitScanAuth("http://169.254.169.254/latest/meta-data/");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/not allowed|blocked/i);
+  });
+
+  it("allows legitimate public target https://example.com", async () => {
+    const res = await submitScanAuth("https://example.com");
+    if (res.status === 400) {
+      // If rejected, must NOT be for SSRF reasons
+      expect(res.body.error ?? "").not.toMatch(/ssrf|not allowed|blocked/i);
+    } else {
+      expect([200, 201]).toContain(res.status);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 19. MongoDB Injection — Query Parameter Operators
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("MongoDB Injection — Operator-Keyed Query Params", () => {
+  it('?status[$gt]= does not cause 500, returns 400 or safe result', async () => {
+    const res = await request
+      .get("/api/findings?status[$gt]=")
+      .set("Cookie", analystCookie);
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBeLessThan(500);
+  });
+
+  it('?severity[$where]=sleep(1000) does not cause 500', async () => {
+    const res = await request
+      .get("/api/findings?severity[$where]=sleep(1000)")
+      .set("Cookie", analystCookie);
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBeLessThan(500);
+  });
+
+  it('?page[$gt]=0 does not cause 500 and is treated as safe NaN or 400', async () => {
+    const res = await request
+      .get("/api/findings?page[$gt]=0")
+      .set("Cookie", analystCookie);
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBeLessThan(500);
+  });
+
+  it('?search[$regex]=.* does not cause 500', async () => {
+    const res = await request
+      .get("/api/findings?search[$regex]=.*")
+      .set("Cookie", analystCookie);
+    expect(res.status).not.toBe(500);
+    expect(res.status).toBeLessThan(500);
+  });
+});

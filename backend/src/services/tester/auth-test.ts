@@ -17,7 +17,7 @@ const authTests: TestCase[] = [
       const goodData = goodRes ? await goodRes.json().catch(() => ({})) : {};
       const dupRes = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({ firstName: "Test", lastName: "User", email: testEmail, password: "AnotherP@ss1" }) });
 
-      if (isRateLimited(goodRes?.status)) return { id: "auth-01", name: "Registration Flow", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Registration") } as TestResult;
+      if (isRateLimited(goodRes?.status)) return { id: "auth-01", name: "Registration Flow", category: "auth", duration: 0, ...rateLimitWarn("Registration") } as TestResult;
 
       const results: string[] = [];
       if (weakRes?.status === 400) results.push("Weak password correctly rejected");
@@ -51,7 +51,7 @@ const authTests: TestCase[] = [
 
       ctx.cookieStore.delete(ctx.apiBase);
       const loginRes = await testFetch(ctx, "/auth/login", { method: "POST", body: JSON.stringify({ email: creds.email, password: creds.password }) });
-      if (isRateLimited(loginRes?.status)) return { id: "auth-02", name: "Login / Logout Flow", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Login") } as TestResult;
+      if (isRateLimited(loginRes?.status)) return { id: "auth-02", name: "Login / Logout Flow", category: "auth", duration: 0, ...rateLimitWarn("Login") } as TestResult;
 
       const badRes = await testFetch(ctx, "/auth/login", { method: "POST", body: JSON.stringify({ email: creds.email, password: "wrongpassword" }) });
 
@@ -73,7 +73,7 @@ const authTests: TestCase[] = [
       const short = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({ firstName: "A", lastName: "B", email: `shortpw-${Date.now()}@test.com`, password: "a" }) });
       const noFields = await testFetch(ctx, "/auth/register", { method: "POST", body: JSON.stringify({}) });
 
-      if (isRateLimited(short?.status)) return { id: "auth-03", name: "Password Policy Enforcement", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Password Policy") } as TestResult;
+      if (isRateLimited(short?.status)) return { id: "auth-03", name: "Password Policy Enforcement", category: "auth", duration: 0, ...rateLimitWarn("Password Policy") } as TestResult;
 
       const status: TestResult["status"] = short?.status === 400 && noFields?.status === 400 ? "pass" : "fail";
       return { id: "auth-03", name: "Password Policy Enforcement", category: "auth", status, duration: 0, message: `Short pw: HTTP ${short?.status}, Empty body: HTTP ${noFields?.status}`, evidence: { shortPwStatus: short?.status, emptyStatus: noFields?.status } } as TestResult;
@@ -108,7 +108,7 @@ const authTests: TestCase[] = [
       const existRes = await testFetch(ctx, "/auth/forgot-password", { method: "POST", body: JSON.stringify({ email: `fpw-${Date.now()}@test.com` }) });
       const invalidEmail = await testFetch(ctx, "/auth/forgot-password", { method: "POST", body: JSON.stringify({}) });
 
-      if (isRateLimited(existRes?.status)) return { id: "auth-05", name: "Forgot Password Flow", category: "auth", status: "warn", duration: 0, ...rateLimitWarn("Forgot Password") } as TestResult;
+      if (isRateLimited(existRes?.status)) return { id: "auth-05", name: "Forgot Password Flow", category: "auth", duration: 0, ...rateLimitWarn("Forgot Password") } as TestResult;
 
       const status: TestResult["status"] = existRes?.status === 200 && invalidEmail?.status === 400 ? "pass" : existRes?.status === 200 ? "warn" : "fail";
       return { id: "auth-05", name: "Forgot Password Flow", category: "auth", status, duration: 0, message: `Forgot password: HTTP ${existRes?.status}, Missing email: HTTP ${invalidEmail?.status}`, evidence: { existStatus: existRes?.status, invalidStatus: invalidEmail?.status }, suggestion: status === "fail" ? "Forgot-password should return 200 for both existent/non-existent emails" : undefined } as TestResult;

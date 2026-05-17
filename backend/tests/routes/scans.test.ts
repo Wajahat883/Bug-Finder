@@ -376,11 +376,61 @@ describe("POST /api/scan-jobs", () => {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Helper to restore the default col mock (used in beforeEach blocks that follow tests which override col)
+async function restoreDefaultColMock() {
+  const { col } = await import("../../src/lib/db");
+  vi.mocked(col).mockImplementation((name: string) => {
+    if (name === "scan_jobs") {
+      return {
+        findOne: vi.fn().mockResolvedValue(mockScanJob),
+        findOneAndUpdate: vi.fn().mockResolvedValue(mockScanJob),
+        find: vi.fn().mockReturnValue({
+          sort: vi.fn().mockReturnValue({
+            skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockScanJob]) }) }),
+            limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockScanJob]) }),
+            toArray: vi.fn().mockResolvedValue([mockScanJob]),
+          }),
+        }),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+        countDocuments: vi.fn().mockResolvedValue(1),
+        aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+      } as never;
+    }
+    if (name === "findings") {
+      return {
+        findOne: vi.fn().mockResolvedValue(mockFinding),
+        find: vi.fn().mockReturnValue({
+          toArray: vi.fn().mockResolvedValue([mockFinding]),
+          sort: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([mockFinding]) }),
+        }),
+        insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+        deleteOne: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+        updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+        countDocuments: vi.fn().mockResolvedValue(1),
+      } as never;
+    }
+    return {
+      findOne: vi.fn().mockResolvedValue(null),
+      find: vi.fn().mockReturnValue({ sort: vi.fn().mockReturnValue({ skip: vi.fn().mockReturnValue({ limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }) }), limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }), toArray: vi.fn().mockResolvedValue([]) }), limit: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }), toArray: vi.fn().mockResolvedValue([]) }),
+      insertOne: vi.fn().mockResolvedValue({ insertedId: new ObjectId() }),
+      updateOne: vi.fn().mockResolvedValue({ modifiedCount: 1 }),
+      updateMany: vi.fn().mockResolvedValue({ modifiedCount: 0 }),
+      deleteOne: vi.fn().mockResolvedValue({ deletedCount: 1 }),
+      deleteMany: vi.fn().mockResolvedValue({ deletedCount: 0 }),
+      countDocuments: vi.fn().mockResolvedValue(0),
+      aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+    } as never;
+  });
+}
+
 describe("GET /api/scan-jobs/:id", () => {
   let app: Awaited<ReturnType<typeof buildApp>>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -451,6 +501,7 @@ describe("DELETE /api/scan-jobs/:id", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -507,6 +558,7 @@ describe("POST /api/scan-jobs/:id/pause", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -530,6 +582,7 @@ describe("PATCH /api/scan-jobs/:id/pause (PATCH variant)", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
@@ -548,6 +601,7 @@ describe("POST /api/scan-jobs/:id/resume", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    await restoreDefaultColMock();
     app = await buildApp();
   });
 
