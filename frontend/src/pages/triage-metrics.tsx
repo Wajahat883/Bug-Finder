@@ -95,7 +95,7 @@ export default function TriageMetricsPage() {
   const { data, isLoading, refetch } = useQuery<TriageStats>({
     queryKey: ["triage-stats"],
     queryFn: async () => {
-      const res = await fetch("/api/triage/stats");
+      const res = await fetch("/api/triage/stats", { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load stats");
       return res.json();
     },

@@ -415,7 +415,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [toast, soundMuted]);
 
-  const showOnboarding = !userLoading && !userError && !!user && (user as Record<string, unknown>)?.onboarding_complete !== true;
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const showOnboarding = !userLoading && !userError && !!user && (user as Record<string, unknown>)?.onboarding_complete !== true && !onboardingDismissed;
 
   const currentPage = pageName(location);
   const displayName = (user as Record<string, unknown>)?.github_login as string || (user as Record<string, unknown>)?.username as string || "SecOps Lead";
@@ -426,6 +427,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     "/executive", "/attack-surface", "/compliance", "/sla", "/engagements", "/scan-templates", "/cvss",
     "/admin/anomaly-alerts", "/admin/ip-allowlist", "/admin/sessions", "/admin/saml-config", "/admin/policy",
     "/admin/tenants", "/scanner-rules", "/admin/login-history",
+    "/credentials", "/metrics", "/report-schedules", "/triage-metrics", "/feature-flags",
+    "/secrets", "/api-docs", "/status",
   ];
 
   async function logout() {
@@ -806,13 +809,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     </div>
     <SessionExpiryModal />
     {showOnboarding && (
-      <OnboardingWizard onComplete={async () => {
-        await fetch("/api/auth/profile", {
+      <OnboardingWizard onDismiss={() => {
+        setOnboardingDismissed(true);
+        fetch("/api/auth/profile", {
           method: "PATCH", credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ onboarding_complete: true }),
-        });
-        qc.invalidateQueries({ queryKey: ["/api/auth/me"] });
+        }).then(() => qc.invalidateQueries({ queryKey: ["/api/auth/me"] })).catch(() => {});
       }} />
     )}
     {shortcutsOpen && (

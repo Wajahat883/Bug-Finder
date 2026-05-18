@@ -2,7 +2,6 @@ import { useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { format } from "date-fns";
-import { OnboardingWizard, useOnboarding } from "@/components/onboarding-wizard";
 import {
   useGetDashboardStats,
   useGetDashboardActivity,
@@ -160,7 +159,6 @@ export default function Dashboard() {
   const { data: activity } = useGetDashboardActivity(undefined, { query: { refetchInterval: 10000 } });
   const { data: scansResp } = useListScanJobs({ page_size: 50 });
   const [, setLocation] = useLocation();
-  const { show: showOnboarding, dismiss: dismissOnboarding } = useOnboarding();
 
   const [isLive, setIsLive] = useState(false);
   const queryClient = useQueryClient();
@@ -223,7 +221,6 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5">
-      {showOnboarding && <OnboardingWizard onDismiss={dismissOnboarding} />}
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>

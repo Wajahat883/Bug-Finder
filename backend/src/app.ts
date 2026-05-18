@@ -88,7 +88,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-Correlation-ID"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-Correlation-ID", "X-CSRF-Token"],
 }));
 
 app.set("trust proxy", 1);

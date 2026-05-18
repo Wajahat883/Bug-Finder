@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { CheckCircle, Target, Scan, Shield, Bell, ChevronRight, X } from "lucide-react";
 
 interface OnboardingStep {
@@ -53,17 +53,25 @@ export function useOnboarding() {
 }
 
 export function OnboardingWizard({ onDismiss, onComplete }: { onDismiss?: () => void; onComplete?: () => void }) {
-  const dismiss = onDismiss ?? onComplete ?? (() => {});
+  const [closed, setClosed] = useState(false);
   const [step, setStep] = useState(0);
   const [, setLocation] = useLocation();
 
   const current = STEPS[step];
   const isLast = step === STEPS.length - 1;
 
+  function dismiss() {
+    setClosed(true);
+    if (onDismiss) onDismiss();
+    else if (onComplete) onComplete();
+  }
+
   function handleAction() {
     if (current.action) {
+      setClosed(true);
       setLocation(current.action.href);
-      dismiss();
+      if (onDismiss) onDismiss();
+      else if (onComplete) onComplete();
     }
   }
 
@@ -76,7 +84,7 @@ export function OnboardingWizard({ onDismiss, onComplete }: { onDismiss?: () => 
   }
 
   return (
-    <Dialog open onOpenChange={(open) => { if (!open) dismiss(); }}>
+    <Dialog open={!closed} onOpenChange={(open) => { if (!open) dismiss(); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
@@ -118,9 +126,9 @@ export function OnboardingWizard({ onDismiss, onComplete }: { onDismiss?: () => 
               Step {step + 1} of {STEPS.length}
             </p>
             <h3 className="text-xl font-semibold">{current.title}</h3>
-            <p className="text-sm text-muted-foreground leading-relaxed max-w-sm">
+            <DialogDescription className="leading-relaxed max-w-sm">
               {current.description}
-            </p>
+            </DialogDescription>
           </div>
         </div>
 

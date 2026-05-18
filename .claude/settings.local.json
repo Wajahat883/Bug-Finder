@@ -24,7 +24,10 @@
       "Bash(perl -i -pe 's/\\\\[\\\\.\\\\.\\\\.\\(res|r\\)\\\\.headers\\\\.entries\\\\\\(\\\\\\)\\\\]/\\(Object.entries\\(\\($1.headers as unknown as Record<string, string>\\)\\)\\)/g' fingerprint.ts headers.ts infrastructure.ts tls.ts)",
       "Bash(perl -i -pe 's/req\\\\.session as Record<string, unknown>/req.session as unknown as Record<string, unknown>/g' oidc.ts)",
       "Bash(perl -i -pe 's/const \\\\{ commentId \\\\} = req\\\\.params;/const commentId = String\\(req.params[\"commentId\"]\\);/g' comments.ts)",
-      "Bash(node build.mjs)"
+      "Bash(node build.mjs)",
+      "Bash(xargs grep -l -i \"setup\\\\|onboard\\\\|welcome\\\\|guide\")",
+      "Bash(xargs grep -l \"metrics/sla\\\\|metrics/mttr\\\\|analytics/finding\\\\|triage/stats\\\\|scheduled-scans\\\\|status/incidents\\\\|scanner/health\")",
+      "Bash(dir \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\\\\frontend\\\\src\\\\lib\")"
     ]
   }
 }

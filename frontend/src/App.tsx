@@ -146,11 +146,15 @@ function Router() {
             </Route>
             <Route path="/owasp" component={OWASPPage} />
             <Route path="/timeline" component={Timeline} />
-            <Route path="/metrics" component={MetricsDashboard} />
+            <Route path="/metrics">
+              {() => <AdminRoute component={MetricsDashboard} />}
+            </Route>
             <Route path="/analytics-enhanced" component={AnalyticsEnhanced} />
             <Route path="/ai-triage" component={AiTriage} />
             <Route path="/false-positives" component={FalsePositivesPage} />
-            <Route path="/triage-metrics" component={TriageMetricsPage} />
+            <Route path="/triage-metrics">
+              {() => <AdminRoute component={TriageMetricsPage} />}
+            </Route>
             <Route path="/feature-flags">
               {() => <AdminRoute component={FeatureFlagsAdmin} />}
             </Route>
@@ -192,17 +196,27 @@ function Router() {
             <Route path="/admin/tenants">
               {() => <AdminRoute component={AdminTenants} />}
             </Route>
-            <Route path="/credentials" component={CredentialsPage} />
-            <Route path="/secrets" component={SecretsPage} />
+            <Route path="/credentials">
+              {() => <AdminRoute component={CredentialsPage} />}
+            </Route>
+            <Route path="/secrets">
+              {() => <AdminRoute component={SecretsPage} />}
+            </Route>
             <Route path="/scanner-rules" component={ScannerRulesPage} />
             <Route path="/admin/login-history">
               {() => <AdminRoute component={AdminLoginHistory} />}
             </Route>
 
             <Route path="/scans/:id/sbom" component={SbomPage} />
-            <Route path="/api-docs" component={ApiDocs} />
-            <Route path="/report-schedules" component={ReportSchedules} />
-            <Route path="/status" component={StatusPage} />
+            <Route path="/api-docs">
+              {() => <AdminRoute component={ApiDocs} />}
+            </Route>
+            <Route path="/report-schedules">
+              {() => <AdminRoute component={ReportSchedules} />}
+            </Route>
+            <Route path="/status">
+              {() => <AdminRoute component={StatusPage} />}
+            </Route>
             <Route path="/forbidden" component={Forbidden} />
             <Route component={NotFound} />
           </Switch>

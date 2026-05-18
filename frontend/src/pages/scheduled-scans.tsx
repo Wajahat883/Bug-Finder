@@ -26,7 +26,7 @@ export default function ScheduledScans() {
 
   const { data: schedules = [], isLoading } = useQuery<Array<Record<string, unknown>>>({
     queryKey: ["/api/scheduled-scans"],
-    queryFn: () => fetch("/api/scheduled-scans", { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch("/api/scheduled-scans", { credentials: "include" }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
     staleTime: 15000,
   });
 

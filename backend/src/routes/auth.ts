@@ -243,6 +243,7 @@ router.get("/auth/me", async (req, res) => {
       last_name: user.last_name,
       avatar_url: user.avatar_url ?? null,
       two_fa_enabled: user.two_fa_enabled ?? false,
+      onboarding_complete: user.onboarding_complete ?? false,
     });
   } catch (err) {
     logger.error({ err }, "Auth me error");
@@ -254,11 +255,12 @@ router.patch("/auth/profile", async (req, res) => {
   const session = (req as unknown as { session: SessionData }).session;
   if (!session.userId) return res.status(401).json({ error: "Not authenticated" });
   try {
-    const { first_name, last_name, email, avatar_url } = req.body as Record<string, string>;
+    const { first_name, last_name, email, avatar_url, onboarding_complete } = req.body as Record<string, string>;
     const update: Record<string, unknown> = { updated_at: new Date() };
     if (first_name) update.first_name = first_name.trim();
     if (last_name) update.last_name = last_name.trim();
     if (avatar_url !== undefined) update.avatar_url = avatar_url;
+    if (onboarding_complete !== undefined) update.onboarding_complete = onboarding_complete === (true as unknown as string) || onboarding_complete === "true";
     if (email) {
       const existing = await col("users").findOne({ email, _id: { $ne: new ObjectId(session.userId) } });
       if (existing) return res.status(409).json({ error: "Email already in use" });
@@ -273,6 +275,7 @@ router.patch("/auth/profile", async (req, res) => {
       id: session.userId, username: updated.username, email: updated.email,
       role: updated.role, first_name: updated.first_name, last_name: updated.last_name,
       avatar_url: updated.avatar_url ?? null,
+      onboarding_complete: updated.onboarding_complete ?? false,
     });
   } catch (err) {
     res.status(500).json({ error: "Internal server error" });

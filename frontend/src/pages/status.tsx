@@ -64,7 +64,7 @@ export default function StatusPage() {
 
   const { data: incidents = [] } = useQuery<Array<Record<string, unknown>>>({
     queryKey: ["/api/status/incidents"],
-    queryFn: () => fetch("/api/status/incidents").then(r => r.json()),
+    queryFn: () => fetch("/api/status/incidents", { credentials: "include" }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
   });
 
   const { data: scannerHealth } = useQuery({
