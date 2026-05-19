@@ -2,7 +2,8 @@ import { useParams, Link, useLocation } from "wouter";
 import {
   useGetFinding,
   useUpdateFinding,
-  useCreateRemediation
+  useCreateRemediation,
+  useGetMe,
 } from "@/api-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -881,6 +882,9 @@ export default function FindingDetail() {
     query: { enabled: !!findingId }
   });
 
+  const { data: user } = useGetMe();
+  const isAdmin = (user as Record<string, unknown>)?.role === "admin";
+
   const updateFinding = useUpdateFinding({});
 
   const createRemediation = useCreateRemediation({
@@ -926,6 +930,11 @@ export default function FindingDetail() {
     "tools", "fp", "cvss", "reasoning", "verify",
     "discussion", "comments",
   ];
+
+  const ADMIN_ONLY_TABS = new Set([
+    "intel", "cve", "remediation", "patch", "patch-gen", "narrative",
+    "poc", "tools", "fp", "cvss", "verify", "discussion", "comments",
+  ]);
 
   const tabLabels: Record<string, string> = {
     details: "Details",
@@ -1405,11 +1414,16 @@ export default function FindingDetail() {
 
         {/* Intel */}
         <TabsContent value="intel" className="pt-6">
-          <IntelTab findingId={findingId} cveId={(finding as Record<string, unknown>)?.cve_id as string | undefined} />
+          {isAdmin ? (
+            <IntelTab findingId={findingId} cveId={(finding as Record<string, unknown>)?.cve_id as string | undefined} />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* CVE Enrichment */}
         <TabsContent value="cve" className="pt-6">
+          {isAdmin ? (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
@@ -1464,10 +1478,14 @@ export default function FindingDetail() {
               )}
             </CardContent>
           </Card>
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* Remediation */}
         <TabsContent value="remediation" className="pt-6 space-y-4">
+          {isAdmin ? (<>
           <Card>
             <CardHeader>
               <CardTitle>Recommended Fix</CardTitle>
@@ -1503,6 +1521,9 @@ export default function FindingDetail() {
             emptyText={`Click "Get AI Advice" for specific, developer-friendly fix instructions.`}
             findingContext={findingCtx}
           />
+          </>) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* Attack Payloads */}
@@ -1520,6 +1541,7 @@ export default function FindingDetail() {
 
         {/* Code Patch */}
         <TabsContent value="patch" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/patch-diff/${findingId}`}
             buttonLabel="Generate Patch"
@@ -1529,6 +1551,9 @@ export default function FindingDetail() {
             emptyText="Click to generate a ready-to-apply code patch for this vulnerability."
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* Bug Bounty Report */}
@@ -1546,6 +1571,7 @@ export default function FindingDetail() {
 
         {/* Attack Narrative */}
         <TabsContent value="narrative" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/attack-narrative/${findingId}`}
             buttonLabel="Generate Narrative"
@@ -1555,10 +1581,14 @@ export default function FindingDetail() {
             emptyText="Click to generate a realistic attack narrative from the threat actor's perspective."
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* PoC */}
         <TabsContent value="poc" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/poc/${findingId}`}
             buttonLabel="Generate PoC"
@@ -1568,10 +1598,14 @@ export default function FindingDetail() {
             emptyText="Click to generate a proof-of-concept with exact HTTP requests and a minimal automation script."
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* Tool Recommendations */}
         <TabsContent value="tools" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/tools/${findingId}`}
             buttonLabel="Get Tool Recommendations"
@@ -1581,10 +1615,14 @@ export default function FindingDetail() {
             emptyText="Click to get specific tool recommendations — Burp plugins, nuclei template IDs, and exact CLI commands to find and confirm this vulnerability."
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* False Positive Analysis */}
         <TabsContent value="fp" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/false-positive/${findingId}`}
             buttonLabel="Analyze Finding"
@@ -1594,10 +1632,14 @@ export default function FindingDetail() {
             emptyText="Click to get an AI verdict on whether this finding is a real vulnerability or a false positive."
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* CVSS Breakdown */}
         <TabsContent value="cvss" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/cvss-breakdown/${findingId}`}
             buttonLabel="Explain CVSS Score"
@@ -1607,10 +1649,14 @@ export default function FindingDetail() {
             emptyText="Click to get a plain-English breakdown of the CVSS score and actionable ways to reduce it."
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* 🤖 Auto-Patch Generator */}
         <TabsContent value="patch-gen" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/generate-patch/${findingId}`}
             buttonLabel="Generate Production Patch"
@@ -1620,6 +1666,9 @@ export default function FindingDetail() {
             emptyText={`Click to generate a production-ready code patch. AI detects your tech stack and generates language-specific fixes with tests.`}
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* 🧠 AI Reasoning Chain */}
@@ -1637,6 +1686,7 @@ export default function FindingDetail() {
 
         {/* 🔍 Safe Exploit Verification */}
         <TabsContent value="verify" className="pt-6">
+          {isAdmin ? (
           <AiStreamPanel
             endpoint={`/api/ai/verify-finding/${findingId}`}
             buttonLabel="Verify Finding"
@@ -1646,15 +1696,23 @@ export default function FindingDetail() {
             emptyText={`Click to verify this finding with a safe exploit. AI generates only non-destructive tests (SLEEP for SQLi, document.domain for XSS, etc.).`}
             findingContext={findingCtx}
           />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* Discussion */}
         <TabsContent value="discussion" className="pt-6">
+          {isAdmin ? (
           <DiscussionTab findingId={findingId} currentUser={(finding as Record<string,unknown>)?.user_id as string} />
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
 
         {/* Comments */}
         <TabsContent value="comments" className="pt-6">
+          {isAdmin ? (
           <div className="space-y-3">
             <div className="flex gap-2">
               <textarea
@@ -1677,6 +1735,9 @@ export default function FindingDetail() {
               </div>
             ))}
           </div>
+          ) : (
+            <p className="text-center py-12 text-muted-foreground text-sm">Available to administrators only.</p>
+          )}
         </TabsContent>
       </Tabs>
     </div>
