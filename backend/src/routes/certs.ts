@@ -63,10 +63,8 @@ async function checkDomainCert(domain: string): Promise<CertInfo> {
   });
 }
 
-router.use(requireAuth);
-
 // GET /certs/check/:targetId — Check SSL cert for a target
-router.get("/certs/check/:targetId", async (req, res) => {
+router.get("/certs/check/:targetId", requireAuth, async (req, res) => {
   try {
     const target = await col("targets").findOne({ _id: new ObjectId(String(req.params.targetId)) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!target) return res.status(404).json({ error: "Target not found" });
@@ -82,7 +80,7 @@ router.get("/certs/check/:targetId", async (req, res) => {
 });
 
 // GET /certs/status — Get cert status for all targets
-router.get("/certs/status", async (_req, res) => {
+router.get("/certs/status", requireAuth, async (_req, res) => {
   try {
     const targets = await col("targets").find({ status: "active" }).toArray() as Array<Record<string, unknown>>;
     const results = await Promise.all(targets.map(async (t) => {

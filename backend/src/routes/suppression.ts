@@ -19,7 +19,6 @@ import { requireAuth } from "../middlewares/rbac";
 import { auditFromReq } from "../lib/audit";
 
 const router = Router();
-router.use(requireAuth);
 
 function formatRule(r: Record<string, unknown>) {
   return {
@@ -37,7 +36,7 @@ function formatRule(r: Record<string, unknown>) {
 }
 
 // Create a suppression rule manually
-router.post("/suppression-rules", async (req, res) => {
+router.post("/suppression-rules", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const body = req.body as {
@@ -92,10 +91,10 @@ router.post("/suppression-rules", async (req, res) => {
 });
 
 // Create rule directly from an existing finding — convenience endpoint used by UI
-router.post("/suppression-rules/from-finding/:findingId", async (req, res) => {
+router.post("/suppression-rules/from-finding/:findingId", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    const { findingId } = req.params;
+    const findingId = String(req.params["findingId"]);
     if (!ObjectId.isValid(findingId)) return res.status(404).json({ error: "Finding not found" });
 
     const finding = await col("findings").findOne({ _id: new ObjectId(findingId) } as Record<string, unknown>) as Record<string, unknown> | null;
@@ -151,7 +150,7 @@ router.post("/suppression-rules/from-finding/:findingId", async (req, res) => {
 });
 
 // List suppression rules
-router.get("/suppression-rules", async (req, res) => {
+router.get("/suppression-rules", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const target = req.query["target_url"] as string | undefined;
@@ -176,7 +175,7 @@ router.get("/suppression-rules", async (req, res) => {
 });
 
 // Delete a suppression rule
-router.delete("/suppression-rules/:id", async (req, res) => {
+router.delete("/suppression-rules/:id", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const id = String(req.params["id"]);

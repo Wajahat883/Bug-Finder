@@ -202,7 +202,9 @@ function Router() {
             <Route path="/secrets">
               {() => <AdminRoute component={SecretsPage} />}
             </Route>
-            <Route path="/scanner-rules" component={ScannerRulesPage} />
+            <Route path="/scanner-rules">
+              {() => <AdminRoute component={ScannerRulesPage} />}
+            </Route>
             <Route path="/admin/login-history">
               {() => <AdminRoute component={AdminLoginHistory} />}
             </Route>
@@ -214,9 +216,7 @@ function Router() {
             <Route path="/report-schedules">
               {() => <AdminRoute component={ReportSchedules} />}
             </Route>
-            <Route path="/status">
-              {() => <AdminRoute component={StatusPage} />}
-            </Route>
+            <Route path="/status" component={StatusPage} />
             <Route path="/forbidden" component={Forbidden} />
             <Route component={NotFound} />
           </Switch>

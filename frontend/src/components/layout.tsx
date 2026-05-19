@@ -416,12 +416,12 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
   }, [toast, soundMuted]);
 
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
-  const showOnboarding = !userLoading && !userError && !!user && (user as Record<string, unknown>)?.onboarding_complete !== true && !onboardingDismissed;
+  const isAdmin = (user as Record<string, unknown>)?.role === "admin";
+  const showOnboarding = !userLoading && !userError && !!user && (user as Record<string, unknown>)?.onboarding_complete !== true && !onboardingDismissed && !isAdmin;
 
   const currentPage = pageName(location);
   const displayName = (user as Record<string, unknown>)?.github_login as string || (user as Record<string, unknown>)?.username as string || "SecOps Lead";
   const displayRole = ((user as Record<string, unknown>)?.role as string)?.toUpperCase() || "ANALYST";
-  const isAdmin = (user as Record<string, unknown>)?.role === "admin";
   const ADMIN_ONLY_PATHS = [
     "/integrations", "/api-keys", "/audit-log", "/system", "/admin/users", "/admin/panel", "/testing",
     "/executive", "/attack-surface", "/compliance", "/sla", "/engagements", "/scan-templates", "/cvss",

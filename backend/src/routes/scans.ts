@@ -9,7 +9,6 @@ import { getComplianceTags } from "../lib/compliance-map";
 import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
 
 const router = Router();
-router.use(requireAuth);
 
 function formatJob(j: Record<string, unknown>) {
   return {
@@ -40,7 +39,7 @@ function formatJob(j: Record<string, unknown>) {
   };
 }
 
-router.get("/scan-jobs", async (req, res) => {
+router.get("/scan-jobs", requireAuth, async (req, res) => {
   try {
     const page = parseInt(String(req.query["page"] ?? "1"));
     const pageSize = parseInt(String(req.query["page_size"] ?? "20"));
@@ -69,7 +68,7 @@ router.get("/scan-jobs", async (req, res) => {
   }
 });
 
-router.post("/scan-jobs", async (req, res) => {
+router.post("/scan-jobs", requireAuth, async (req, res) => {
   try {
     const body = req.body as {
       target_url: string;
@@ -189,7 +188,7 @@ router.post("/scan-jobs", async (req, res) => {
   }
 });
 
-router.get("/scan-jobs/:id", async (req, res) => {
+router.get("/scan-jobs/:id", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
@@ -210,7 +209,7 @@ router.get("/scan-jobs/:id", async (req, res) => {
   }
 });
 
-router.get("/scan-jobs/:id/findings", async (req, res) => {
+router.get("/scan-jobs/:id/findings", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
@@ -229,7 +228,7 @@ router.get("/scan-jobs/:id/findings", async (req, res) => {
   }
 });
 
-router.get("/scan-jobs/:id/attack-surface", async (req, res) => {
+router.get("/scan-jobs/:id/attack-surface", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
@@ -343,7 +342,7 @@ function formatFinding(f: Record<string, unknown>) {
 }
 
 // Pause a running scan
-router.post("/scan-jobs/:id/pause", async (req, res) => {
+router.post("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
@@ -360,7 +359,7 @@ router.post("/scan-jobs/:id/pause", async (req, res) => {
 });
 
 // Resume a paused scan
-router.post("/scan-jobs/:id/resume", async (req, res) => {
+router.post("/scan-jobs/:id/resume", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });

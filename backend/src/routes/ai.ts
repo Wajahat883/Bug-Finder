@@ -220,10 +220,9 @@ function estimateConfidence(text: string, inputLength: number): number {
 const router = Router();
 
 router.use(aiLimiter);
-router.use(requireAuth);
 
 // ── Token budget check middleware ─────────────────────────────────────────────
-router.use(async (req, res, next) => {
+router.use(requireAuth, async (req, res, next) => {
   if (req.method !== "POST") return next();
   const session = (req as unknown as { session: { userId?: string } }).session;
   const userId = session.userId;

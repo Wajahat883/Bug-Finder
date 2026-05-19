@@ -5,6 +5,7 @@ import { logger } from "../lib/logger";
 import { ScanFinding } from "../services/scanner/types";
 import { requireAuth, requireAdmin } from "../middlewares/rbac";
 import { runCustomRules as runCustomRulesEngine } from "../services/scanner/custom-rules";
+import { checkSsrf } from "../lib/ssrf-guard";
 
 interface ScannerRule {
   name: string;
@@ -25,11 +26,9 @@ interface ScannerRule {
 }
 
 const router = Router();
-router.use(requireAuth);
-router.use(requireAdmin);
 
 // GET /scanner/rules — List all custom rules
-router.get("/scanner-rules", async (_req, res) => {
+router.get("/scanner-rules", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const rules = await col("custom_scanner_rules").find({}).sort({ created_at: -1 }).toArray() as Array<Record<string, unknown>>;
     res.json(rules.map((r) => ({
@@ -50,7 +49,7 @@ router.get("/scanner-rules", async (_req, res) => {
 });
 
 // GET /scanner/rules/:id — Get single rule
-router.get("/scanner-rules/:id", async (req, res) => {
+router.get("/scanner-rules/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const rule = await col("custom_scanner_rules").findOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!rule) return res.status(404).json({ error: "Rule not found" });
@@ -61,7 +60,7 @@ router.get("/scanner-rules/:id", async (req, res) => {
 });
 
 // POST /scanner/rules — Create new custom rule
-router.post("/scanner-rules", async (req, res) => {
+router.post("/scanner-rules", requireAuth, requireAdmin, async (req, res) => {
   try {
     const rule = req.body as ScannerRule;
     if (!rule.name || !rule.method || !rule.pathPattern) {
@@ -95,7 +94,7 @@ router.post("/scanner-rules", async (req, res) => {
 });
 
 // PATCH /scanner/rules/:id — Update rule
-router.patch("/scanner-rules/:id", async (req, res) => {
+router.patch("/scanner-rules/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     const updates = req.body as Partial<ScannerRule & { enabled: boolean }>;
     const set: Record<string, unknown> = { updated_at: new Date() };
@@ -117,7 +116,7 @@ router.patch("/scanner-rules/:id", async (req, res) => {
 });
 
 // DELETE /scanner/rules/:id — Delete rule
-router.delete("/scanner-rules/:id", async (req, res) => {
+router.delete("/scanner-rules/:id", requireAuth, requireAdmin, async (req, res) => {
   try {
     await col("custom_scanner_rules").deleteOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>);
     res.json({ ok: true });
@@ -127,10 +126,13 @@ router.delete("/scanner-rules/:id", async (req, res) => {
 });
 
 // POST /scanner/rules/test — Test a rule against a target without saving findings
-router.post("/scanner-rules/test", async (req, res) => {
+router.post("/scanner-rules/test", requireAuth, requireAdmin, async (req, res) => {
   try {
     const { rule, targetUrl } = req.body as { rule: ScannerRule; targetUrl: string };
     if (!rule || !targetUrl) return res.status(400).json({ error: "rule and targetUrl required" });
+
+    const ssrfError = checkSsrf(targetUrl);
+    if (ssrfError) return res.status(400).json({ error: ssrfError });
 
     const findings: ScanFinding[] = [];
     const url = targetUrl.replace(/\/$/, "") + (rule.pathPattern.startsWith("/") ? rule.pathPattern : "/" + rule.pathPattern);

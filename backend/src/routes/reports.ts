@@ -7,10 +7,8 @@ import PDFDocument from "pdfkit";
 
 const router = Router();
 
-router.use(requireAuth);
-
 // GET /reports/scan/:id — Generate HTML security scan report
-router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
+router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
@@ -141,7 +139,7 @@ router.get(["/reports/scan/:id", "/reports/scan/:id/pdf"], async (req, res) => {
 });
 
 // GET /reports/:id/pdf — Generate a real PDF security report using pdfkit
-router.get("/reports/:id/pdf", async (req, res) => {
+router.get("/reports/:id/pdf", requireAuth, async (req, res) => {
   try {
     const sess = req.session as unknown as { userId?: string; role?: string };
     const id = String(req.params["id"]);

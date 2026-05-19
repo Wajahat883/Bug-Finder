@@ -4,7 +4,6 @@ import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
-router.use(requireAuth);
 
 interface ComplianceFramework {
   id: string;
@@ -85,7 +84,7 @@ function getControlStatus(categories: string[], controlCategories: string[]): "p
 }
 
 // GET /compliance/report/:framework — Generate compliance report
-router.get("/compliance/report/:framework", async (req, res) => {
+router.get("/compliance/report/:framework", requireAuth, async (req, res) => {
   try {
     const framework = FRAMEWORKS.find(f => f.id === req.params.framework);
     if (!framework) {
@@ -178,7 +177,7 @@ function generateComplianceHtml(
 }
 
 // GET /compliance/frameworks — List available frameworks
-router.get("/compliance/frameworks", (_req, res) => {
+router.get("/compliance/frameworks", requireAuth, (_req, res) => {
   res.json(FRAMEWORKS.map(f => ({
     id: f.id,
     name: f.name,

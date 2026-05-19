@@ -6,10 +6,8 @@ import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
-router.use(requireAuth);
-
 // GET /search — Full-text search across findings, targets, and scans
-router.get("/search", async (req, res) => {
+router.get("/search", requireAuth, async (req, res) => {
   try {
     const q = (req.query["q"] as string)?.trim();
     const type = req.query["type"] as string | undefined;

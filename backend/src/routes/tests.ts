@@ -6,10 +6,9 @@ import {
 } from "../services/tester";
 
 const router = Router();
-router.use(requireAuth);
 
 // GET /tests/suites — List all available test suites with metadata
-router.get("/tests/suites", (_req, res) => {
+router.get("/tests/suites", requireAuth, (_req, res) => {
   try {
     res.json(ALL_SUITES.map(s => ({
       id: s.id,
@@ -27,9 +26,9 @@ router.get("/tests/suites", (_req, res) => {
 });
 
 // GET /tests/suites/:id — Get single suite with all tests
-router.get("/tests/suites/:id", (req, res) => {
+router.get("/tests/suites/:id", requireAuth, (req, res) => {
   try {
-    const suite = getSuite(req.params.id);
+    const suite = getSuite(String(req.params["id"]));
     if (!suite) return res.status(404).json({ error: "Suite not found" });
     res.json({
       id: suite.id,
@@ -48,7 +47,7 @@ router.get("/tests/suites/:id", (req, res) => {
 });
 
 // POST /tests/run — Run specified test suites
-router.post("/tests/run", async (req, res) => {
+router.post("/tests/run", requireAuth, async (req, res) => {
   try {
     const { suiteIds, baseUrl } = req.body as { suiteIds?: string[]; baseUrl?: string };
 
@@ -80,14 +79,14 @@ router.post("/tests/run", async (req, res) => {
 });
 
 // GET /tests/runs/:id — Get a specific test run result
-router.get("/tests/runs/:id", (req, res) => {
-  const run = getTestRun(req.params.id);
+router.get("/tests/runs/:id", requireAuth, (req, res) => {
+  const run = getTestRun(String(req.params["id"]));
   if (!run) return res.status(404).json({ error: "Test run not found" });
   res.json(run);
 });
 
 // GET /tests/runs — Get test run history
-router.get("/tests/runs", async (req, res) => {
+router.get("/tests/runs", requireAuth, async (req, res) => {
   try {
     const limit = parseInt(String(req.query["limit"] ?? "10"));
     const history = await getTestRunHistory(limit);
@@ -107,7 +106,7 @@ router.get("/tests/runs", async (req, res) => {
 });
 
 // GET /tests/runs/:id/stream — SSE stream for real-time test progress
-router.get("/tests/runs/:id/stream", (req, res) => {
+router.get("/tests/runs/:id/stream", requireAuth, (req, res) => {
   const id = String(req.params["id"]);
 
   res.setHeader("Content-Type", "text/event-stream");

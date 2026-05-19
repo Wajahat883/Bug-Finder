@@ -4,7 +4,6 @@ import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { formatFinding } from "./scans";
 import { requireAuth } from "../middlewares/rbac";
-import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
 import { getComplianceTags } from "../lib/compliance-map";
 import { engagementScopeFilter } from "../middlewares/resource-rbac";
 import { logAudit, auditFromReq } from "../lib/audit";
@@ -52,7 +51,7 @@ router.get("/findings", requireAuth, async (req, res) => {
         .skip((page - 1) * pageSize)
         .limit(pageSize)
         .toArray()
-        .then(rows => (rows as Array<Record<string, unknown>>).map(r => formatFinding(redactObject(r, FINDING_SENSITIVE_FIELDS)))),
+        .then(rows => (rows as Array<Record<string, unknown>>).map(formatFinding)),
       col("findings").countDocuments(query as Record<string, unknown>),
     ]);
 
@@ -1154,25 +1153,29 @@ router.post("/findings/:id/false-negative", requireAuth, async (req, res) => {
 router.post("/findings/:id/evidence", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
-    const { filename, content_type, data, description } = req.body as {
+    const { filename, content_type, base64_data, data, label, description } = req.body as {
       filename?: string;
       content_type?: string;
-      data?: string; // base64 encoded
+      base64_data?: string;
+      data?: string;
+      label?: string;
       description?: string;
     };
-    if (!filename || !data) return res.status(400).json({ error: "filename and data (base64) are required" });
+    const fileData = base64_data ?? data;
+    if (!filename || !fileData) return res.status(400).json({ error: "filename and data (base64) are required" });
     const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "application/json", "text/plain", "application/octet-stream", "application/har+json"];
     const ct = content_type ?? "application/octet-stream";
     if (!ALLOWED_TYPES.includes(ct)) return res.status(400).json({ error: "File type not allowed" });
-    const buf = Buffer.from(data, "base64");
+    const buf = Buffer.from(fileData, "base64");
     if (buf.length > 10 * 1024 * 1024) return res.status(400).json({ error: "File too large (max 10MB)" });
 
     const insert = await col("evidence_files").insertOne({
       finding_id: id,
       filename,
       content_type: ct,
-      data: data, // store base64 in DB (for small files; production would use S3)
+      data: fileData,
       size_bytes: buf.length,
+      label: label ?? description ?? null,
       description: description ?? null,
       created_at: new Date(),
     });
@@ -1188,7 +1191,7 @@ router.get("/findings/:id/evidence", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     const files = await col("evidence_files").find({ finding_id: id } as Record<string, unknown>).sort({ created_at: -1 }).toArray();
-    res.json(files.map(f => ({ id: String(f["_id"]), filename: f["filename"], content_type: f["content_type"], size_bytes: f["size_bytes"], description: f["description"], created_at: f["created_at"] })));
+    res.json(files.map(f => ({ id: String(f["_id"]), filename: f["filename"], content_type: f["content_type"], size_bytes: f["size_bytes"], label: f["label"] ?? f["description"] ?? null, created_at: f["created_at"], base64_data: f["data"] ?? null })));
   } catch {
     res.status(500).json({ error: "Internal server error" });
   }

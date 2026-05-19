@@ -326,7 +326,7 @@ function AiStreamPanel({
   );
 }
 
-function EvidenceTab({ findingId }: { findingId: string }) {
+function EvidenceTab({ findingId, evidence }: { findingId: string; evidence?: string }) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [uploading, setUploading] = useState(false);
@@ -384,6 +384,14 @@ function EvidenceTab({ findingId }: { findingId: string }) {
     <Card>
       <CardHeader><CardTitle className="text-base flex items-center gap-2"><Paperclip className="w-4 h-4" />Evidence & Attachments</CardTitle></CardHeader>
       <CardContent className="space-y-4">
+        {/* Scanner evidence */}
+        {evidence && (
+          <div className="border border-border rounded-lg p-4">
+            <h4 className="text-sm font-medium mb-2">Scanner Evidence</h4>
+            <pre className="text-xs font-mono bg-muted rounded p-3 overflow-auto max-h-80 whitespace-pre-wrap break-all">{evidence}</pre>
+          </div>
+        )}
+
         {/* Upload area */}
         <div
           className="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
@@ -1392,7 +1400,7 @@ export default function FindingDetail() {
 
         {/* Evidence */}
         <TabsContent value="evidence" className="pt-6">
-          <EvidenceTab findingId={findingId} />
+          <EvidenceTab findingId={findingId} evidence={finding?.evidence} />
         </TabsContent>
 
         {/* Intel */}

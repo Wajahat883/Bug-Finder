@@ -84,10 +84,13 @@ export default function Login() {
     } finally { setLoading(false); }
   }
 
-const strength = regForm.password.length === 0 ? 0
-    : regForm.password.length < 4 ? 1
-    : regForm.password.length < 6 ? 2
-    : regForm.password.length < 8 ? 3 : 4;
+const pwVal = regForm.password;
+  const pwHasUpper = /[A-Z]/.test(pwVal);
+  const pwHasNumber = /[0-9]/.test(pwVal);
+  const pwHasSpecial = /[^A-Za-z0-9]/.test(pwVal);
+  const pwLongEnough = pwVal.length >= 12;
+  const strength = pwVal.length === 0 ? 0
+    : [pwLongEnough, pwHasUpper, pwHasNumber, pwHasSpecial].filter(Boolean).length;
 
   const strengthLabel = ["", "Weak", "Fair", "Good", "Strong"][strength];
   const strengthColor = ["", "#ef4444", "#f97316", "#eab308", "#22c55e"][strength];
@@ -249,25 +252,6 @@ const strength = regForm.password.length === 0 ? 0
                 {loading ? <Loader2 size={16} className="animate-spin" /> : <>Sign In <ArrowRight size={16} /></>}
               </button>
 
-              <div className="flex items-center gap-3">
-                <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.06)" }} />
-                <span className="text-xs" style={{ color: "rgba(255,255,255,0.22)" }}>or continue with</span>
-                <div className="flex-1 h-px" style={{ background: "rgba(255,255,255,0.06)" }} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <a href="/api/auth/oauth/github"
-                  className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all hover:opacity-80"
-                  style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.04)" }}>
-                  <GithubIcon /> GitHub
-                </a>
-                <a href="/api/auth/oauth/google"
-                  className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium transition-all hover:opacity-80"
-                  style={{ border: "1px solid rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.7)", background: "rgba(255,255,255,0.04)" }}>
-                  <GoogleIcon /> Google
-                </a>
-              </div>
-
               <div className="text-right">
                 <a href="/forgot-password" className="text-xs hover:opacity-80" style={{ color: "#a78bfa" }}>Forgot password?</a>
               </div>
@@ -316,7 +300,7 @@ const strength = regForm.password.length === 0 ? 0
               <div className="relative">
                 <Lock size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: "rgba(255,255,255,0.25)" }} />
                 <input
-                  type={showPass ? "text" : "password"} required minLength={6} placeholder="Password (min 6 characters)"
+                  type={showPass ? "text" : "password"} required minLength={12} placeholder="Password (min 12 chars, A-Z, 0-9, symbol)"
                   value={regForm.password} onChange={e => setRegForm(p => ({ ...p, password: e.target.value }))}
                   className="w-full rounded-xl pl-10 pr-10 py-3 text-sm outline-none transition-all"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "white" }}
@@ -337,7 +321,13 @@ const strength = regForm.password.length === 0 ? 0
                         style={{ background: i < strength ? strengthColor : "rgba(255,255,255,0.08)" }} />
                     ))}
                   </div>
-                  <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.3)" }}>{strengthLabel} password</p>
+                  <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                    <p className="text-[10px]" style={{ color: strengthColor || "rgba(255,255,255,0.3)" }}>{strengthLabel} password</p>
+                    {!pwLongEnough && <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.3)" }}>12+ chars</p>}
+                    {!pwHasUpper && <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.3)" }}>uppercase</p>}
+                    {!pwHasNumber && <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.3)" }}>number</p>}
+                    {!pwHasSpecial && <p className="text-[10px]" style={{ color: "rgba(255,255,255,0.3)" }}>symbol</p>}
+                  </div>
                 </div>
               )}
 

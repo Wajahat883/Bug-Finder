@@ -10,7 +10,6 @@ import { errorResponse } from "../lib/response";
 import { logger } from "../lib/logger";
 
 const router = Router();
-router.use(requireAuth);
 
 // ── Anomaly Alerts ────────────────────────────────────────────────────────────
 

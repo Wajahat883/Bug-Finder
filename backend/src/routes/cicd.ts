@@ -14,11 +14,10 @@ import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
-router.use(requireAuth);
 
 // ── SARIF 2.1.0 export ────────────────────────────────────────────────────────
 
-router.get("/scan-jobs/:id/sarif", async (req, res) => {
+router.get("/scan-jobs/:id/sarif", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
@@ -141,7 +140,7 @@ router.get("/scan-jobs/:id/sarif", async (req, res) => {
 // Returns exit_code: 0 if clean (pipeline should pass).
 // Optional ?min_severity=high|critical (default: critical)
 
-router.get("/scan-jobs/:id/exit-code", async (req, res) => {
+router.get("/scan-jobs/:id/exit-code", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
@@ -190,7 +189,7 @@ router.get("/scan-jobs/:id/exit-code", async (req, res) => {
 // Future scans on the same target will diff against this baseline
 // instead of the most-recent-previous scan.
 
-router.post("/scan-jobs/:id/set-baseline", async (req, res) => {
+router.post("/scan-jobs/:id/set-baseline", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });
@@ -238,7 +237,7 @@ router.post("/scan-jobs/:id/set-baseline", async (req, res) => {
 // Returns structured new/recurring/resolved diff between this scan and the
 // pinned baseline (or the most-recent previous scan if no baseline is pinned).
 
-router.get("/scan-jobs/:id/diff", async (req, res) => {
+router.get("/scan-jobs/:id/diff", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Scan not found" });

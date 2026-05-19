@@ -6,10 +6,8 @@ import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
-router.use(requireAuth);
-
 // GET /webhooks/delivery-log — View delivery history
-router.get("/webhooks/delivery-log", async (req, res) => {
+router.get("/webhooks/delivery-log", requireAuth, async (req, res) => {
   try {
     const webhookId = req.query["webhook_id"] as string | undefined;
     const limit = parseInt(String(req.query["limit"] ?? "50"));
@@ -37,7 +35,7 @@ router.get("/webhooks/delivery-log", async (req, res) => {
 });
 
 // POST /webhooks/delivery-log/retry/:id — Retry a failed delivery
-router.post("/webhooks/delivery-log/retry/:id", async (req, res) => {
+router.post("/webhooks/delivery-log/retry/:id", requireAuth, async (req, res) => {
   try {
     const delivery = await col("webhook_deliveries").findOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!delivery) return res.status(404).json({ error: "Delivery not found" });
@@ -79,7 +77,7 @@ router.post("/webhooks/delivery-log/retry/:id", async (req, res) => {
 });
 
 // DELETE /webhooks/delivery-log — Clear old logs
-router.delete("/webhooks/delivery-log", async (req, res) => {
+router.delete("/webhooks/delivery-log", requireAuth, async (req, res) => {
   try {
     const days = parseInt(String(req.query["older_than"] ?? "30"));
     const cutoff = new Date(Date.now() - days * 86400000);

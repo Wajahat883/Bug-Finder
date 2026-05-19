@@ -4,7 +4,6 @@ import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
-router.use(requireAuth);
 
 const DEFAULT_LAYOUT = {
   widgets: [
@@ -19,7 +18,7 @@ const DEFAULT_LAYOUT = {
 };
 
 // GET /dashboard/layout — Get user's dashboard layout
-router.get("/dashboard/layout", async (req, res) => {
+router.get("/dashboard/layout", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string } }).session;
     const userId = session.userId ?? "anonymous";
@@ -32,7 +31,7 @@ router.get("/dashboard/layout", async (req, res) => {
 });
 
 // PUT /dashboard/layout — Save user's dashboard layout
-router.put("/dashboard/layout", async (req, res) => {
+router.put("/dashboard/layout", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string } }).session;
     const userId = session.userId ?? "anonymous";

@@ -849,12 +849,12 @@ export default function ScanDetail() {
                 <tbody className="divide-y divide-border">
                   {findingsLoading ? (
                     <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">Loading findings...</td></tr>
-                  ) : (findings?.items?.length ?? 0) === 0 ? (
+                  ) : (findings?.length ?? 0) === 0 ? (
                     <tr><td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
                       {isRunning ? "No findings discovered yet..." : "No vulnerabilities found."}
                     </td></tr>
                   ) : (
-                    findings?.items?.map((finding) => (
+                    findings?.map((finding) => (
                       <tr key={finding.id} className="hover:bg-muted/20 cursor-pointer" onClick={() => setLocation(`/findings/${finding.id}`)}>
                         <td className="px-4 py-3 w-24"><SeverityBadge severity={finding.severity} /></td>
                         <td className="px-4 py-3 font-medium">{finding.title}</td>

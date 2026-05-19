@@ -5,7 +5,6 @@ import { logger } from "../lib/logger";
 import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
-router.use(requireAuth);
 
 // SLA deadlines by severity (business days)
 const SLA_DAYS: Record<string, number> = {
@@ -38,7 +37,7 @@ function getSlaStatus(dueDate: Date, resolvedAt?: Date | null): "on_track" | "at
 }
 
 // GET /sla/summary — SLA summary across all findings
-router.get("/sla/summary", async (req, res) => {
+router.get("/sla/summary", requireAuth, async (req, res) => {
   try {
     const scanId = req.query["scan_id"] as string | undefined;
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
@@ -97,7 +96,7 @@ router.get("/sla/summary", async (req, res) => {
 });
 
 // GET /sla/finding/:id — SLA info for a specific finding
-router.get("/sla/finding/:id", async (req, res) => {
+router.get("/sla/finding/:id", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
@@ -128,7 +127,7 @@ router.get("/sla/finding/:id", async (req, res) => {
 });
 
 // POST /sla/finding/:id/resolve — Mark a finding as resolved
-router.post("/sla/finding/:id/resolve", async (req, res) => {
+router.post("/sla/finding/:id/resolve", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
@@ -146,7 +145,7 @@ router.post("/sla/finding/:id/resolve", async (req, res) => {
 });
 
 // GET /sla/velocity — avg time-to-fix (days) per severity for resolved findings
-router.get("/sla/velocity", async (req, res) => {
+router.get("/sla/velocity", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const uf = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
@@ -176,7 +175,7 @@ router.get("/sla/velocity", async (req, res) => {
 });
 
 // GET /sla/heatmap — breach density per day for last 90 days
-router.get("/sla/heatmap", async (req, res) => {
+router.get("/sla/heatmap", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const uf = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
@@ -202,7 +201,7 @@ router.get("/sla/heatmap", async (req, res) => {
 });
 
 // GET /sla/burn-down — weekly on_track/at_risk/breached/resolved counts for last 6 weeks
-router.get("/sla/burn-down", async (req, res) => {
+router.get("/sla/burn-down", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
@@ -234,7 +233,7 @@ router.get("/sla/burn-down", async (req, res) => {
 });
 
 // GET /sla/exceptions — list SLA extension requests
-router.get("/sla/exceptions", async (_req, res) => {
+router.get("/sla/exceptions", requireAuth, async (_req, res) => {
   try {
     const items = await col("sla_exceptions").find({}).sort({ created_at: -1 }).toArray() as Array<Record<string, unknown>>;
     res.json(items.map(e => ({ ...e, id: String(e["_id"]) })));
@@ -245,7 +244,7 @@ router.get("/sla/exceptions", async (_req, res) => {
 });
 
 // POST /sla/exceptions — request SLA extension
-router.post("/sla/exceptions", async (req, res) => {
+router.post("/sla/exceptions", requireAuth, async (req, res) => {
   try {
     const { finding_id, reason, requested_days, analyst } = req.body as {
       finding_id?: string; reason?: string; requested_days?: number; analyst?: string;
@@ -265,7 +264,7 @@ router.post("/sla/exceptions", async (req, res) => {
 });
 
 // PATCH /sla/exceptions/:id — approve or deny
-router.patch("/sla/exceptions/:id", async (req, res) => {
+router.patch("/sla/exceptions/:id", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     const { status, reviewer_note, reviewer } = req.body as { status?: string; reviewer_note?: string; reviewer?: string };

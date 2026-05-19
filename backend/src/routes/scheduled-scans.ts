@@ -8,10 +8,8 @@ import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
-router.use(requireAuth);
-
 // GET /scheduled-scans — List all scheduled scans
-router.get("/scheduled-scans", async (_req, res) => {
+router.get("/scheduled-scans", requireAuth, async (_req, res) => {
   try {
     const scans = await col("scheduled_scans").find({}).sort({ created_at: -1 }).toArray() as Array<Record<string, unknown>>;
     res.json(scans.map((s) => ({
@@ -31,7 +29,7 @@ router.get("/scheduled-scans", async (_req, res) => {
 });
 
 // POST /scheduled-scans — Create scheduled scan
-router.post("/scheduled-scans", async (req, res) => {
+router.post("/scheduled-scans", requireAuth, async (req, res) => {
   try {
     const { target_url, scan_profile, cron_expression, validation_enabled, fuzzing_enabled, bug_bounty_mode } = req.body as Record<string, unknown>;
     if (!target_url || !scan_profile || !cron_expression) return res.status(400).json({ error: "target_url, scan_profile, and cron_expression required" });
@@ -55,7 +53,7 @@ router.post("/scheduled-scans", async (req, res) => {
 });
 
 // PATCH /scheduled-scans/:id — Toggle enable/disable
-router.patch("/scheduled-scans/:id", async (req, res) => {
+router.patch("/scheduled-scans/:id", requireAuth, async (req, res) => {
   try {
     const { enabled } = req.body as { enabled?: boolean };
     await col("scheduled_scans").updateOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>, { $set: { enabled: !!enabled, updated_at: new Date() } });
@@ -63,17 +61,17 @@ router.patch("/scheduled-scans/:id", async (req, res) => {
       const scan = await col("scheduled_scans").findOne({ _id: new ObjectId(String(req.params.id)) }) as Record<string, unknown>;
       if (scan) scheduleJob(scan as any);
     } else {
-      unscheduleJob(req.params.id);
+      unscheduleJob(String(req.params["id"]));
     }
     res.json({ ok: true });
   } catch (err) { logger.error({ err }, "Toggle scheduled scan error"); res.status(500).json({ error: "Failed" }); }
 });
 
 // DELETE /scheduled-scans/:id — Remove scheduled scan
-router.delete("/scheduled-scans/:id", async (req, res) => {
+router.delete("/scheduled-scans/:id", requireAuth, async (req, res) => {
   try {
-    unscheduleJob(req.params.id);
-    await col("scheduled_scans").deleteOne({ _id: new ObjectId(String(req.params.id)) } as Record<string, unknown>);
+    unscheduleJob(String(req.params["id"]));
+    await col("scheduled_scans").deleteOne({ _id: new ObjectId(String(req.params["id"])) } as Record<string, unknown>);
     res.json({ ok: true });
   } catch (err) { logger.error({ err }, "Delete scheduled scan error"); res.status(500).json({ error: "Failed" }); }
 });
