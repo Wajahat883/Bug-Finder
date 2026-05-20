@@ -15,6 +15,7 @@
     "test:all": "pnpm test && pnpm test:e2e"
   },
   "private": true,
+  "packageManager": "pnpm@10.33.3",
   "devDependencies": {
     "prettier": "^3.8.1",
     "typescript": "~5.9.2"
