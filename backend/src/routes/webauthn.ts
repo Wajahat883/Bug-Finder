@@ -21,7 +21,8 @@ function getSession(req: unknown) {
 // POST /api/webauthn/register/begin — start passkey registration
 router.post("/webauthn/register/begin", requireAuth, async (req, res) => {
   try {
-    let generateRegistrationOptions: (opts: unknown) => Promise<unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let generateRegistrationOptions: (opts: any) => Promise<any>;
     try {
       ({ generateRegistrationOptions } = await import("@simplewebauthn/server") as typeof import("@simplewebauthn/server"));
     } catch {
@@ -65,7 +66,8 @@ router.post("/webauthn/register/begin", requireAuth, async (req, res) => {
 // POST /api/webauthn/register/complete — finish passkey registration
 router.post("/webauthn/register/complete", requireAuth, async (req, res) => {
   try {
-    let verifyRegistrationResponse: (opts: unknown) => Promise<unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let verifyRegistrationResponse: (opts: any) => Promise<any>;
     try {
       ({ verifyRegistrationResponse } = await import("@simplewebauthn/server") as typeof import("@simplewebauthn/server"));
     } catch {
@@ -115,7 +117,8 @@ router.post("/webauthn/register/complete", requireAuth, async (req, res) => {
 // POST /api/webauthn/authenticate/begin — start passkey login
 router.post("/webauthn/authenticate/begin", async (req, res) => {
   try {
-    let generateAuthenticationOptions: (opts: unknown) => Promise<unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let generateAuthenticationOptions: (opts: any) => Promise<any>;
     try {
       ({ generateAuthenticationOptions } = await import("@simplewebauthn/server") as typeof import("@simplewebauthn/server"));
     } catch {
@@ -151,7 +154,8 @@ router.post("/webauthn/authenticate/begin", async (req, res) => {
 // POST /api/webauthn/authenticate/complete — finish passkey login
 router.post("/webauthn/authenticate/complete", async (req, res) => {
   try {
-    let verifyAuthenticationResponse: (opts: unknown) => Promise<unknown>;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let verifyAuthenticationResponse: (opts: any) => Promise<any>;
     try {
       ({ verifyAuthenticationResponse } = await import("@simplewebauthn/server") as typeof import("@simplewebauthn/server"));
     } catch {
