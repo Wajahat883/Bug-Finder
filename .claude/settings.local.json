@@ -43,7 +43,9 @@
       "PowerShell(Get-Content \"pnpm-lock.yaml\" | Select-Object -Index \\(69..90\\))",
       "PowerShell(git add *)",
       "PowerShell(git show HEAD:pnpm-lock.yaml | Select-Object -Index \\(69..85\\))",
-      "PowerShell(git show 8daf923:pnpm-lock.yaml | Select-String \"^overrides\" | Select-Object -First 3; git show 8daf923:pnpm-lock.yaml | Select-Object -Index \\(69..80\\))"
+      "PowerShell(git show 8daf923:pnpm-lock.yaml | Select-String \"^overrides\" | Select-Object -First 3; git show 8daf923:pnpm-lock.yaml | Select-Object -Index \\(69..80\\))",
+      "PowerShell(git *)",
+      "PowerShell(Get-ChildItem -Path \".\" | Where-Object { $_.Name -match \"\\\\.\\(yaml|yml\\)$\" })"
     ]
   }
 }

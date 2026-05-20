@@ -1,5 +1,5 @@
 {
-  "buildCommand": "PORT=3000 BASE_PATH=/ pnpm --filter \"./frontend\" run build",
+  "buildCommand": "cd frontend && PORT=3000 BASE_PATH=/ pnpm run build",
   "outputDirectory": "frontend/dist/public",
   "installCommand": "pnpm install --frozen-lockfile",
   "framework": null,
