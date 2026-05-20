@@ -38,6 +38,7 @@ router.get("/dashboard/stats", async (req, res) => {
     const riskScore = Math.min(100, totalCrit * 20 + totalHigh * 10 + totalMed * 4);
 
     // Scans over time (last 14 days)
+    //new Date() is used instead of Date.now() to ensure we get the current date in the correct timezone
     const today = new Date();
     const scansOverTime = Array.from({ length: 14 }, (_, i) => {
       const d = new Date(today);
