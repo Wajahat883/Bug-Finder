@@ -56,6 +56,23 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    sourcemap: process.env.NODE_ENV !== "production",
+    // Chunk size warning threshold — helps catch bloated bundles early
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        // Split vendor code into separate chunk for better caching
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("react") || id.includes("wouter")) return "react-vendor";
+            if (id.includes("@tanstack")) return "query-vendor";
+            if (id.includes("lucide")) return "icons-vendor";
+            if (id.includes("recharts") || id.includes("d3")) return "chart-vendor";
+            return "vendor";
+          }
+        },
+      },
+    },
   },
   server: {
     port,

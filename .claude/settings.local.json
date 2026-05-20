@@ -28,7 +28,11 @@
       "Bash(xargs grep -l -i \"setup\\\\|onboard\\\\|welcome\\\\|guide\")",
       "Bash(xargs grep -l \"metrics/sla\\\\|metrics/mttr\\\\|analytics/finding\\\\|triage/stats\\\\|scheduled-scans\\\\|status/incidents\\\\|scanner/health\")",
       "Bash(dir \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\\\\frontend\\\\src\\\\lib\")",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(dir \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\\\\frontend\\\\src\\\\pages\" /b)",
+      "Bash(findstr -i \"false\\\\|fp\\\\|triage\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }
