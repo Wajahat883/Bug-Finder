@@ -33,7 +33,11 @@
       "Bash(findstr -i \"false\\\\|fp\\\\|triage\")",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\" -Recurse -Directory)",
       "Bash(Select-Object -ExpandProperty FullName)",
-      "Bash(pnpm install *)"
+      "Bash(pnpm install *)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('overrides:', json.dumps\\(d.get\\('overrides', d.get\\('pnpm', {}\\).get\\('overrides', {}\\)\\), indent=2\\)\\)\")",
+      "Bash(python *)",
+      "Bash(Get-ChildItem \"node_modules\\\\.pnpm\\\\date-fns-jalali@4.1.0-0\\\\node_modules\\\\date-fns-jalali\" -Force)",
+      "Bash(Select-Object -First 20)"
     ]
   }
 }
