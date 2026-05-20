@@ -32,7 +32,8 @@
       "Bash(dir \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\\\\frontend\\\\src\\\\pages\" /b)",
       "Bash(findstr -i \"false\\\\|fp\\\\|triage\")",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\" -Recurse -Directory)",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(pnpm install *)"
     ]
   }
 }
