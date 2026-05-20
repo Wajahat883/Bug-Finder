@@ -339,7 +339,7 @@ function EvidenceTab({ findingId, evidence }: { findingId: string; evidence?: st
     label: string; size_bytes: number; created_at: string; base64_data: string;
   }>>({
     queryKey: ["/api/findings", findingId, "evidence"],
-    queryFn: () => fetch(`/api/findings/${findingId}/evidence`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/findings/${findingId}/evidence`, { credentials: "include" }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   });
 
   async function handleFileUpload(file: File) {
@@ -470,7 +470,7 @@ function IntelTab({ findingId, cveId }: { findingId: string; cveId?: string }) {
     affected_products: string[];
   }>({
     queryKey: ["/api/findings", findingId, "vuln-intel"],
-    queryFn: () => fetch(`/api/findings/${findingId}/vuln-intel`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/findings/${findingId}/vuln-intel`, { credentials: "include" }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
     enabled: !!cveId,
   });
 
@@ -543,7 +543,7 @@ function DiscussionTab({ findingId, currentUser }: { findingId: string; currentU
 
   const { data: comments = [] } = useQuery<Array<{ id: string; body: string; author: string; created_at: string; edited?: boolean }>>({
     queryKey: ["/api/comments", "finding", findingId],
-    queryFn: () => fetch(`/api/comments?resource=finding&resource_id=${findingId}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/comments?resource=finding&resource_id=${findingId}`, { credentials: "include" }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
     refetchInterval: 15000,
   });
 
@@ -618,7 +618,7 @@ function RelatedFindings({ currentId, cweId, category }: { currentId: string; cw
 
   const { data } = useQuery<{ findings: any[] }>({
     queryKey: ["/api/findings", "related", cweId, category],
-    queryFn: () => fetch(`/api/findings?${params.toString()}`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/findings?${params.toString()}`, { credentials: "include" }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
     enabled: !!(cweId || category),
   });
 
@@ -709,7 +709,7 @@ export default function FindingDetail() {
 
   const { data: connections = [] } = useQuery<Array<{ integration_id: string; account_name: string }>>({
     queryKey: ["/api/integrations/connections"],
-    queryFn: () => fetch("/api/integrations/connections", { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch("/api/integrations/connections", { credentials: "include" }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   });
   const connectedIds = new Set(connections.map(c => c.integration_id));
   const hasAnyIntegration = connectedIds.has("jira") || connectedIds.has("github") || connectedIds.has("slack");
@@ -758,7 +758,7 @@ export default function FindingDetail() {
 
   const { data: comments = [] } = useQuery<any[]>({
     queryKey: ["/api/findings", findingId, "comments"],
-    queryFn: () => fetch(`/api/findings/${findingId}/comments`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/findings/${findingId}/comments`, { credentials: "include" }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
   });
 
   const addComment = useMutation({
@@ -776,7 +776,7 @@ export default function FindingDetail() {
 
   const { data: cveData, isLoading: cveLoading, refetch: fetchCve, isFetching: cveFetching } = useQuery({
     queryKey: ["/api/findings", findingId, "cve"],
-    queryFn: () => fetch(`/api/findings/${findingId}/cve`, { credentials: "include" }).then(r => r.json()),
+    queryFn: () => fetch(`/api/findings/${findingId}/cve`, { credentials: "include" }).then(r => { if (!r.ok) throw new Error(r.statusText); return r.json(); }),
     enabled: false,
     staleTime: 300000,
   });
@@ -1365,12 +1365,14 @@ export default function FindingDetail() {
       {/* Tabs */}
       <Tabs defaultValue="details" className="w-full">
         <TabsList className="w-full justify-start border-b border-border rounded-none bg-transparent h-auto p-0 flex-wrap">
-          {tabs.map(tab => (
-            <TabsTrigger key={tab} value={tab}
-              className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 text-xs">
-              {tabLabels[tab] ?? tab}
-            </TabsTrigger>
-          ))}
+          {tabs
+            .filter(tab => isAdmin || !ADMIN_ONLY_TABS.has(tab))
+            .map(tab => (
+              <TabsTrigger key={tab} value={tab}
+                className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-3 text-xs">
+                {tabLabels[tab] ?? tab}
+              </TabsTrigger>
+            ))}
         </TabsList>
 
         {/* Details */}
