@@ -5,7 +5,7 @@ WORKDIR /app
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY backend ./backend
 
-RUN npm install -g pnpm
+RUN npm install -g pnpm@10.33.3
 RUN pnpm install --frozen-lockfile
 
 WORKDIR /app/backend
@@ -24,7 +24,7 @@ RUN apk add --no-cache curl \
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY backend ./backend
 
-RUN npm install -g pnpm \
+RUN npm install -g pnpm@10.33.3 \
  && pnpm install --prod --frozen-lockfile \
  && chown -R appuser:appgroup /app
 
