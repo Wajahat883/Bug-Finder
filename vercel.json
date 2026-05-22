@@ -1,16 +1,10 @@
 {
-  "buildCommand": "cd frontend && PORT=3000 BASE_PATH=/ pnpm run build",
+  "buildCommand": "pnpm --filter \"./frontend\" run build",
   "outputDirectory": "frontend/dist/public",
   "installCommand": "pnpm install --frozen-lockfile",
   "framework": null,
   "routes": [
-    {
-      "src": "/assets/(.*)",
-      "dest": "/assets/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
+    { "src": "/assets/(.*)", "dest": "/assets/$1" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
