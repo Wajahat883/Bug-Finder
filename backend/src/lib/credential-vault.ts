@@ -83,36 +83,20 @@ export async function storeCredential(
   const payload = JSON.stringify(cred);
   const { encrypted, iv, auth_tag } = encrypt(payload);
 
-  // Upsert: one credential set per (target_id, type, label) tuple
   const label = cred.label ?? cred.type;
-  const existing = await col("scan_credentials").findOne({
-    target_id: targetId,
-    type: cred.type,
-    label,
-  } as Record<string, unknown>) as StoredCredential | null;
 
-  if (existing) {
-    await col("scan_credentials").updateOne(
-      { _id: existing._id } as Record<string, unknown>,
-      {
-        $set: { encrypted, iv, auth_tag, updated_at: new Date(), created_by: createdBy ?? null },
-      } as Record<string, unknown>,
-    );
-    return existing._id.toString();
-  }
+  // Atomic upsert — avoids the findOne+insert race condition that caused duplicate-key
+  // errors (E11000) when two concurrent saves occurred for the same (target_id, type, label).
+  const result = await col("scan_credentials").findOneAndUpdate(
+    { target_id: targetId, type: cred.type, label } as Record<string, unknown>,
+    {
+      $set: { encrypted, iv, auth_tag, updated_at: new Date(), created_by: createdBy ?? null },
+      $setOnInsert: { target_id: targetId, label, type: cred.type, created_at: new Date() },
+    } as Record<string, unknown>,
+    { upsert: true, returnDocument: "after" },
+  ) as StoredCredential | null;
 
-  const result = await col("scan_credentials").insertOne({
-    target_id: targetId,
-    label,
-    type: cred.type,
-    encrypted,
-    iv,
-    auth_tag,
-    created_at: new Date(),
-    updated_at: new Date(),
-    created_by: createdBy ?? null,
-  });
-  return result.insertedId.toString();
+  return result?._id.toString() ?? "unknown";
 }
 
 export async function loadCredential(credentialId: string): Promise<PlainCredential | null> {

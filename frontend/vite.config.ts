@@ -74,6 +74,16 @@ export default defineConfig({
         target: process.env.API_URL ?? "http://localhost:5000",
         changeOrigin: true,
         secure: false,
+        // Keep SSE connections alive — without this, Vite's proxy closes long-lived
+        // HTTP streams (EventSource) after a short idle timeout, causing 404/ERR_INCOMPLETE_CHUNKED_ENCODING
+        configure: (proxy) => {
+          proxy.on("proxyReq", (_proxyReq, req) => {
+            // Mark SSE requests so the proxy doesn't buffer them
+            if (req.headers["accept"] === "text/event-stream") {
+              _proxyReq.setHeader("X-Accel-Buffering", "no");
+            }
+          });
+        },
       },
       "/stream": {
         target: process.env.API_URL ?? "http://localhost:5000",

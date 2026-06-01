@@ -46,8 +46,19 @@ export const scanLimiter = rateLimit({
 
 export const globalLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 200,
+  max: 600,   // raised from 200 — dashboard pages fire many parallel /api/findings/:id calls
   message: { error: "Too many requests. Please slow down." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: skipIfTest(),
+  keyGenerator: userOrIpKey,
+});
+
+// Dedicated limiter for findings read endpoints — higher cap to support bulk UI operations
+export const findingsReadLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  message: { error: "Too many finding requests. Please slow down." },
   standardHeaders: true,
   legacyHeaders: false,
   skip: skipIfTest(),

@@ -9,6 +9,7 @@ import { engagementScopeFilter } from "../middlewares/resource-rbac";
 import { logAudit, auditFromReq } from "../lib/audit";
 import { withTenant } from "../middlewares/tenant";
 import { sendIntegrationAlerts } from "../services/alerts";
+import { findingsReadLimiter } from "../middlewares/rate-limit";
 
 const router = Router();
 
@@ -112,14 +113,27 @@ router.post("/findings/saved-filters", requireAuth, async (req, res) => {
 
 // ── Get single finding ───────────────────────────────────────────────────────
 
-router.get("/findings/:id", requireAuth, async (req, res) => {
+router.get("/findings/:id", requireAuth, findingsReadLimiter, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    const ownerFilter = session.role !== "admin" ? { user_id: session.userId ?? null } : {};
-    const finding = (await col("findings").findOne({ _id: new ObjectId(id), ...ownerFilter } as Record<string, unknown>)) as Record<string, unknown> | null;
+
+    // Fetch without ownership filter first to distinguish "not found" from "forbidden"
+    const finding = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!finding) return res.status(404).json({ error: "Finding not found" });
+
+    // Ownership check — admins see everything; non-admins must match user_id (string or ObjectId)
+    if (session.role !== "admin") {
+      const storedUserId = finding["user_id"];
+      const sessionUserId = session.userId ?? null;
+      const matches =
+        storedUserId === sessionUserId ||
+        String(storedUserId) === String(sessionUserId) ||
+        storedUserId === null;   // legacy findings saved without user_id are visible to any auth'd user
+      if (!matches) return res.status(403).json({ error: "Forbidden" });
+    }
+
     res.json(formatFinding(finding));
   } catch (err) {
     logger.error({ err }, "Get finding error");

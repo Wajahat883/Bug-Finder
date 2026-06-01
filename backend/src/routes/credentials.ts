@@ -57,6 +57,12 @@ router.post("/credentials", requireAuth, async (req: AuthenticatedRequest, res) 
 
     res.status(201).json({ id, message: "Credential stored securely (AES-256-GCM encrypted)" });
   } catch (err) {
+    // MongoDB duplicate key — should not happen with atomic upsert, but guard anyway
+    const code = (err as Record<string, unknown>)?.["code"];
+    if (code === 11000) {
+      res.status(409).json({ error: "A credential of this type already exists for this target. It has been updated instead." });
+      return;
+    }
     res.status(500).json({ error: "Failed to store credential" });
   }
 });

@@ -362,7 +362,7 @@ export default function ScanDetail() {
     setSseActive(true);
     setActiveEngine(null);
 
-    const es = new EventSource(`/api/scan-jobs/${scanId}/stream`);
+    const es = new EventSource(`/api/scan-jobs/${scanId}/stream`, { withCredentials: true } as EventSourceInit);
     sseRef.current = es;
 
     es.addEventListener("log", (e: MessageEvent) => {
