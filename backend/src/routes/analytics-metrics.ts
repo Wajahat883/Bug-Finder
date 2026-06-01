@@ -167,11 +167,15 @@ router.get("/analytics/finding-trends", requireAuth, async (req, res) => {
       const d = new Date(today);
       d.setDate(d.getDate() - (29 - i));
       const dateStr = d.toISOString().split("T")[0]!;
-      const count = findings.filter((f) => {
+      const dayFindings = findings.filter((f) => {
         const fDate = (f["created_at"] instanceof Date ? f["created_at"] : new Date(f["created_at"] as string)).toISOString().split("T")[0];
         return fDate === dateStr;
-      }).length;
-      return { date: dateStr, count };
+      });
+      return {
+        date: dateStr,
+        count: dayFindings.length,
+        critical: dayFindings.filter((f) => f["severity"] === "critical").length,
+      };
     });
     res.json(trend);
   } catch (err) {
