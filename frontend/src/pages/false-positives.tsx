@@ -5,11 +5,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import {
   CheckCircle2, XCircle, Clock, AlertTriangle, ShieldOff,
   Loader2, RefreshCw, User, ChevronDown, ChevronUp,
   Search, SlidersHorizontal, Keyboard, Shield, Brain,
-  CalendarClock, ExternalLink,
+  CalendarClock, ExternalLink, Undo2,
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInDays } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -55,13 +56,55 @@ const EXPIRY_OPTIONS = [
 ];
 
 const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+const SEVERITY_WEIGHT: Record<string, number> = { critical: 40, high: 30, medium: 20, low: 10, info: 5 };
 
 const TABS = [
-  { value: "pending_review", label: "Pending Review", icon: Clock, color: "text-yellow-400", apiStatus: "pending_review" },
-  { value: "confirmed_fp",   label: "Confirmed FPs",  icon: CheckCircle2, color: "text-green-400", apiStatus: "confirmed_fp" },
-  { value: "rejected_fp",    label: "Rejected",       icon: XCircle, color: "text-red-400", apiStatus: "rejected_fp" },
-  { value: "suppressed",     label: "Suppressed",     icon: Shield, color: "text-purple-400", apiStatus: "suppressed" },
+  { value: "pending_review", label: "Pending Review", icon: Clock,        color: "text-yellow-400", apiStatus: "pending_review" },
+  { value: "confirmed_fp",   label: "Confirmed FPs",  icon: CheckCircle2, color: "text-green-400",  apiStatus: "confirmed_fp"   },
+  { value: "rejected_fp",    label: "Rejected",       icon: XCircle,      color: "text-red-400",    apiStatus: "rejected_fp"    },
+  { value: "suppressed",     label: "Suppressed",     icon: Shield,       color: "text-purple-400", apiStatus: "suppressed"     },
 ] as const;
+
+// ─── Priority Score ───────────────────────────────────────────────────────────
+
+function calcPriority(f: FPFinding): number {
+  const sevScore = SEVERITY_WEIGHT[f.severity?.toLowerCase()] ?? 5;
+  const ageDays  = f.fp_marked_at ? differenceInDays(new Date(), new Date(f.fp_marked_at)) : 0;
+  const ageScore = Math.min(ageDays * 2, 30);
+  const aiScore  = f.ai_triage_assessment ? 100 - f.ai_triage_assessment.fp_probability : 0;
+  return Math.round(sevScore + ageScore + aiScore * 0.3);
+}
+
+function PriorityBadge({ score }: { score: number }) {
+  const [cls, label] =
+    score >= 70 ? ["bg-red-500/20 text-red-400 border-red-500/30",    "Critical"]
+    : score >= 40 ? ["bg-orange-500/20 text-orange-400 border-orange-500/30", "High"]
+    : score >= 20 ? ["bg-yellow-500/20 text-yellow-400 border-yellow-500/30", "Med"]
+    :               ["bg-muted/50 text-muted-foreground border-border",        "Low"];
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${cls}`}
+      title={`Priority score: ${score}`}>
+      P{score} · {label}
+    </span>
+  );
+}
+
+// ─── Expiry Countdown ─────────────────────────────────────────────────────────
+
+function ExpiryCountdown({ expiryDate }: { expiryDate: string }) {
+  const days = differenceInDays(new Date(expiryDate), new Date());
+  const [cls, prefix] =
+    days <= 7  ? ["border-red-500/30 bg-red-500/10 text-red-400",       "⚠ "]
+    : days <= 30 ? ["border-yellow-500/30 bg-yellow-500/10 text-yellow-400", ""]
+    :              ["border-green-500/30 bg-green-500/10 text-green-400",    ""];
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${cls}`}
+      title={`Expires ${format(new Date(expiryDate), "MMM d, yyyy")}`}>
+      <CalendarClock className="w-3 h-3" />
+      {prefix}{days <= 0 ? "Expired" : `${days}d left`}
+    </span>
+  );
+}
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -88,7 +131,8 @@ function AgingBadge({ markedAt }: { markedAt: string }) {
     ? "bg-yellow-500/20 text-yellow-400 border-yellow-500/30"
     : "bg-muted/50 text-muted-foreground border-border";
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${cls}`} title={`Marked ${format(new Date(markedAt), "MMM d, HH:mm")}`}>
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border ${cls}`}
+      title={`Marked ${format(new Date(markedAt), "MMM d, HH:mm")}`}>
       <CalendarClock className="w-3 h-3" />
       {days === 0 ? "Today" : `${days}d`}
     </span>
@@ -102,7 +146,7 @@ function AiBar({ prob }: { prob: number }) {
     <div className="flex items-center gap-2 mt-2">
       <Brain className="w-3.5 h-3.5 shrink-0" style={{ color }} />
       <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-        <div className="h-full rounded-full transition-all" style={{ width: `${prob}%`, background: color }} />
+        <div className="h-full rounded-full transition-all duration-700" style={{ width: `${prob}%`, background: color }} />
       </div>
       <span className="text-xs font-mono shrink-0" style={{ color }}>{prob}% — {label}</span>
     </div>
@@ -167,18 +211,26 @@ interface FPCardProps {
   finding: FPFinding;
   focused: boolean;
   selected: boolean;
+  priority: number;
   onSelect: (id: string, checked: boolean) => void;
-  onAction: () => void;
+  onAction: (action: "approve" | "reject", id: string) => void;
   tabRef?: (el: HTMLDivElement | null) => void;
 }
 
-function FPCard({ finding, focused, selected, onSelect, onAction, tabRef }: FPCardProps) {
+function FPCard({ finding, focused, selected, priority, onSelect, onAction, tabRef }: FPCardProps) {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(false);
   const [reviewOpen, setReviewOpen] = useState<"approve" | "reject" | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [reviewExpiry, setReviewExpiry] = useState("");
+  const [exiting, setExiting] = useState(false);
+  const undoRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const aiProb = finding.ai_triage_assessment?.fp_probability;
+  const aiDisagrees = aiProb !== undefined && aiProb < 30;
+  const isPending = finding.triage_status === "pending_review";
+  const hasDetails = !!(finding.fp_evidence || finding.ai_triage_assessment?.reasoning);
 
   const reviewMutation = useMutation({
     mutationFn: async ({ action, note, expiry }: { action: "approve" | "reject"; note: string; expiry: string }) => {
@@ -187,8 +239,7 @@ function FPCard({ finding, focused, selected, onSelect, onAction, tabRef }: FPCa
         notes: note.trim() || (action === "approve" ? "Confirmed false positive" : "Finding is valid"),
       };
       if (expiry) {
-        const days = parseInt(expiry);
-        body.fp_expiry_date = new Date(Date.now() + days * 86400_000).toISOString();
+        body.fp_expiry_date = new Date(Date.now() + parseInt(expiry) * 86400_000).toISOString();
       }
       const res = await fetch(`/api/findings/${finding._id}/triage/review`, {
         method: "POST",
@@ -199,32 +250,65 @@ function FPCard({ finding, focused, selected, onSelect, onAction, tabRef }: FPCa
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
+    onMutate: () => {
+      // Slide card out immediately
+      setExiting(true);
+    },
     onSuccess: (_, { action }) => {
-      toast({
-        title: action === "approve" ? "✓ FP Confirmed" : "✗ FP Rejected",
-        description: action === "approve"
-          ? "Finding confirmed as false positive."
-          : "Finding rejected — marked as real vulnerability.",
-      });
-      qc.invalidateQueries({ queryKey: ["false-positives"] });
       setReviewOpen(null);
       setReviewNote("");
       setReviewExpiry("");
-      onAction();
-    },
-    onError: (e: Error) => toast({ title: "Action failed", description: e.message, variant: "destructive" }),
-  });
+      onAction(action, finding._id);
 
-  const prob = finding.ai_triage_assessment?.fp_probability;
-  const isPending = finding.triage_status === "pending_review";
-  const hasDetails = !!(finding.fp_evidence || finding.ai_triage_assessment?.reasoning);
+      // Undo toast — delay actual invalidation by 5s
+      const invalidateTimer = setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["false-positives"] });
+      }, 5000);
+      undoRef.current = invalidateTimer;
+
+      toast({
+        title: action === "approve" ? "✓ FP Confirmed" : "✗ FP Rejected",
+        description: (
+          <div className="flex items-center gap-3">
+            <span>{action === "approve" ? "Finding confirmed as false positive." : "Finding rejected — marked as real vulnerability."}</span>
+            <button
+              className="flex items-center gap-1 text-xs font-semibold text-primary underline shrink-0"
+              onClick={() => {
+                if (undoRef.current) clearTimeout(undoRef.current);
+                setExiting(false);
+                qc.invalidateQueries({ queryKey: ["false-positives"] });
+                toast({ title: "Action undone", description: "Finding restored to pending review." });
+              }}>
+              <Undo2 className="w-3 h-3" /> Undo
+            </button>
+          </div>
+        ) as unknown as string,
+      });
+    },
+    onError: (e: Error) => {
+      setExiting(false);
+      toast({ title: "Action failed", description: e.message, variant: "destructive" });
+    },
+  });
 
   return (
     <div
       ref={tabRef}
-      className={`rounded-lg border transition-all ${focused ? "border-primary ring-1 ring-primary/30" : selected ? "border-primary/50 bg-primary/5" : "border-border/50 hover:border-border"}`}
+      style={{ transition: "opacity 0.3s ease, transform 0.3s ease, max-height 0.4s ease" }}
+      className={`rounded-lg border overflow-hidden
+        ${exiting ? "opacity-0 -translate-x-4 max-h-0 pointer-events-none" : "max-h-[1000px]"}
+        ${aiDisagrees && isPending ? "border-amber-500/50 bg-amber-500/5" : focused ? "border-primary ring-1 ring-primary/30" : selected ? "border-primary/50 bg-primary/5" : "border-border/50 hover:border-border"}
+      `}
     >
       <div className="p-4">
+        {/* AI disagrees warning banner */}
+        {aiDisagrees && isPending && (
+          <div className="flex items-center gap-2 mb-3 px-3 py-1.5 rounded bg-amber-500/10 border border-amber-500/20 text-xs text-amber-400">
+            <Brain className="w-3.5 h-3.5 shrink-0" />
+            <span><span className="font-semibold">AI flags as real vulnerability</span> — probability {aiProb}%. Review carefully before confirming.</span>
+          </div>
+        )}
+
         {/* Top row: checkbox + badges + aging */}
         <div className="flex items-start gap-3">
           {isPending && (
@@ -239,18 +323,14 @@ function FPCard({ finding, focused, selected, onSelect, onAction, tabRef }: FPCa
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap mb-1.5">
               <SeverityPill severity={finding.severity} />
+              {isPending && <PriorityBadge score={priority} />}
               {finding.fp_reason && (
                 <span className="text-xs px-2 py-0.5 rounded border border-border bg-muted/50 text-muted-foreground">
                   {REASON_LABELS[finding.fp_reason] ?? finding.fp_reason}
                 </span>
               )}
               {finding.fp_marked_at && <AgingBadge markedAt={finding.fp_marked_at} />}
-              {finding.fp_expiry_date && (
-                <span className="text-xs px-2 py-0.5 rounded border border-yellow-500/30 bg-yellow-500/10 text-yellow-400 flex items-center gap-1">
-                  <CalendarClock className="w-3 h-3" />
-                  Expires {format(new Date(finding.fp_expiry_date), "MMM d")}
-                </span>
-              )}
+              {finding.fp_expiry_date && <ExpiryCountdown expiryDate={finding.fp_expiry_date} />}
             </div>
 
             <Link href={`/findings/${finding._id}`}>
@@ -261,8 +341,7 @@ function FPCard({ finding, focused, selected, onSelect, onAction, tabRef }: FPCa
             </Link>
             <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate">{finding.endpoint}</p>
 
-            {/* AI probability bar */}
-            {prob !== undefined && <AiBar prob={prob} />}
+            {aiProb !== undefined && <AiBar prob={aiProb} />}
           </div>
 
           {/* Action buttons (pending only) */}
@@ -291,7 +370,7 @@ function FPCard({ finding, focused, selected, onSelect, onAction, tabRef }: FPCa
         {/* Inline review form */}
         {reviewOpen && (
           <div className={`mt-3 p-3 rounded-lg border ${reviewOpen === "approve" ? "border-green-500/30 bg-green-500/5" : "border-red-500/30 bg-red-500/5"}`}>
-            <p className="text-xs font-semibold mb-2 ${reviewOpen === 'approve' ? 'text-green-400' : 'text-red-400'}">
+            <p className={`text-xs font-semibold mb-2 ${reviewOpen === "approve" ? "text-green-400" : "text-red-400"}`}>
               {reviewOpen === "approve" ? "Confirm as False Positive" : "Reject — Mark as Real Finding"}
             </p>
             <textarea
@@ -366,7 +445,7 @@ function FPCard({ finding, focused, selected, onSelect, onAction, tabRef }: FPCa
           </div>
         )}
 
-        {/* Audit trail (confirmed/rejected tabs) */}
+        {/* Audit trail */}
         {(finding.fp_reviewed_at || finding.fp_reviewer_name) && (
           <div className="mt-3 pt-3 border-t border-border/50 flex items-start gap-2 text-xs text-muted-foreground">
             <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-green-400" />
@@ -392,15 +471,17 @@ export default function FalsePositivesPage() {
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("all");
   const [reasonFilter, setReasonFilter] = useState("all");
-  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "ai_prob" | "severity">("newest");
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "ai_prob" | "severity" | "priority">("priority");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
   const [focusedIdx, setFocusedIdx] = useState(0);
   const [showFilters, setShowFilters] = useState(false);
   const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
 
-  // Fetch counts for all tabs in parallel
+  // Fetch counts for all tabs — auto-refresh every 30s
   const countQueries = TABS.map(t =>
+    // eslint-disable-next-line react-hooks/rules-of-hooks
     useQuery({
       queryKey: ["false-positives-count", t.apiStatus],
       queryFn: async () => {
@@ -410,12 +491,13 @@ export default function FalsePositivesPage() {
         return d.total ?? 0;
       },
       staleTime: 15000,
+      refetchInterval: 30_000,
     })
   );
 
   const tabCounts = Object.fromEntries(TABS.map((t, i) => [t.value, countQueries[i].data]));
 
-  // Main data query
+  // Main data query — auto-refresh every 30s
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["false-positives", tab],
     queryFn: async () => {
@@ -423,6 +505,7 @@ export default function FalsePositivesPage() {
       if (!res.ok) throw new Error("Failed to load");
       return res.json() as Promise<{ items: FPFinding[]; total: number }>;
     },
+    refetchInterval: 30_000,
   });
 
   const rawFindings: FPFinding[] = data?.items ?? [];
@@ -436,29 +519,23 @@ export default function FalsePositivesPage() {
       return true;
     })
     .sort((a, b) => {
-      if (sortBy === "newest") return new Date(b.fp_marked_at).getTime() - new Date(a.fp_marked_at).getTime();
-      if (sortBy === "oldest") return new Date(a.fp_marked_at).getTime() - new Date(b.fp_marked_at).getTime();
-      if (sortBy === "ai_prob") return (b.ai_triage_assessment?.fp_probability ?? -1) - (a.ai_triage_assessment?.fp_probability ?? -1);
+      if (sortBy === "newest")   return new Date(b.fp_marked_at).getTime() - new Date(a.fp_marked_at).getTime();
+      if (sortBy === "oldest")   return new Date(a.fp_marked_at).getTime() - new Date(b.fp_marked_at).getTime();
+      if (sortBy === "ai_prob")  return (b.ai_triage_assessment?.fp_probability ?? -1) - (a.ai_triage_assessment?.fp_probability ?? -1);
       if (sortBy === "severity") return (SEVERITY_ORDER[a.severity?.toLowerCase()] ?? 99) - (SEVERITY_ORDER[b.severity?.toLowerCase()] ?? 99);
+      if (sortBy === "priority") return calcPriority(b) - calcPriority(a);
       return 0;
     });
 
-  // Reset selection when tab changes
   useEffect(() => { setSelected(new Set()); setFocusedIdx(0); }, [tab]);
 
-  // Keyboard shortcuts
+  // Keyboard navigation
   const handleKey = useCallback((e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
     const pendingFindings = findings.filter(f => f.triage_status === "pending_review");
-    if (e.key === "j" || e.key === "ArrowDown") {
-      e.preventDefault();
-      setFocusedIdx(i => Math.min(i + 1, pendingFindings.length - 1));
-    }
-    if (e.key === "k" || e.key === "ArrowUp") {
-      e.preventDefault();
-      setFocusedIdx(i => Math.max(i - 1, 0));
-    }
+    if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocusedIdx(i => Math.min(i + 1, pendingFindings.length - 1)); }
+    if (e.key === "k" || e.key === "ArrowUp")   { e.preventDefault(); setFocusedIdx(i => Math.max(i - 1, 0)); }
     if (e.key === "a" && tab === "pending_review" && pendingFindings[focusedIdx]) {
       e.preventDefault();
       toast({ title: "Use the Approve button", description: "Click Approve then confirm the review form." });
@@ -470,35 +547,30 @@ export default function FalsePositivesPage() {
     return () => window.removeEventListener("keydown", handleKey);
   }, [handleKey]);
 
-  // Scroll focused card into view
   useEffect(() => {
     cardRefs.current[focusedIdx]?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedIdx]);
 
-  // Bulk actions
+  // Selection helpers
   const toggleSelect = (id: string, checked: boolean) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      checked ? next.add(id) : next.delete(id);
-      return next;
-    });
+    setSelected(prev => { const n = new Set(prev); checked ? n.add(id) : n.delete(id); return n; });
   };
 
   const toggleSelectAll = () => {
     const pending = findings.filter(f => f.triage_status === "pending_review");
-    if (selected.size === pending.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(pending.map(f => f._id)));
-    }
+    setSelected(selected.size === pending.length ? new Set() : new Set(pending.map(f => f._id)));
   };
 
+  // Bulk action with live progress bar
   const bulkAction = async (action: "approve" | "reject") => {
     if (!selected.size) return;
+    const ids = [...selected];
     setBulkLoading(true);
+    setBulkProgress({ done: 0, total: ids.length });
     let success = 0, failed = 0;
+
     await Promise.allSettled(
-      [...selected].map(id =>
+      ids.map(id =>
         fetch(`/api/findings/${id}/triage/review`, {
           method: "POST",
           credentials: "include",
@@ -507,11 +579,15 @@ export default function FalsePositivesPage() {
             decision: action,
             notes: action === "approve" ? "Bulk confirmed false positive" : "Bulk rejected — finding is valid",
           }),
-        }).then(r => { if (r.ok) success++; else failed++; })
-         .catch(() => failed++)
+        })
+          .then(r => { if (r.ok) success++; else failed++; })
+          .catch(() => failed++)
+          .finally(() => setBulkProgress(p => p ? { ...p, done: p.done + 1 } : null))
       )
     );
+
     setBulkLoading(false);
+    setBulkProgress(null);
     setSelected(new Set());
     qc.invalidateQueries({ queryKey: ["false-positives"] });
     toast({
@@ -534,7 +610,7 @@ export default function FalsePositivesPage() {
             False Positive Review Queue
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Four-eyes review workflow — a second analyst must confirm or reject each FP.
+            Four-eyes review workflow — a second analyst must confirm or reject each FP. Auto-refreshes every 30s.
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -561,7 +637,7 @@ export default function FalsePositivesPage() {
             <button key={t.value}
               onClick={() => setTab(t.value)}
               className={`text-left rounded-lg border p-4 transition-all hover:border-primary/50 ${tab === t.value ? "border-primary/60 bg-primary/5" : "border-border/50"}`}>
-              <div className={`flex items-center gap-1.5 text-xs text-muted-foreground mb-1`}>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-1">
                 <Icon className={`w-3.5 h-3.5 ${t.color}`} />
                 {t.label}
               </div>
@@ -588,13 +664,16 @@ export default function FalsePositivesPage() {
         <button onClick={() => setShowFilters(p => !p)}
           className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border transition-colors ${showFilters ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/50"}`}>
           <SlidersHorizontal className="w-3.5 h-3.5" />
-          Filters {(severityFilter !== "all" || reasonFilter !== "all") && <span className="bg-primary text-primary-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px]">!</span>}
+          Filters {(severityFilter !== "all" || reasonFilter !== "all") && (
+            <span className="bg-primary text-primary-foreground rounded-full w-4 h-4 flex items-center justify-center text-[10px]">!</span>
+          )}
         </button>
 
         <select
           value={sortBy}
           onChange={e => setSortBy(e.target.value as typeof sortBy)}
           className="bg-background border border-border rounded px-2 py-1.5 text-xs text-muted-foreground h-8 cursor-pointer">
+          <option value="priority">Priority score ↓</option>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="ai_prob">AI probability ↓</option>
@@ -642,27 +721,39 @@ export default function FalsePositivesPage() {
 
       {/* ── Bulk Action Bar ── */}
       {tab === "pending_review" && selected.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg border border-primary/40 bg-primary/5">
-          <span className="text-sm font-medium">{selected.size} selected</span>
-          <div className="flex gap-2 ml-auto">
-            <Button size="sm" variant="outline"
-              className="border-green-500/50 text-green-400 hover:bg-green-500/10 h-8 text-xs gap-1"
-              disabled={bulkLoading}
-              onClick={() => bulkAction("approve")}>
-              {bulkLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-              Approve All ({selected.size})
-            </Button>
-            <Button size="sm" variant="outline"
-              className="border-red-500/50 text-red-400 hover:bg-red-500/10 h-8 text-xs gap-1"
-              disabled={bulkLoading}
-              onClick={() => bulkAction("reject")}>
-              {bulkLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
-              Reject All ({selected.size})
-            </Button>
-            <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setSelected(new Set())}>
-              Clear
-            </button>
+        <div className="flex flex-col gap-2 px-4 py-3 rounded-lg border border-primary/40 bg-primary/5">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium">{selected.size} selected</span>
+            <div className="flex gap-2 ml-auto">
+              <Button size="sm" variant="outline"
+                className="border-green-500/50 text-green-400 hover:bg-green-500/10 h-8 text-xs gap-1"
+                disabled={bulkLoading}
+                onClick={() => bulkAction("approve")}>
+                {bulkLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
+                Approve All ({selected.size})
+              </Button>
+              <Button size="sm" variant="outline"
+                className="border-red-500/50 text-red-400 hover:bg-red-500/10 h-8 text-xs gap-1"
+                disabled={bulkLoading}
+                onClick={() => bulkAction("reject")}>
+                {bulkLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+                Reject All ({selected.size})
+              </Button>
+              <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setSelected(new Set())}>
+                Clear
+              </button>
+            </div>
           </div>
+
+          {/* Live bulk progress bar */}
+          {bulkProgress && (
+            <div className="space-y-1">
+              <Progress value={(bulkProgress.done / bulkProgress.total) * 100} className="h-1.5" />
+              <p className="text-xs text-muted-foreground text-right">
+                {bulkProgress.done} / {bulkProgress.total} processed
+              </p>
+            </div>
+          )}
         </div>
       )}
 
@@ -688,7 +779,6 @@ export default function FalsePositivesPage() {
 
         {TABS.map(t => (
           <TabsContent key={t.value} value={t.value} className="mt-4">
-            {/* Select-all row (pending tab only) */}
             {t.value === "pending_review" && !isLoading && pendingFindings.length > 0 && (
               <div className="flex items-center gap-3 mb-3 px-1">
                 <input
@@ -697,9 +787,7 @@ export default function FalsePositivesPage() {
                   onChange={toggleSelectAll}
                   className="w-4 h-4 rounded accent-primary cursor-pointer"
                 />
-                <span className="text-xs text-muted-foreground">
-                  Select all ({pendingFindings.length})
-                </span>
+                <span className="text-xs text-muted-foreground">Select all ({pendingFindings.length})</span>
                 <span className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
                   <Keyboard className="w-3 h-3" /> J/K to navigate
                 </span>
@@ -718,6 +806,7 @@ export default function FalsePositivesPage() {
                     finding={f}
                     focused={tab === "pending_review" && idx === focusedIdx}
                     selected={selected.has(f._id)}
+                    priority={calcPriority(f)}
                     onSelect={toggleSelect}
                     onAction={() => qc.invalidateQueries({ queryKey: ["false-positives"] })}
                     tabRef={(el) => { cardRefs.current[idx] = el; }}
