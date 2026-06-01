@@ -1,6 +1,7 @@
 import { ScanContext, ScanFinding, ctxFetch, isInScope, isWafBlock, handleWafBlock, buildRawCapture, curlReproducer } from "./types";
 import { runOpenApiDiscovery } from "./openapi";
 import { wafVariants } from "./waf-bypass";
+import { isSpaFallback } from "./spa-detector";
 
 const SQL_ERROR_PATTERNS = [
   "sql syntax",
@@ -120,6 +121,11 @@ export async function runSqliCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     const baseline = await ctxFetch(ctx, endpoint);
     if (!baseline) continue;
     const baseBody = await baseline.text().catch(() => "");
+    // Skip endpoint entirely if its baseline response is a SPA shell
+    if (isSpaFallback(baseline, baseBody, ctx.spaSignature)) {
+      emit({ type: "log", message: `  [SPA] Skipping SQLi probes at ${endpoint} — SPA fallback response` });
+      continue;
+    }
     const baseStatus = baseline.status;
     const baseLen = baseBody.length;
 

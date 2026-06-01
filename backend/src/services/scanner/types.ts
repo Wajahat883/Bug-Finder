@@ -68,6 +68,10 @@ export interface ScanContext {
   // Optional OpenAPI/Swagger spec URL — when set, nuclei will scan each discovered path
   // with api/ templates in addition to the standard full-target scan.
   openapiSpecUrl?: string;
+  // SPA baseline signature — fetched once at scan start by the orchestrator.
+  // Scanner modules use this with isSpaFallback() from spa-detector.ts to skip
+  // responses that are just the React/Vue/Angular index.html shell page.
+  spaSignature?: import("./spa-detector").SpaSignature | null;
 }
 
 // Cross-module session store for sharing discovered tokens across scanner modules

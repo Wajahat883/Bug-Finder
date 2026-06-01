@@ -1,4 +1,5 @@
 import { ScanContext, ScanFinding, ctxFetch, curlReproducer } from "./types";
+import { isSpaFallback } from "./spa-detector";
 
 const REDIRECT_PARAMS = ["redirect", "redirect_uri", "redirect_url", "return", "return_url", "returnTo", "next", "url", "goto", "dest", "destination", "target", "ref", "referer", "callback", "continue"];
 
@@ -119,6 +120,13 @@ export async function runRedirectCheck(ctx: ScanContext): Promise<ScanFinding[]>
 
         // javascript:/data: URIs may not produce a 3xx — check the body too
         const body = !isRedirect ? await res.text().catch(() => "") : "";
+
+        // Skip SPA fallback — the redirect target is the SPA shell, not a real redirect
+        if (!isRedirect && isSpaFallback(res, body, ctx.spaSignature)) {
+          emit({ type: "log", message: `  [SPA] Skipping redirect probe at ${endpoint} [${param}] — SPA fallback response` });
+          break;
+        }
+
         const locationOrBody = isRedirect ? location : body;
 
         if (locationOrBody.includes(probe.matchIn)) {

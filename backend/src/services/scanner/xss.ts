@@ -2,6 +2,7 @@ import { ScanContext, ScanFinding, ctxFetch, safeFetch, isInScope, isWafBlock, h
 import { runOpenApiDiscovery } from "./openapi";
 import { createOastClient } from "./oast";
 import { wafVariants } from "./waf-bypass";
+import { isSpaFallback } from "./spa-detector";
 
 // Harmless XSS markers — detect reflection without executing code
 const XSS_PROBES = [
@@ -57,6 +58,12 @@ export async function runXssCheck(ctx: ScanContext): Promise<ScanFinding[]> {
 
         if (!res) { if (wafBlocked) { handleWafBlock(ctx, endpoint); break; } continue; }
         const testUrl = buildUrl(endpoint, paramName, usedVariant);
+
+        // Skip SPA fallback responses — the marker appears inside the shell HTML, not a real reflection
+        if (isSpaFallback(res, body, ctx.spaSignature)) {
+          emit({ type: "log", message: `  [SPA] Skipping XSS probe at ${testUrl} — SPA fallback response` });
+          break;
+        }
 
         const ct = res.headers.get("content-type") ?? "";
         if (!ct.includes("html") && !ct.includes("text") && !ct.includes("json")) continue;

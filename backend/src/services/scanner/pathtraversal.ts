@@ -1,5 +1,6 @@
 import { ScanContext, ScanFinding, ctxFetch, isWafBlock, handleWafBlock, curlReproducer } from "./types";
 import { wafVariants } from "./waf-bypass";
+import { isSpaFallback } from "./spa-detector";
 
 const TRAVERSAL_PROBES = [
   "../../../etc/passwd",
@@ -46,6 +47,13 @@ export async function runPathTraversalCheck(ctx: ScanContext): Promise<ScanFindi
 
         if (!res) { if (wafBlocked) { handleWafBlock(ctx, endpoint); } continue; }
         const testUrl = `${endpoint}${endpoint.includes("?") ? "&" : "?"}${param}=${usedVariant}`;
+
+        // Skip SPA fallback — the indicators appear in React meta tags, not real file disclosure
+        if (isSpaFallback(res, body, ctx.spaSignature)) {
+          emit({ type: "log", message: `  [SPA] Skipping path traversal probe at ${testUrl} — SPA fallback response` });
+          break;
+        }
+
         const bodyLower = body.toLowerCase();
 
         const unixHit = UNIX_INDICATORS.find(i => bodyLower.includes(i));

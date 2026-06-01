@@ -47,6 +47,7 @@ import { runOsintEnrichment } from "./osint";
 import { runCustomRules } from "./custom-rules";
 import { runDomBrowserScan } from "./dom-browser";
 import { isSuppressed } from "./fp-learner";
+import { fetchSpaSignature, isSpaFallback, annotateSpaFalsePositive } from "./spa-detector";
 import { isPathAllowed, rateAwareFetch as _rateAwareFetch } from "./scope-manager";
 import { findSourceLocation, indexRepo, formatSourceLocation } from "./source-mapper";
 import { notifyAllChannels } from "../notifications";
@@ -465,6 +466,18 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     }
   }
 
+  // ── SPA Baseline Fingerprint ──────────────────────────────────────────────────
+  // Fetch the target root once to determine if it is a Single-Page Application.
+  // All subsequent probe responses are compared against this signature so that
+  // scanner modules can skip endpoints that simply return the SPA shell (index.html).
+  emit({ type: "log", message: "Detecting SPA baseline…" });
+  ctx.spaSignature = await fetchSpaSignature(targetUrl);
+  if (ctx.spaSignature?.isSpa) {
+    emit({ type: "log", message: `[SPA] Detected SPA shell (title: "${ctx.spaSignature.title}", ${ctx.spaSignature.bodyLength} bytes) — SPA fallback filtering enabled` });
+  } else {
+    emit({ type: "log", message: "[SPA] Target does not appear to be a SPA — fallback filtering disabled" });
+  }
+
   const pipeline = getPipeline(profile, validationEnabled, fuzzingEnabled, bugBountyMode);
   const totalSteps = pipeline.length;
 
@@ -517,7 +530,36 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
         logger.error({ err, step: step.name, jobId }, "Scanner step error");
       }
 
+      // ── SPA Fallback Post-Processing ───────────────────────────────────────
+      // For each finding, verify its endpoint is not just the SPA shell page.
+      // Modules that already call isSpaFallback() inline skip the network re-check;
+      // this is a safety net for modules that do not have inline checks.
+      const filteredFindings: ScanFinding[] = [];
       for (const finding of findings) {
+        // Only re-verify endpoints that look like real web URLs (skip DNS, port, etc.)
+        if (ctx.spaSignature?.isSpa && finding.endpoint.startsWith("http")) {
+          try {
+            const verifyRes = await fetch(finding.endpoint, {
+              headers: { ...ctx.authHeaders, Accept: "text/html,application/xhtml+xml" },
+              signal: AbortSignal.timeout(6000),
+            });
+            const verifyBody = await verifyRes.text().catch(() => "");
+            if (isSpaFallback(verifyRes, verifyBody, ctx.spaSignature)) {
+              const annotation = annotateSpaFalsePositive(finding.evidence, finding.endpoint);
+              filteredFindings.push({
+                ...finding,
+                evidence: annotation.evidence,
+                confidence: annotation.confidence,
+              });
+              emit({ type: "log", message: `  [SPA-FP] ${finding.title} @ ${finding.endpoint} — marked as false positive (SPA fallback)` });
+              continue; // skip normal push so it goes through as annotated finding
+            }
+          } catch { /* network error — keep finding as-is */ }
+        }
+        filteredFindings.push(finding);
+      }
+
+      for (const finding of filteredFindings) {
         const riskScore = await saveFinding(jobId, targetUrl, finding, jobUserId);
         totalFindings++;
         maxRiskScore = Math.max(maxRiskScore, riskScore);
