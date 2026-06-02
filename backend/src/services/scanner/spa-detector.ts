@@ -212,3 +212,20 @@ export function isSpaFallback(
 ): boolean {
   return checkSpaFallback(res, body, signature).isFallback;
 }
+
+/**
+ * Annotates a finding that passed the initial scanner but was caught by the
+ * post-scan SPA re-verification pass in index.ts.
+ * Sets validation_status: "false_positive" and confidence: 1.0 (certain FP).
+ */
+export function annotateSpaFalsePositive(
+  evidence: string,
+  endpointUrl: string,
+): { evidence: string; confidence: number; validation_status: string; fp_reason: string } {
+  return {
+    evidence: `[SPA-FALLBACK DETECTED]\nEndpoint "${endpointUrl}" returned the SPA index.html shell instead of a real resource. This is a false positive — the route does not exist and the application served its client-side entry point.\n\nOriginal evidence:\n${evidence}`,
+    confidence: 1.0,
+    validation_status: "false_positive",
+    fp_reason: "SPA fallback detected",
+  };
+}

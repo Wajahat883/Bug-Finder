@@ -191,6 +191,10 @@ router.post("/auth/login", authLimiter, async (req, res) => {
       }
     }
 
+    // Regenerate session ID to prevent session fixation attacks
+    await new Promise<void>((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
     const session = (req as unknown as { session: SessionData }).session;
     session.userId = id; session.username = user.username; session.role = user.role;
     session.created_at = Date.now();
@@ -495,8 +499,12 @@ router.get("/auth/magic-link/verify", async (req, res) => {
     }
 
     const id = user._id.toHexString();
+    await new Promise<void>((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
     const session = (req as unknown as { session: SessionData }).session;
     session.userId = id; session.username = user.username; session.role = user.role;
+    session.created_at = Date.now();
 
     await auditFromReq(req, "user.magic_link_login", "users", id);
     res.redirect("/dashboard");
@@ -708,8 +716,12 @@ router.get("/auth/oauth/google/callback", async (req, res) => {
       });
       user = await col("users").findOne({ _id: ins.insertedId }) as Record<string,unknown>;
     }
+    await new Promise<void>((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
     const sess = req.session as SessionData;
     sess.userId = String(user!["_id"]); sess.username = String(user!["name"] ?? user!["email"]); sess.role = String(user!["role"] ?? "analyst");
+    sess.created_at = Date.now();
     res.redirect("/dashboard");
   } catch { res.redirect("/login?error=oauth_failed"); }
 });

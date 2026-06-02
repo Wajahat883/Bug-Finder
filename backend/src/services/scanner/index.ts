@@ -550,6 +550,8 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
                 ...finding,
                 evidence: annotation.evidence,
                 confidence: annotation.confidence,
+                validation_status: annotation.validation_status,
+                fp_reason: annotation.fp_reason,
               });
               emit({ type: "log", message: `  [SPA-FP] ${finding.title} @ ${finding.endpoint} — marked as false positive (SPA fallback)` });
               continue; // skip normal push so it goes through as annotated finding
