@@ -93,7 +93,34 @@ router.get("/credentials/:targetId", requireAuth, async (req: AuthenticatedReque
 router.delete("/credentials/:id", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
     const { id } = req.params as { id: string };
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+
+    // Verify the credential exists and its parent target belongs to this user
+    const cred = await col("scan_credentials").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!cred) return res.status(404).json({ error: "Credential not found" });
+
+    const targetId = String(cred["target_id"] ?? "");
+    if (targetId) {
+      const target = await col("targets").findOne({
+        _id: ObjectId.isValid(targetId) ? new ObjectId(targetId) : targetId,
+      } as Record<string, unknown>) as Record<string, unknown> | null;
+      if (target && target["user_id"] !== req.session.userId) {
+        const sess = req.session as SessionData & { role?: string };
+        if (sess.role !== "admin") return res.status(403).json({ error: "Forbidden" });
+      }
+    }
+
     await deleteCredential(id);
+    // Audit destructive action
+    await col("audit_log").insertOne({
+      user_id: req.session.userId,
+      action: "credential.delete",
+      resource: "scan_credentials",
+      resource_id: id,
+      details: { target_id: targetId },
+      created_at: new Date(),
+      ip: req.ip ?? "",
+    });
     res.json({ message: "Credential deleted" });
   } catch {
     res.status(500).json({ error: "Failed to delete credential" });
