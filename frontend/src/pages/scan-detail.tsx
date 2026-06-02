@@ -234,7 +234,7 @@ export default function ScanDetail() {
 
   const cancelScan = useMutation({
     mutationFn: () =>
-      fetch(`/api/scan-jobs/${scanId}/cancel`, { method: "POST", credentials: "include" }).then(r => r.json()),
+      fetch(`/api/scan-jobs/${scanId}/cancel`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } }).then(r => r.json()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/scan-jobs", scanId] });
       toast({ title: "Scan cancelled" });
@@ -243,7 +243,7 @@ export default function ScanDetail() {
 
   const pauseScan = useMutation({
     mutationFn: () =>
-      fetch(`/api/scan-jobs/${scanId}/pause`, { method: "POST", credentials: "include" }).then(r => r.json()),
+      fetch(`/api/scan-jobs/${scanId}/pause`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } }).then(r => r.json()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/scan-jobs", scanId] });
       toast({ title: "Scan paused" });

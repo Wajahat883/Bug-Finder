@@ -186,7 +186,7 @@ export default function Scans() {
 
   const cancelScan = useMutation({
     mutationFn: (id: string) =>
-      fetch(`/api/scan-jobs/${id}/cancel`, { method: "POST", credentials: "include" }).then(async r => {
+      fetch(`/api/scan-jobs/${id}/cancel`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } }).then(async r => {
         if (!r.ok) throw new Error(await r.text());
         return r.json();
       }),
@@ -210,7 +210,7 @@ export default function Scans() {
   async function bulkCancel() {
     const running = scans.filter(s => selectedIds.has(s.id) && (s.status === "running" || s.status === "queued"));
     for (const s of running) {
-      await fetch(`/api/scan-jobs/${s.id}/cancel`, { method: "POST", credentials: "include" });
+      await fetch(`/api/scan-jobs/${s.id}/cancel`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" } });
     }
     qc.invalidateQueries({ queryKey: ["/api/scan-jobs"] });
     toast({ title: `${running.length} scans cancelled` });
