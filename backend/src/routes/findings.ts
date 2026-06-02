@@ -27,7 +27,22 @@ router.get("/findings", requireAuth, async (req, res) => {
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     let query: Record<string, unknown> = withTenant({}, (req as unknown as { tenantId?: string }).tenantId);
-    if (session.role !== "admin") query["user_id"] = session.userId ?? null;
+    if (session.role !== "admin") {
+      // Show findings where user_id matches OR user_id is absent (legacy/seeded data)
+      // OR the finding belongs to one of the user's scan jobs (propagation edge cases)
+      const userScanJobIds = await col("scan_jobs")
+        .find({ user_id: session.userId } as Record<string, unknown>)
+        .project({ _id: 1 })
+        .limit(500)
+        .toArray()
+        .then(jobs => jobs.map(j => j["_id"]));
+
+      query["$or"] = [
+        { user_id: session.userId },
+        { user_id: { $in: [null, undefined] } },
+        ...(userScanJobIds.length > 0 ? [{ scan_job_id: { $in: userScanJobIds } }] : []),
+      ];
+    }
     // Apply engagement-level RBAC scope filter
     const scopeFilter = engagementScopeFilter(req);
     if (scopeFilter) Object.assign(query, scopeFilter);
@@ -35,12 +50,19 @@ router.get("/findings", requireAuth, async (req, res) => {
     if (valStatus) query["validation_status"] = valStatus;
     if (search) {
       const safeSearch = String(search);
-      query["$or"] = [
+      const searchOr = [
         { title: { $regex: safeSearch, $options: "i" } },
         { endpoint: { $regex: safeSearch, $options: "i" } },
         { cwe_id: { $regex: safeSearch, $options: "i" } },
         { category: { $regex: safeSearch, $options: "i" } },
       ];
+      if (query["$or"]) {
+        // Combine ownership $or with search $or using $and so both must be satisfied
+        query["$and"] = [{ $or: query["$or"] }, { $or: searchOr }];
+        delete query["$or"];
+      } else {
+        query["$or"] = searchOr;
+      }
     }
     if (scanJobId && ObjectId.isValid(scanJobId)) query["scan_job_id"] = new ObjectId(scanJobId);
     if (suppressFp) query["validation_status"] = { $ne: "false_positive" };
@@ -119,19 +141,41 @@ router.get("/findings/:id", requireAuth, findingsReadLimiter, async (req, res) =
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
 
-    // Fetch without ownership filter first to distinguish "not found" from "forbidden"
     const finding = (await col("findings").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!finding) return res.status(404).json({ error: "Finding not found" });
 
-    // Ownership check — admins see everything; non-admins must match user_id (string or ObjectId)
     if (session.role !== "admin") {
-      const storedUserId = finding["user_id"];
       const sessionUserId = session.userId ?? null;
-      const matches =
-        storedUserId == null ||   // null or undefined — legacy findings visible to any authenticated user
+      const storedUserId  = finding["user_id"];
+
+      // Three-tier ownership check:
+      // 1. finding.user_id matches (most findings)
+      // 2. finding.user_id is absent/null — seeded or legacy data, visible to any authenticated user
+      // 3. Parent scan job belongs to this user — handles edge cases where finding.user_id
+      //    was not propagated correctly (e.g. bulk scans, background jobs, data migrations)
+      const directMatch =
+        storedUserId == null ||
         storedUserId === sessionUserId ||
         String(storedUserId) === String(sessionUserId);
-      if (!matches) return res.status(403).json({ error: "Forbidden" });
+
+      if (!directMatch) {
+        // Fallback: check if the parent scan job is owned by the session user
+        let jobOwned = false;
+        const scanJobId = finding["scan_job_id"];
+        if (scanJobId && ObjectId.isValid(String(scanJobId))) {
+          const job = await col("scan_jobs").findOne(
+            { _id: new ObjectId(String(scanJobId)) } as Record<string, unknown>
+          ) as Record<string, unknown> | null;
+          if (job) {
+            const jobUserId = job["user_id"];
+            jobOwned =
+              jobUserId == null ||
+              jobUserId === sessionUserId ||
+              String(jobUserId) === String(sessionUserId);
+          }
+        }
+        if (!jobOwned) return res.status(403).json({ error: "Forbidden" });
+      }
     }
 
     res.json(formatFinding(finding));

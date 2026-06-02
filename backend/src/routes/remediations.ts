@@ -6,6 +6,11 @@ import { requireAuth } from "../middlewares/rbac";
 
 const router = Router();
 
+type Session = { userId?: string; role?: string };
+function getSession(req: Parameters<typeof requireAuth>[0]): Session {
+  return (req as unknown as { session: Session }).session;
+}
+
 function formatRemediation(r: Record<string, unknown>) {
   return {
     id: String(r["_id"]),
@@ -20,9 +25,47 @@ function formatRemediation(r: Record<string, unknown>) {
   };
 }
 
-router.get("/remediations", async (req, res) => {
+// Build user-scoped remediation query: only return remediations linked to the
+// user's own findings or scan jobs. Admins see everything.
+async function userScopedQuery(session: Session): Promise<Record<string, unknown>> {
+  if (session.role === "admin") return {};
+  const userId = session.userId;
+  if (!userId) return { _id: null }; // authenticated but no userId — return nothing
+
+  // Collect the user's scan job IDs and finding IDs
+  const [scanJobIds, findingIds] = await Promise.all([
+    col("scan_jobs")
+      .find({ user_id: userId } as Record<string, unknown>)
+      .project({ _id: 1 })
+      .toArray()
+      .then(jobs => jobs.map(j => j["_id"])),
+    col("findings")
+      .find({
+        $or: [
+          { user_id: userId },
+          { user_id: { $in: [null, undefined] } },
+        ],
+      } as Record<string, unknown>)
+      .project({ _id: 1 })
+      .limit(500)
+      .toArray()
+      .then(findings => findings.map(f => f["_id"])),
+  ]);
+
+  return {
+    $or: [
+      { user_id: userId },
+      ...(scanJobIds.length > 0 ? [{ scan_job_id: { $in: scanJobIds } }] : []),
+      ...(findingIds.length > 0 ? [{ finding_id: { $in: findingIds } }] : []),
+    ],
+  };
+}
+
+router.get("/remediations", requireAuth, async (req, res) => {
   try {
-    const all = (await col("remediations").find({}).sort({ created_at: -1 }).toArray()) as Array<Record<string, unknown>>;
+    const session = getSession(req);
+    const scopeQuery = await userScopedQuery(session);
+    const all = (await col("remediations").find(scopeQuery).sort({ created_at: -1 }).toArray()) as Array<Record<string, unknown>>;
     res.json(all.map(formatRemediation));
   } catch (err) {
     logger.error({ err }, "List remediations error");
@@ -30,8 +73,9 @@ router.get("/remediations", async (req, res) => {
   }
 });
 
-router.post("/remediations", async (req, res) => {
+router.post("/remediations", requireAuth, async (req, res) => {
   try {
+    const session = getSession(req);
     const body = req.body as {
       finding_id: string;
       scan_job_id: string;
@@ -52,6 +96,7 @@ router.post("/remediations", async (req, res) => {
       description: body.description,
       patch_snippet: body.patch_snippet ?? null,
       status: "pending",
+      user_id: session.userId ?? null,
       created_at: now,
       updated_at: now,
     });
@@ -64,13 +109,19 @@ router.post("/remediations", async (req, res) => {
   }
 });
 
-router.get("/remediations/:id", async (req, res) => {
+router.get("/remediations/:id", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const session = getSession(req);
+    const scopeQuery = await userScopedQuery(session);
+    const query = { _id: new ObjectId(id), ...scopeQuery } as Record<string, unknown>;
 
-    const rem = (await col("remediations").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
+    const rem = (await col("remediations").findOne(
+      Object.keys(scopeQuery).length > 0 ? { $and: [{ _id: new ObjectId(id) }, scopeQuery] } as Record<string, unknown> : { _id: new ObjectId(id) } as Record<string, unknown>
+    )) as Record<string, unknown> | null;
     if (!rem) return res.status(404).json({ error: "Remediation not found" });
+    void query;
 
     res.json(formatRemediation(rem));
   } catch (err) {
