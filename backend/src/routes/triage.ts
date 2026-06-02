@@ -2,12 +2,12 @@
  * Triage routes — False Positive / False Negative management
  * Phases 1-5: triage workflow, FP queue, FN risk scoring, AI assessment, metrics
  */
-import { Router } from "express";
+import { Router, type Request } from "express";
 import { ObjectId } from "mongodb";
 import { col } from "../lib/db";
 import { logger } from "../lib/logger";
 import { requireAuth, requireRole } from "../middlewares/rbac";
-import { logAudit } from "../lib/audit";
+import { logAudit, auditFromReq } from "../lib/audit";
 import { sendIntegrationAlerts } from "../services/alerts";
 
 const router = Router();

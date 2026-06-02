@@ -218,8 +218,11 @@ router.post("/auth/login", authLimiter, async (req, res) => {
 router.post("/auth/extend-session", async (req, res) => {
   const session = (req as unknown as { session: SessionData }).session;
   if (!session.userId) return res.status(401).json({ error: "Not authenticated" });
+  // Cap extension to 8 hours — never silently extend to multi-day without re-auth
+  const MAX_EXTENSION_MS = 8 * 60 * 60 * 1000;
   session.created_at = Date.now();
-  req.session.cookie.maxAge = 7 * 24 * 60 * 60 * 1000;
+  req.session.cookie.maxAge = MAX_EXTENSION_MS;
+  await auditFromReq(req, "user.session_extended", "users", session.userId);
   res.json({ ok: true, expires_in: req.session.cookie.maxAge });
 });
 
@@ -286,7 +289,11 @@ router.patch("/auth/profile", async (req, res) => {
   }
 });
 
-router.post("/auth/demo", async (req, res) => {
+// Demo login — development/staging only; blocked in production
+router.post("/auth/demo", authLimiter, async (req, res) => {
+  if (process.env["NODE_ENV"] === "production") {
+    return res.status(404).json({ error: "Not found" });
+  }
   try {
     let user = await col("users").findOne({ email: DEFAULT_ADMIN_EMAIL }) as {
       _id: ObjectId; username: string; email: string; role: string;
@@ -304,8 +311,12 @@ router.post("/auth/demo", async (req, res) => {
     }
 
     const id = user._id.toHexString();
+    await new Promise<void>((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
     const session = (req as unknown as { session: SessionData }).session;
     session.userId = id; session.username = user.username; session.role = user.role;
+    session.created_at = Date.now();
     res.json({ id, username: user.username, email: user.email, role: user.role });
   } catch (err) {
     logger.error({ err }, "Demo login error");
@@ -664,7 +675,12 @@ router.post("/auth/2fa/verify", async (req, res) => {
     const secret = String(user["totp_secret_pending"] ?? user["totp_secret"] ?? "");
     if (!secret) return res.status(400).json({ error: "2FA not set up" });
     const expected = getTotpCode(secret);
-    if (code !== expected) return res.status(400).json({ error: "Invalid code" });
+    // Use timing-safe comparison to prevent timing oracle attacks on TOTP codes
+    const codeLen = Buffer.byteLength(code ?? "");
+    const expLen  = Buffer.byteLength(expected);
+    const timingSafe = codeLen === expLen &&
+      require("crypto").timingSafeEqual(Buffer.from(code ?? ""), Buffer.from(expected));
+    if (!timingSafe) return res.status(400).json({ error: "Invalid code" });
     await col("users").updateOne({ _id: new ObjectId(sess.userId) } as Record<string,unknown>, { $set: { totp_secret: secret, totp_enabled: true, totp_secret_pending: null } });
     res.json({ ok: true, message: "2FA enabled successfully" });
   } catch(err) { res.status(500).json({ error: "Internal server error" }); }
@@ -764,8 +780,12 @@ router.get("/auth/oauth/github/callback", async (req, res) => {
       });
       user = await col("users").findOne({ _id: ins.insertedId }) as Record<string,unknown>;
     }
+    await new Promise<void>((resolve, reject) =>
+      req.session.regenerate(err => (err ? reject(err) : resolve()))
+    );
     const sess = req.session as SessionData;
     sess.userId = String(user!["_id"]); sess.username = String(user!["name"] ?? user!["email"]); sess.role = String(user!["role"] ?? "analyst");
+    sess.created_at = Date.now();
     res.redirect("/dashboard");
   } catch { res.redirect("/login?error=oauth_failed"); }
 });

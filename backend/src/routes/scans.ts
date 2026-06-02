@@ -213,6 +213,12 @@ router.get("/scan-jobs/:id/findings", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!job) return res.status(404).json({ error: "Scan job not found" });
+    if (session.role !== "admin" && job["user_id"] !== session.userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const query: Record<string, unknown> = { scan_job_id: new ObjectId(id) };
     const severity = req.query["severity"] as string | undefined;
@@ -232,9 +238,12 @@ router.get("/scan-jobs/:id/attack-surface", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
-
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const job = (await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!job) return res.status(404).json({ error: "Not found" });
+    if (session.role !== "admin" && job["user_id"] !== session.userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
 
     const findings = (await col("findings").find({ scan_job_id: new ObjectId(id) }).toArray()) as Array<Record<string, unknown>>;
     const targetUrl = job["target_url"] as string;
@@ -286,8 +295,12 @@ router.get("/scan-jobs/:id/engines", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!job) return res.status(404).json({ error: "Scan job not found" });
+    if (session.role !== "admin" && job["user_id"] !== session.userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     const engines = (job["engines"] as Array<Record<string, unknown>>) ?? [];
     res.json(engines.map((e: Record<string, unknown>) => ({
       engine: e["engine"] ?? e["name"] ?? "unknown",
@@ -430,6 +443,14 @@ router.delete("/scan-jobs/:id", requireAuth, async (req, res) => {
 // GET /scan-jobs/:id/progress — SSE stream for real-time scan progress
 router.get("/scan-jobs/:id/progress", requireAuth, async (req, res) => {
   const id = String(req.params["id"]);
+  if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+  const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+  const jobCheck = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+  if (!jobCheck) return res.status(404).json({ error: "Scan job not found" });
+  if (session.role !== "admin" && jobCheck["user_id"] !== session.userId) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -498,8 +519,17 @@ router.post("/scan-jobs/bulk", requireAuth, async (req, res) => {
     if (target_urls.length > 20) {
       return res.status(400).json({ error: "Cannot bulk-scan more than 20 targets at once" });
     }
-    // Basic URL validation
-    const validUrls = target_urls.filter(u => { try { new URL(u); return true; } catch { return false; } });
+    // URL validation + SSRF protection on every entry
+    const blocked: string[] = [];
+    const validUrls = target_urls.filter(u => {
+      try { new URL(u); } catch { return false; }
+      const ssrf = checkSsrf(u);
+      if (!ssrf.allowed) { blocked.push(u); return false; }
+      return true;
+    });
+    if (blocked.length > 0) {
+      return res.status(400).json({ error: "One or more URLs are not allowed (SSRF protection)", blocked });
+    }
     if (validUrls.length === 0) return res.status(400).json({ error: "No valid URLs provided" });
 
     const results: Array<{ url: string; scan_id: string }> = [];

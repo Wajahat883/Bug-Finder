@@ -17,8 +17,8 @@ const router = Router();
 
 router.get("/findings", requireAuth, async (req, res) => {
   try {
-    const page = parseInt(String(req.query["page"] ?? "1"));
-    const pageSize = parseInt(String(req.query["page_size"] ?? "20"));
+    const page = Math.max(1, parseInt(String(req.query["page"] ?? "1")));
+    const pageSize = Math.min(100, Math.max(1, parseInt(String(req.query["page_size"] ?? "20"))));
     const severity = req.query["severity"] as string | undefined;
     const valStatus = req.query["validation_status"] as string | undefined;
     const search = req.query["search"] as string | undefined;
@@ -326,7 +326,14 @@ router.delete("/fp-suppressions/:id", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const suppression = await col("fp_suppressions").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!suppression) return res.status(404).json({ error: "Not found" });
+    if (session.role !== "admin" && suppression["created_by"] !== session.userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     await col("fp_suppressions").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>);
+    await auditFromReq(req, "fp_suppression.delete", "fp_suppressions", id);
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err }, "Delete FP suppression error");
@@ -1090,8 +1097,10 @@ router.post("/findings/:id/assign", requireAuth, async (req, res) => {
 router.patch("/findings/:id/assign", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const { assignee_id } = req.body as { assignee_id?: string };
     if (!assignee_id) return res.status(400).json({ error: "assignee_id is required" });
+    if (!ObjectId.isValid(assignee_id)) return res.status(400).json({ error: "Invalid assignee_id" });
     // Verify assignee exists
     const assignee = await col("users").findOne({ _id: new ObjectId(assignee_id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!assignee) return res.status(404).json({ error: "Assignee user not found" });
