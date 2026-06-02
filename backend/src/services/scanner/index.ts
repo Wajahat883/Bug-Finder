@@ -594,7 +594,8 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
 
       for (const finding of filteredFindings) {
         const riskScore = await saveFinding(jobId, targetUrl, finding, jobUserId);
-        totalFindings++;
+        // Only count findings that were actually persisted (saveFinding returns 0 for suppressed)
+        if (riskScore > 0) totalFindings++;
         maxRiskScore = Math.max(maxRiskScore, riskScore);
 
         if (finding.severity === "critical") critCount++;
@@ -624,6 +625,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
       emit({ type: "progress", progress });
     }
 
+    // Always remove the cancel listener — prevents permanent leak on any exit path
     scanEvents.off(`cancel:${jobId}`, cancelListener);
     if (cancelled) {
       await col("scan_jobs").updateOne(
@@ -631,6 +633,7 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
         { $set: { status: "cancelled", completed_at: new Date() } }
       );
       emit({ type: "complete", progress: 100, message: "Scan cancelled" });
+      activeScanCount = Math.max(0, activeScanCount - 1);
       return;
     }
 
@@ -703,7 +706,11 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
 
     // AI auto-triage: score findings with AI confidence
     runAiAutoTriage(jobId).catch((err) => logger.warn({ err }, "AI auto-triage error"));
+    activeScanCount = Math.max(0, activeScanCount - 1);
   } catch (err) {
+    // Always remove cancel listener and release concurrency slot on any fatal error
+    scanEvents.off(`cancel:${jobId}`, () => {});
+    activeScanCount = Math.max(0, activeScanCount - 1);
     logger.error({ err, jobId }, "Scan pipeline fatal error");
     await col("scan_jobs").updateOne(
       { _id: new ObjectId(jobId) } as Record<string, unknown>,

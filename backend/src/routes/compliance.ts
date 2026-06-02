@@ -263,10 +263,23 @@ router.get("/compliance/findings/:id", async (req, res) => {
 });
 
 // GET /compliance/history — weekly compliance % for last 8 weeks, computed from findings
-router.get("/compliance/history", async (req, res) => {
+router.get("/compliance/history", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+    let userFilter: Record<string, unknown> = {};
+    if (session?.role !== "admin") {
+      const userScanJobIds = await col("scan_jobs")
+        .find({ user_id: session?.userId } as Record<string, unknown>)
+        .project({ _id: 1 }).limit(500).toArray()
+        .then(jobs => jobs.map(j => j["_id"]));
+      userFilter = {
+        $or: [
+          { user_id: session?.userId },
+          { user_id: { $in: [null, undefined] } },
+          ...(userScanJobIds.length > 0 ? [{ scan_job_id: { $in: userScanJobIds } }] : []),
+        ],
+      };
+    }
     const findings = await col("findings").find(userFilter).toArray() as Array<Record<string, unknown>>;
     const now = Date.now();
     const weeks: Array<{ week: string; pci: number; soc2: number; owasp: number; iso: number }> = [];

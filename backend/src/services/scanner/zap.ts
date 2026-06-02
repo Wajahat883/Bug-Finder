@@ -82,6 +82,12 @@ async function startZapContainer(zapUrl: string): Promise<boolean> {
   return false;
 }
 
+function zapApiUrl(base: string, path: string): string {
+  const apiKey = process.env["ZAP_API_KEY"] ?? "";
+  const sep = path.includes("?") ? "&" : "?";
+  return apiKey ? `${base}${path}${sep}apikey=${encodeURIComponent(apiKey)}` : `${base}${path}`;
+}
+
 export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
   const findings: ScanFinding[] = [];
   const zapUrl = process.env["ZAP_URL"] ?? "http://localhost:8080";
@@ -97,7 +103,7 @@ export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
 
   try {
     // Start spider
-    const spiderRes = await fetch(`${zapUrl}/JSON/spider/action/scan/?url=${encodeURIComponent(ctx.targetUrl)}&maxChildren=3`, {
+    const spiderRes = await fetch(zapApiUrl(zapUrl, `/JSON/spider/action/scan/?url=${encodeURIComponent(ctx.targetUrl)}&maxChildren=3`), {
       signal: AbortSignal.timeout(10000),
     });
     if (!spiderRes.ok) throw new Error("Spider failed to start");
@@ -109,7 +115,7 @@ export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
     let spiderDone = false;
     for (let i = 0; i < 30 && !spiderDone; i++) {
       await new Promise(r => setTimeout(r, 1000));
-      const statusRes = await fetch(`${zapUrl}/JSON/spider/view/status/?scanId=${spiderId}`, { signal: AbortSignal.timeout(5000) });
+      const statusRes = await fetch(zapApiUrl(zapUrl, `/JSON/spider/view/status/?scanId=${spiderId}`), { signal: AbortSignal.timeout(5000) });
       if (statusRes.ok) {
         const statusData = await statusRes.json() as Record<string, unknown>;
         const progress = String(statusData["status"] ?? "0");
@@ -119,7 +125,7 @@ export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
     }
 
     // Active scan
-    const scanRes = await fetch(`${zapUrl}/JSON/ascan/action/scan/?url=${encodeURIComponent(ctx.targetUrl)}`, {
+    const scanRes = await fetch(zapApiUrl(zapUrl, `/JSON/ascan/action/scan/?url=${encodeURIComponent(ctx.targetUrl)}`), {
       signal: AbortSignal.timeout(10000),
     });
     if (scanRes.ok) {
@@ -129,7 +135,7 @@ export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
       let scanDone = false;
       for (let i = 0; i < 60 && !scanDone; i++) {
         await new Promise(r => setTimeout(r, 2000));
-        const statusRes = await fetch(`${zapUrl}/JSON/ascan/view/status/?scanId=${scanId}`, { signal: AbortSignal.timeout(5000) });
+        const statusRes = await fetch(zapApiUrl(zapUrl, `/JSON/ascan/view/status/?scanId=${scanId}`), { signal: AbortSignal.timeout(5000) });
         if (statusRes.ok) {
           const statusData = await statusRes.json() as Record<string, unknown>;
           const progress = String(statusData["status"] ?? "0");
@@ -139,7 +145,7 @@ export async function runZapScan(ctx: ScanContext): Promise<ScanFinding[]> {
       }
 
       // Get alerts
-      const alertsRes = await fetch(`${zapUrl}/JSON/core/view/alerts/?baseurl=${encodeURIComponent(ctx.targetUrl)}`, {
+      const alertsRes = await fetch(zapApiUrl(zapUrl, `/JSON/core/view/alerts/?baseurl=${encodeURIComponent(ctx.targetUrl)}`), {
         signal: AbortSignal.timeout(10000),
       });
       if (alertsRes.ok) {

@@ -8,7 +8,20 @@ const router = Router();
 router.get("/analytics/risk-trend", requireAuth, async (req, res) => {
   try {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    const userFilter = session?.role !== "admin" ? { user_id: session?.userId ?? null } : {};
+    let userFilter: Record<string, unknown> = {};
+    if (session?.role !== "admin") {
+      const userScanJobIds = await col("scan_jobs")
+        .find({ user_id: session?.userId } as Record<string, unknown>)
+        .project({ _id: 1 }).limit(500).toArray()
+        .then(jobs => jobs.map(j => j["_id"]));
+      userFilter = {
+        $or: [
+          { user_id: session?.userId },
+          { user_id: { $in: [null, undefined] } },
+          ...(userScanJobIds.length > 0 ? [{ scan_job_id: { $in: userScanJobIds } }] : []),
+        ],
+      };
+    }
     const findings = await col("findings").find(userFilter).sort({ created_at: 1 }).toArray() as Array<Record<string,unknown>>;
     const SEV_WEIGHT: Record<string,number> = { critical: 40, high: 20, medium: 8, low: 2, info: 0 };
     const now = Date.now();

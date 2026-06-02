@@ -5,8 +5,33 @@ build
 .gitignore
 .DS_Store
 *.log
+
+# All .env variants — never bake secrets into image layers
 .env
-.env.local
+.env.*
+
+# TLS certificates and private keys
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+config/nginx/certs/
+
+# Test and coverage artifacts
 coverage
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+**/__tests__/
+**/__mocks__/
+
+# Next.js / other build artifacts
 .next
 out
+
+# Docker config (no need in build context)
+docker-compose*.yml
+.dockerignore
