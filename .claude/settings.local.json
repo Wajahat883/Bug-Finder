@@ -54,7 +54,8 @@
       "PowerShell(Set-Location \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\"; $tsc = Resolve-Path \"node_modules\\\\.bin\\\\tsc.cmd\" -ErrorAction SilentlyContinue; if \\($tsc\\) { & $tsc -p backend\\\\tsconfig.json --noEmit 2>&1 | Select-Object -First 50 } else { \"tsc not found at node_modules\\\\.bin\\\\tsc.cmd\" })",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\waji2\\\\OneDrive\\\\Desktop\\\\Bug-finder\\\\Bug-Finder\" -Force)",
       "Bash(Select-Object Name, PSIsContainer)",
-      "Bash(Format-Table -AutoSize)"
+      "Bash(Format-Table -AutoSize)",
+      "Bash(xargs grep -l \"false.positive\\\\|falsePositive\")"
     ]
   }
 }

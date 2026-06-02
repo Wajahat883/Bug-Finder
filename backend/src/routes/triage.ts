@@ -48,8 +48,12 @@ router.patch("/findings/:id/triage", requireAuth, async (req, res) => {
     }
 
     const now = new Date();
+    // Four-eyes workflow: submitting false_positive enters "needs_review" queue;
+    // only POST /findings/:id/triage/review (by a different user) confirms it as false_positive.
+    const storedStatus = status === "false_positive" ? "needs_review" : status;
+
     const updateFields: Record<string, unknown> = {
-      triage_status: status,
+      triage_status: storedStatus,
       triage_updated_at: now,
       triage_updated_by: session.userId,
     };
@@ -59,8 +63,9 @@ router.patch("/findings/:id/triage", requireAuth, async (req, res) => {
       updateFields["fp_evidence"] = fp_evidence ?? "";
       updateFields["fp_marked_by"] = session.userId;
       updateFields["fp_marked_at"] = now;
-      updateFields["fp_reviewer_id"] = fp_reviewer_id ?? null;
+      updateFields["fp_reviewer_id"] = null;
       updateFields["fp_reviewed_at"] = null;
+      updateFields["fp_rejected"] = false;
       if (expiry_days) {
         const expiry = new Date(now);
         expiry.setDate(expiry.getDate() + Number(expiry_days));
@@ -125,15 +130,29 @@ router.get("/findings/false-positives", requireAuth, async (req, res) => {
     if (session.role !== "admin") query["user_id"] = session.userId;
 
     if (status === "pending_review") {
+      // Findings submitted as FP awaiting a second reviewer
       query["triage_status"] = "needs_review";
-    } else if (status === "approved") {
+    } else if (status === "confirmed_fp" || status === "approved") {
+      // Reviewed and approved as genuine false positives
       query["triage_status"] = "false_positive";
       query["fp_reviewer_id"] = { $ne: null };
+      query["fp_rejected"] = { $ne: true };
+    } else if (status === "rejected_fp") {
+      // FP submissions that were rejected by the reviewer (returned to open)
+      query["fp_rejected"] = true;
+    } else if (status === "suppressed") {
+      query["triage_status"] = "suppressed";
     } else if (status === "expired") {
       query["triage_status"] = "false_positive";
       query["fp_expiry_date"] = { $lt: new Date() };
     } else {
-      query["triage_status"] = { $in: ["false_positive", "needs_review", "suppressed"] };
+      // "all" — show everything in the FP workflow
+      query["$or"] = [
+        { triage_status: "needs_review" },
+        { triage_status: "false_positive" },
+        { triage_status: "suppressed" },
+        { fp_rejected: true },
+      ];
     }
 
     const [items, total] = await Promise.all([
@@ -173,13 +192,17 @@ router.post("/findings/:id/triage/review", requireAuth, async (req, res) => {
       return res.status(403).json({ error: "Four-eyes: reviewer must be a different user than the submitter." });
     }
 
-    const newStatus = decision === "approve" ? "false_positive" : "open";
+    const approved = decision === "approve";
+    const newStatus = approved ? "false_positive" : "open";
     await col("findings").updateOne(query as any, {
       $set: {
         triage_status: newStatus,
         fp_reviewer_id: session.userId,
         fp_reviewed_at: new Date(),
+        fp_rejected: !approved,
         triage_notes: notes ?? finding.triage_notes,
+        triage_updated_at: new Date(),
+        triage_updated_by: session.userId,
       },
     });
 

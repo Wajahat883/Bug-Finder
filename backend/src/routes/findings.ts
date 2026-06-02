@@ -128,9 +128,9 @@ router.get("/findings/:id", requireAuth, findingsReadLimiter, async (req, res) =
       const storedUserId = finding["user_id"];
       const sessionUserId = session.userId ?? null;
       const matches =
+        storedUserId == null ||   // null or undefined — legacy findings visible to any authenticated user
         storedUserId === sessionUserId ||
-        String(storedUserId) === String(sessionUserId) ||
-        storedUserId === null;   // legacy findings saved without user_id are visible to any auth'd user
+        String(storedUserId) === String(sessionUserId);
       if (!matches) return res.status(403).json({ error: "Forbidden" });
     }
 

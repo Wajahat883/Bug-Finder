@@ -229,7 +229,7 @@ function FPCard({ finding, focused, selected, priority, onSelect, onAction, tabR
 
   const aiProb = finding.ai_triage_assessment?.fp_probability;
   const aiDisagrees = aiProb !== undefined && aiProb < 30;
-  const isPending = finding.triage_status === "pending_review";
+  const isPending = finding.triage_status === "needs_review";
   const hasDetails = !!(finding.fp_evidence || finding.ai_triage_assessment?.reasoning);
 
   const reviewMutation = useMutation({
@@ -533,7 +533,7 @@ export default function FalsePositivesPage() {
   const handleKey = useCallback((e: KeyboardEvent) => {
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-    const pendingFindings = findings.filter(f => f.triage_status === "pending_review");
+    const pendingFindings = findings.filter(f => f.triage_status === "needs_review");
     if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); setFocusedIdx(i => Math.min(i + 1, pendingFindings.length - 1)); }
     if (e.key === "k" || e.key === "ArrowUp")   { e.preventDefault(); setFocusedIdx(i => Math.max(i - 1, 0)); }
     if (e.key === "a" && tab === "pending_review" && pendingFindings[focusedIdx]) {
@@ -557,7 +557,7 @@ export default function FalsePositivesPage() {
   };
 
   const toggleSelectAll = () => {
-    const pending = findings.filter(f => f.triage_status === "pending_review");
+    const pending = findings.filter(f => f.triage_status === "needs_review");
     setSelected(selected.size === pending.length ? new Set() : new Set(pending.map(f => f._id)));
   };
 
@@ -597,7 +597,7 @@ export default function FalsePositivesPage() {
     });
   };
 
-  const pendingFindings = findings.filter(f => f.triage_status === "pending_review");
+  const pendingFindings = findings.filter(f => f.triage_status === "needs_review");
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">

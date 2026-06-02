@@ -4,9 +4,15 @@ import { runDomBrowserScan } from "./dom-browser";
 
 let playwrightAvailable = false;
 let checkedPlaywright = false;
+let lastCheckedAt = 0;
+const RECHECK_INTERVAL_MS = 60_000; // re-probe every 60s so a slow-starting container is eventually detected
 
 async function ensurePlaywright(): Promise<boolean> {
-  if (checkedPlaywright) return playwrightAvailable;
+  const now = Date.now();
+  // Return cached result if still fresh, or if previously confirmed available
+  if (checkedPlaywright && (playwrightAvailable || now - lastCheckedAt < RECHECK_INTERVAL_MS)) {
+    return playwrightAvailable;
+  }
 
   const playwrightUrl = process.env["PLAYWRIGHT_URL"];
 
@@ -14,12 +20,14 @@ async function ensurePlaywright(): Promise<boolean> {
     try {
       const res = await fetch(`${playwrightUrl}/health`, { signal: AbortSignal.timeout(3000) });
       playwrightAvailable = res.ok;
+      checkedPlaywright = true;
+      lastCheckedAt = now;
       if (playwrightAvailable) {
         logger.info({ playwrightUrl }, "Playwright service available");
-        checkedPlaywright = true;
         return true;
       }
-    } catch { /* not running */ }
+      logger.warn({ playwrightUrl, status: res.status }, "Playwright /health returned non-OK — will retry");
+    } catch { /* not running yet — will retry next scan */ }
   }
 
   // Try local check
