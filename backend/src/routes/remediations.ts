@@ -130,7 +130,7 @@ router.get("/remediations/:id", requireAuth, async (req, res) => {
   }
 });
 
-router.patch("/remediations/:id", async (req, res) => {
+router.patch("/remediations/:id", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });

@@ -62,6 +62,25 @@ import { triggerWebhooks } from "../../routes/webhooks";
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
 
+// ── Concurrency limiter ────────────────────────────────────────────────────────
+const MAX_CONCURRENT_SCANS = parseInt(process.env["MAX_CONCURRENT_SCANS"] ?? "5", 10);
+let activeScanCount = 0;
+
+// ── Stale job recovery on startup ─────────────────────────────────────────────
+// If the process crashed mid-scan, jobs remain stuck in "running". Fix them on
+// startup so the UI does not show perpetually running scans.
+(async () => {
+  try {
+    const stale = await col("scan_jobs").updateMany(
+      { status: "running" } as Record<string, unknown>,
+      { $set: { status: "failed", error_message: "Process restarted — scan interrupted" } }
+    );
+    if (stale.modifiedCount > 0) {
+      logger.warn({ count: stale.modifiedCount }, "Marked stale running scan jobs as failed on startup");
+    }
+  } catch { /* non-fatal — DB may not be ready yet */ }
+})();
+
 export interface ScanJobOptions {
   jobId: string;
   targetUrl: string;
@@ -477,6 +496,18 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
   } else {
     emit({ type: "log", message: "[SPA] Target does not appear to be a SPA — fallback filtering disabled" });
   }
+
+  // ── Concurrency gate ────────────────────────────────────────────────────────
+  if (activeScanCount >= MAX_CONCURRENT_SCANS) {
+    logger.warn({ jobId, activeScanCount, MAX_CONCURRENT_SCANS }, "Scan rejected — concurrency limit reached");
+    await col("scan_jobs").updateOne(
+      { _id: new ObjectId(jobId) } as Record<string, unknown>,
+      { $set: { status: "failed", error_message: `Server busy — max ${MAX_CONCURRENT_SCANS} concurrent scans. Try again shortly.` } }
+    );
+    emit({ type: "error", message: "Server busy — scan limit reached. Please try again shortly." });
+    return;
+  }
+  activeScanCount++;
 
   const pipeline = getPipeline(profile, validationEnabled, fuzzingEnabled, bugBountyMode);
   const totalSteps = pipeline.length;

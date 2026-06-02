@@ -581,11 +581,19 @@ router.get("/scan-jobs/queue", requireAdmin, async (_req, res) => {
 router.patch("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!scan) return res.status(404).json({ error: "Scan not found" });
+    if (session.role !== "admin" && scan["user_id"] !== session.userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     const { redisSet } = await import("../lib/redis");
     await redisSet(`scan:paused:${id}`, "1", 24 * 3600);
     await col("scan_jobs").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: { paused: true, paused_at: new Date() } });
     res.json({ ok: true, status: "paused" });
   } catch (err) {
+    logger.error({ err }, "Scan PATCH pause error");
     res.status(500).json({ error: "Failed to pause scan" });
   }
 });
@@ -593,11 +601,19 @@ router.patch("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
 router.patch("/scan-jobs/:id/resume", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!scan) return res.status(404).json({ error: "Scan not found" });
+    if (session.role !== "admin" && scan["user_id"] !== session.userId) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
     const { redisDel } = await import("../lib/redis");
     await redisDel(`scan:paused:${id}`);
     await col("scan_jobs").updateOne({ _id: new ObjectId(id) } as Record<string, unknown>, { $set: { paused: false, resumed_at: new Date() } });
     res.json({ ok: true, status: "running" });
   } catch (err) {
+    logger.error({ err }, "Scan PATCH resume error");
     res.status(500).json({ error: "Failed to resume scan" });
   }
 });

@@ -128,12 +128,25 @@ router.get("/compliance/cwe/:cweId", (req, res) => {
   res.json({ cwe_id: cweId, ...mapping });
 });
 
-// GET /compliance/report — Generate compliance report for all findings or a specific scan
-router.get("/compliance/report", async (req, res) => {
+// GET /compliance/report — Generate compliance report scoped to the requesting user
+router.get("/compliance/report", requireAuth, async (req, res) => {
   try {
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const scanId = req.query["scan_id"] as string | undefined;
 
     const query: Record<string, unknown> = {};
+    // Scope to user's own findings unless admin
+    if (session.role !== "admin") {
+      const userScanJobIds = await col("scan_jobs")
+        .find({ user_id: session.userId } as Record<string, unknown>)
+        .project({ _id: 1 }).limit(500).toArray()
+        .then(jobs => jobs.map(j => j["_id"]));
+      query["$or"] = [
+        { user_id: session.userId },
+        { user_id: { $in: [null, undefined] } },
+        ...(userScanJobIds.length > 0 ? [{ scan_job_id: { $in: userScanJobIds } }] : []),
+      ];
+    }
     if (scanId && ObjectId.isValid(scanId)) {
       query["scan_job_id"] = new ObjectId(scanId);
     }
@@ -287,9 +300,10 @@ router.get("/compliance/history", async (req, res) => {
   }
 });
 
-// GET /compliance/owasp/findings/:categoryId — findings for an OWASP category
-router.get("/compliance/owasp/findings/:categoryId", async (req, res) => {
+// GET /compliance/owasp/findings/:categoryId — findings for an OWASP category (user-scoped)
+router.get("/compliance/owasp/findings/:categoryId", requireAuth, async (req, res) => {
   try {
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const { categoryId } = req.params;
     const REVERSE_MAP: Record<string, string[]> = {
       "A01:2021": ["Broken Access Control","IDOR","Path Traversal"],
@@ -304,7 +318,19 @@ router.get("/compliance/owasp/findings/:categoryId", async (req, res) => {
       "A10:2021": ["SSRF","Server-Side Request Forgery"],
     };
     const categories = REVERSE_MAP[categoryId] ?? [];
-    const findings = await col("findings").find({ category: { $in: categories } }).toArray() as Array<Record<string, unknown>>;
+    const baseQuery: Record<string, unknown> = { category: { $in: categories } };
+    if (session.role !== "admin") {
+      const userScanJobIds = await col("scan_jobs")
+        .find({ user_id: session.userId } as Record<string, unknown>)
+        .project({ _id: 1 }).limit(500).toArray()
+        .then(jobs => jobs.map(j => j["_id"]));
+      baseQuery["$or"] = [
+        { user_id: session.userId },
+        { user_id: { $in: [null, undefined] } },
+        ...(userScanJobIds.length > 0 ? [{ scan_job_id: { $in: userScanJobIds } }] : []),
+      ];
+    }
+    const findings = await col("findings").find(baseQuery).toArray() as Array<Record<string, unknown>>;
     res.json(findings.map(f => ({ ...f, id: String(f["_id"]) })));
   } catch (err) {
     logger.error({ err }, "OWASP category findings error");
