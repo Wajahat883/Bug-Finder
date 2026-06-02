@@ -10,6 +10,19 @@ import { redactObject, FINDING_SENSITIVE_FIELDS } from "../lib/pii-redact";
 
 const router = Router();
 
+// Reusable ownership check for scan jobs.
+// Returns true when the session user is allowed to access the given job.
+// Handles null/undefined user_id (seed/legacy jobs) and ObjectId vs string coercion.
+function userOwnsJob(job: Record<string, unknown>, sessionUserId: string | undefined): boolean {
+  if (!sessionUserId) return false;
+  const stored = job["user_id"];
+  return (
+    stored == null ||                               // legacy/seed — visible to any authenticated user
+    stored === sessionUserId ||
+    String(stored) === String(sessionUserId)
+  );
+}
+
 function formatJob(j: Record<string, unknown>) {
   return {
     id: String(j["_id"]),
@@ -48,10 +61,23 @@ router.get("/scan-jobs", requireAuth, async (req, res) => {
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const query: Record<string, unknown> = {};
-    if (session.role !== "admin") query.user_id = session.userId;
+    if (session.role !== "admin") {
+      // Three-tier scope: exact match OR null/absent (seed/legacy jobs) OR via ObjectId string cast
+      query["$or"] = [
+        { user_id: session.userId },
+        { user_id: { $in: [null, undefined] } },
+      ];
+    }
     if (status) query["status"] = status;
     if (search) {
-      query["target_url"] = { $regex: search, $options: "i" };
+      const safeSearch = String(search);
+      const searchCond = { target_url: { $regex: safeSearch, $options: "i" } };
+      if (query["$or"]) {
+        query["$and"] = [{ $or: query["$or"] }, searchCond];
+        delete query["$or"];
+      } else {
+        query["target_url"] = { $regex: safeSearch, $options: "i" };
+      }
     }
 
     const col_ = col("scan_jobs");
@@ -198,7 +224,7 @@ router.get("/scan-jobs/:id", requireAuth, async (req, res) => {
 
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     if (!session?.userId) return res.status(401).json({ error: "Not authenticated" });
-    if (session.role !== "admin" && job.user_id !== session.userId) {
+    if (session.role !== "admin" && !userOwnsJob(job, session.userId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -216,7 +242,7 @@ router.get("/scan-jobs/:id/findings", requireAuth, async (req, res) => {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!job) return res.status(404).json({ error: "Scan job not found" });
-    if (session.role !== "admin" && job["user_id"] !== session.userId) {
+    if (session.role !== "admin" && !userOwnsJob(job, session.userId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -241,7 +267,7 @@ router.get("/scan-jobs/:id/attack-surface", requireAuth, async (req, res) => {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const job = (await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>)) as Record<string, unknown> | null;
     if (!job) return res.status(404).json({ error: "Not found" });
-    if (session.role !== "admin" && job["user_id"] !== session.userId) {
+    if (session.role !== "admin" && !userOwnsJob(job, session.userId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -298,7 +324,7 @@ router.get("/scan-jobs/:id/engines", requireAuth, async (req, res) => {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const job = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!job) return res.status(404).json({ error: "Scan job not found" });
-    if (session.role !== "admin" && job["user_id"] !== session.userId) {
+    if (session.role !== "admin" && !userOwnsJob(job, session.userId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
     const engines = (job["engines"] as Array<Record<string, unknown>>) ?? [];
@@ -362,7 +388,7 @@ router.post("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!scan) return res.status(404).json({ error: "Scan not found" });
-    if (session.role !== "admin" && scan["user_id"] !== session.userId) {
+    if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
     const result = await col("scan_jobs").findOneAndUpdate(
@@ -585,7 +611,7 @@ router.patch("/scan-jobs/:id/pause", requireAuth, async (req, res) => {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!scan) return res.status(404).json({ error: "Scan not found" });
-    if (session.role !== "admin" && scan["user_id"] !== session.userId) {
+    if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
     const { redisSet } = await import("../lib/redis");
@@ -605,7 +631,7 @@ router.patch("/scan-jobs/:id/resume", requireAuth, async (req, res) => {
     const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!scan) return res.status(404).json({ error: "Scan not found" });
-    if (session.role !== "admin" && scan["user_id"] !== session.userId) {
+    if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
       return res.status(403).json({ error: "Forbidden" });
     }
     const { redisDel } = await import("../lib/redis");
