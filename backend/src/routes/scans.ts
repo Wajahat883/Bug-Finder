@@ -427,7 +427,7 @@ async function cancelScanJob(id: string, req: import("express").Request, res: im
   if (!scan) return res.status(404).json({ error: "Scan not found" });
 
   const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-  if (session.role !== "admin" && scan["user_id"] !== session.userId) {
+  if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
     return res.status(403).json({ error: "Forbidden" });
   }
 
@@ -473,7 +473,7 @@ router.get("/scan-jobs/:id/progress", requireAuth, async (req, res) => {
   const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
   const jobCheck = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
   if (!jobCheck) return res.status(404).json({ error: "Scan job not found" });
-  if (session.role !== "admin" && jobCheck["user_id"] !== session.userId) {
+  if (session.role !== "admin" && !userOwnsJob(jobCheck, session.userId)) {
     return res.status(403).json({ error: "Forbidden" });
   }
 
