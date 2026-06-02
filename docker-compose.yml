@@ -31,8 +31,8 @@ services:
     image: mongo:7-jammy
     container_name: bug-finder-mongo
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?MONGO_USER is required}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD is required}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-bugfinder}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-bugfinder_dev_pw}
       MONGO_INITDB_DATABASE: ${MONGO_DB:-bugfinder}
     # Internal only — no host port binding in production
     expose:
@@ -213,7 +213,7 @@ services:
     command: >
       -domain ${INTERACTSH_DOMAIN:-oast.local}
       -http-port 8194
-      -token ${INTERACTSH_TOKEN:?INTERACTSH_TOKEN is required}
+      -token ${INTERACTSH_TOKEN:-dev-interactsh-token}
       -debug
     expose:
       - "8193"
@@ -246,7 +246,7 @@ services:
     environment:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 5000
-      MONGODB_URI: mongodb://${MONGO_USER:?MONGO_USER is required}:${MONGO_PASSWORD:?MONGO_PASSWORD is required}@mongodb:27017/${MONGO_DB:-bugfinder}?authSource=admin
+      MONGODB_URI: mongodb://${MONGO_USER:-bugfinder}:${MONGO_PASSWORD:-bugfinder_dev_pw}@mongodb:27017/${MONGO_DB:-bugfinder}?authSource=admin
       OPENCODE_API_KEY: ${OPENCODE_API_KEY}
       OPENCODE_API_BASE: ${OPENCODE_API_BASE:-https://opencode.ai/zen/v1}
       OPENCODE_MODEL: ${OPENCODE_MODEL:-nemotron-3-super-free}
@@ -260,7 +260,7 @@ services:
       JIRA_EMAIL: ${JIRA_EMAIL:-}
       JIRA_API_TOKEN: ${JIRA_API_TOKEN:-}
       JIRA_PROJECT_KEY: ${JIRA_PROJECT_KEY:-}
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      SESSION_SECRET: ${SESSION_SECRET:-dev-session-secret-change-in-production}
       ZAP_URL: http://zap:8080
       ZAP_API_KEY: ${ZAP_API_KEY:-zap-api-key-change-me}
       PLAYWRIGHT_URL: http://playwright:3005
@@ -268,17 +268,17 @@ services:
       NUCLEI_URL: http://nuclei:8088
       NUCLEI_BINARY: /usr/local/bin/nuclei
       NUCLEI_TEMPLATES_DIR: /home/appuser/nuclei-templates
-      INTERACTSH_TOKEN: ${INTERACTSH_TOKEN:?INTERACTSH_TOKEN is required}
+      INTERACTSH_TOKEN: ${INTERACTSH_TOKEN:-dev-interactsh-token}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-noreply@bugfinder.io}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@bugfinder.local}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin123!}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
-      CREDENTIAL_VAULT_KEY: ${CREDENTIAL_VAULT_KEY:?CREDENTIAL_VAULT_KEY is required}
-      WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:?WEBHOOK_SECRET_KEY is required}
+      CREDENTIAL_VAULT_KEY: ${CREDENTIAL_VAULT_KEY:-dev-credential-vault-key-min-32-chars!}
+      WEBHOOK_SECRET_KEY: ${WEBHOOK_SECRET_KEY:-dev-webhook-secret-key-32-chars!!}
       MAX_CONCURRENT_SCANS: ${MAX_CONCURRENT_SCANS:-5}
       SAML_ENTRY_POINT: ${SAML_ENTRY_POINT:-}
       SAML_CALLBACK_URL: ${SAML_CALLBACK_URL:-}
