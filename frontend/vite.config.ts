@@ -18,18 +18,22 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
+    // Dev-only plugins — never load in production builds
+    ...(process.env.NODE_ENV !== "production"
       ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, ".."),
-            }),
-          ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
+          runtimeErrorOverlay(),
+          ...(process.env.REPL_ID !== undefined
+            ? [
+                await import("@replit/vite-plugin-cartographer").then((m) =>
+                  m.cartographer({
+                    root: path.resolve(import.meta.dirname, ".."),
+                  }),
+                ),
+                await import("@replit/vite-plugin-dev-banner").then((m) =>
+                  m.devBanner(),
+                ),
+              ]
+            : []),
         ]
       : []),
   ],
@@ -47,6 +51,18 @@ export default defineConfig({
     // Chunk size warning threshold — helps catch bloated bundles early
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
+      onwarn(warning, warn) {
+        // shadcn/radix-ui components ship with "use client" directives (a Next.js RSC
+        // marker). Rollup doesn't understand it, emits a MODULE_LEVEL_DIRECTIVE warning,
+        // then fails to resolve the sourcemap position — producing the SOURCEMAP_ERROR
+        // noise. Both are harmless in a pure client-side Vite build.
+        if (
+          warning.code === "MODULE_LEVEL_DIRECTIVE" &&
+          warning.message.includes('"use client"')
+        ) return;
+        if (warning.code === "SOURCEMAP_ERROR") return;
+        warn(warning);
+      },
       output: {
         // Split vendor code into separate chunk for better caching
         manualChunks(id) {
