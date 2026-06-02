@@ -113,50 +113,244 @@ export async function runAuthCheck(ctx: ScanContext): Promise<ScanFinding[]> {
   // ── 2. Rate-limit / lockout detection ──────────────────────────────────────
   if (loginUrl) {
     emit({ type: "log", message: `Testing rate limiting on ${loginUrl}…` });
-    const statusCodes: number[] = [];
-    const testBody = { username: "ratetest@example.com", password: "wrong_password_probe_123" };
 
-    for (let i = 0; i < 8; i++) {
-      const r = await ctxFetch(ctx, loginUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(testBody),
+    // ── Step A: Extract CSRF token from login page ────────────────────────────
+    // Many frameworks require a CSRF token in every POST. If we omit it the
+    // server returns 403 not because rate limiting is absent, but because the
+    // request was malformed. Always attempt to extract the token first.
+    let csrfToken: string | null = null;
+    let csrfFieldName: string | null = null;
+    const loginPageUrl = loginUrl.replace(/\/api/, "").replace(/\/login$/, "") + "/login";
+
+    try {
+      const pageRes = await ctxFetch(ctx, loginPageUrl, {
+        headers: { Accept: "text/html" },
       });
-      if (r) statusCodes.push(r.status);
-      await new Promise((res) => setTimeout(res, 150));
+      if (pageRes) {
+        const html = await pageRes.text().catch(() => "");
+        // Common CSRF field names across Rails, Laravel, Django, Express, Spring
+        const csrfPatterns: Array<[RegExp, string]> = [
+          [/<input[^>]+name=["'](csrf[_-]?token)["'][^>]+value=["']([^"']+)["']/i, "csrf_token"],
+          [/<input[^>]+name=["'](_token)["'][^>]+value=["']([^"']+)["']/i, "_token"],
+          [/<input[^>]+name=["'](authenticity_token)["'][^>]+value=["']([^"']+)["']/i, "authenticity_token"],
+          [/<input[^>]+name=["'](__RequestVerificationToken)["'][^>]+value=["']([^"']+)["']/i, "__RequestVerificationToken"],
+          [/<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/i, "csrf-token"],
+        ];
+        for (const [pattern, fieldName] of csrfPatterns) {
+          const m = html.match(pattern);
+          if (m) {
+            // Group index: meta tags have token in group 1; input tags have name in 1, value in 2
+            csrfToken = m[2] ?? m[1] ?? null;
+            csrfFieldName = fieldName;
+            emit({ type: "log", message: `  CSRF token found (field: ${csrfFieldName}) — will include in rate limit test requests` });
+            break;
+          }
+        }
+        if (!csrfToken) {
+          emit({ type: "log", message: "  No CSRF token found on login page — testing with JSON body only" });
+        }
+      }
+    } catch { /* non-fatal — proceed without CSRF token */ }
+
+    // ── Step B: Detect WAF / CDN blocking signatures ──────────────────────────
+    // Consistently blocked requests (403 from WAF/CDN) are NOT evidence of missing
+    // rate limiting — they never reach application auth logic.
+    function detectWaf(statusCode: number, headers: Headers, body: string): string | null {
+      const server   = (headers.get("server") ?? "").toLowerCase();
+      const bodyLow  = body.slice(0, 500).toLowerCase();
+      if (headers.get("cf-ray"))                                              return "Cloudflare";
+      if (server.includes("cloudflare"))                                      return "Cloudflare";
+      if (headers.get("x-akamai-session-id") || headers.get("akamai-grn"))   return "Akamai";
+      if (headers.get("x-iinfo") || bodyLow.includes("incapsula"))           return "Imperva/Incapsula";
+      if (bodyLow.includes("access denied") && statusCode === 403)           return "WAF (generic)";
+      if (bodyLow.includes("blocked") && statusCode === 403)                 return "WAF (generic)";
+      if (bodyLow.includes("security check") && statusCode === 403)          return "WAF (generic)";
+      return null;
     }
 
-    const has429 = statusCodes.includes(429);
-    const has423 = statusCodes.includes(423); // account locked
-    const allFailed401 = statusCodes.every((s) => [400, 401, 403, 422].includes(s));
+    // ── Step C: Build request headers including CSRF and session cookies ───────
+    function buildRateLimitHeaders(extraCsrf?: Record<string, string>): Record<string, string> {
+      return {
+        "Content-Type": "application/json",
+        Accept: "application/json, */*",
+        "X-Requested-With": "XMLHttpRequest",
+        ...(csrfToken && csrfFieldName ? { "X-CSRF-Token": csrfToken, "X-Csrf-Token": csrfToken } : {}),
+        ...(extraCsrf ?? {}),
+        ...(ctx.authHeaders ?? {}),
+      };
+    }
 
-    if (!has429 && !has423 && allFailed401 && statusCodes.length >= 6) {
-      findings.push({
-        title: "No Rate Limiting on Login Endpoint",
-        category: "Authentication",
-        severity: "high",
-        endpoint: loginUrl,
-        description:
-          `The login endpoint does not rate-limit repeated failed attempts. ` +
-          `${statusCodes.length} consecutive failed logins returned ${statusCodes.join(", ")} without any 429 or lockout response. ` +
-          `This allows unlimited brute-force attacks against user accounts.`,
-        evidence:
-          `${statusCodes.length} POST requests to ${loginUrl}\n` +
-          `Responses: ${statusCodes.join(", ")}\n` +
-          `No HTTP 429 (Too Many Requests) or 423 (Locked) received`,
-        recommended_fix:
-          "Implement IP-based and account-based rate limiting (max 5 attempts/minute). " +
-          "Return HTTP 429 with Retry-After header. Add CAPTCHA after 3 failures. " +
-          "Lock accounts after 10 failed attempts and alert the user via email.",
-        cvss_score: 7.5,
-        cwe_id: "CWE-307",
-        scanner_name: "Bug-Finder/Auth",
-        scanner_family: "web",
-        confidence: 0.85,
+    function buildRateLimitBody(): Record<string, string> {
+      const body: Record<string, string> = {
+        username: "ratetest@example.com",
+        email:    "ratetest@example.com",
+        password: "wrong_password_probe_123!",
+      };
+      if (csrfToken && csrfFieldName) body[csrfFieldName] = csrfToken;
+      return body;
+    }
+
+    // ── Step D: Send probes and collect rich response data ────────────────────
+    const probes: Array<{ status: number; timingMs: number; waf: string | null; bodySnippet: string }> = [];
+
+    // Warm-up request — establishes session cookie and validates the flow
+    const warmupCookieJar: string[] = [];
+    try {
+      const warmup = await ctxFetch(ctx, loginUrl, {
+        method: "POST",
+        headers: buildRateLimitHeaders(),
+        body: JSON.stringify(buildRateLimitBody()),
       });
-      emit({ type: "log", message: "  [HIGH] No rate limiting on login" });
+      if (warmup) {
+        const sc = warmup.headers.get("set-cookie");
+        if (sc) warmupCookieJar.push(sc.split(";")[0] ?? "");
+      }
+    } catch { /* non-fatal */ }
+
+    for (let i = 0; i < 10; i++) {
+      if (ctx.abortSignal?.aborted) break;
+      const t0 = Date.now();
+      const cookieHeader = warmupCookieJar.length > 0 ? { Cookie: warmupCookieJar.join("; ") } : {};
+      const r = await ctxFetch(ctx, loginUrl, {
+        method: "POST",
+        headers: { ...buildRateLimitHeaders(cookieHeader) },
+        body: JSON.stringify(buildRateLimitBody()),
+      });
+      const timingMs = Date.now() - t0;
+
+      if (!r) continue;
+      const body = await r.text().catch(() => "");
+      const waf = detectWaf(r.status, r.headers, body);
+      probes.push({ status: r.status, timingMs, waf, bodySnippet: body.slice(0, 150) });
+
+      // Stop early if we detect throttling — no need to keep hammering
+      if (r.status === 429 || r.status === 423 || r.status === 503) break;
+      await new Promise((res) => setTimeout(res, 120));
+    }
+
+    if (probes.length === 0) {
+      emit({ type: "log", message: "  Rate limit test: no responses received — skipping" });
     } else {
-      emit({ type: "log", message: `  Rate limit check: ${has429 ? "429 detected ✓" : has423 ? "lockout detected ✓" : "no protection found"}` });
+      const statusCodes    = probes.map(p => p.status);
+      const wafDetected    = probes.find(p => p.waf !== null);
+      const has429         = statusCodes.includes(429);
+      const has423         = statusCodes.includes(423);
+      const has503         = statusCodes.includes(503);
+      const timingsSorted  = [...probes.map(p => p.timingMs)].sort((a, b) => a - b);
+      const medianTiming   = timingsSorted[Math.floor(timingsSorted.length / 2)] ?? 0;
+      const maxTiming      = timingsSorted[timingsSorted.length - 1] ?? 0;
+      const timingRamp     = maxTiming > medianTiming * 2.5; // server adding delay = throttling
+
+      // Lockout keyword in any response body
+      const lockoutKeywords = ["locked", "too many", "rate limit", "blocked", "suspended", "temporarily", "try again"];
+      const hasLockoutBody  = probes.some(p => lockoutKeywords.some(kw => p.bodySnippet.toLowerCase().includes(kw)));
+
+      // All responses are 403 → requests never reached application auth logic.
+      // This is a blocked/WAF/CSRF failure, NOT evidence of missing rate limiting.
+      const all403 = statusCodes.every(s => s === 403);
+
+      // Valid evidence requires seeing real auth failures (401 / 400 / 422).
+      // 403 does not count — it means the request was rejected before reaching the auth layer.
+      const validAuthFailures = statusCodes.filter(s => [400, 401, 422].includes(s));
+      const requestsReachedAppLogic = validAuthFailures.length >= 5;
+
+      emit({ type: "log", message: `  Rate limit probe: [${statusCodes.join(", ")}] | WAF: ${wafDetected?.waf ?? "none"} | timing ramp: ${timingRamp} | lockout body: ${hasLockoutBody}` });
+
+      if (has429 || has423 || has503) {
+        emit({ type: "log", message: `  Rate limiting ACTIVE — HTTP ${statusCodes.find(s => [429, 423, 503].includes(s))} detected ✓` });
+
+      } else if (timingRamp) {
+        emit({ type: "log", message: `  Delay-based throttling detected (median: ${medianTiming}ms → max: ${maxTiming}ms) ✓` });
+
+      } else if (hasLockoutBody) {
+        emit({ type: "log", message: "  Account lockout keywords detected in response body ✓" });
+
+      } else if (wafDetected) {
+        // WAF is intercepting before the app — cannot evaluate rate limiting
+        findings.push({
+          title: "Rate Limit Test Blocked by WAF/CDN — Test Inconclusive",
+          category: "Authentication",
+          severity: "info",
+          endpoint: loginUrl,
+          description:
+            `The rate limiting test was blocked by ${wafDetected.waf} before requests reached application logic. ` +
+            `All login probe requests were intercepted and returned HTTP ${wafDetected.status} by the WAF/CDN layer. ` +
+            `The application's own rate limiting cannot be evaluated from outside the WAF perimeter.`,
+          evidence:
+            `${probes.length} POST requests to ${loginUrl}\n` +
+            `Responses: ${statusCodes.join(", ")}\n` +
+            `WAF detected: ${wafDetected.waf}\n` +
+            `Detection signal: ${wafDetected.waf === "Cloudflare" ? "cf-ray header present" : "blocking response headers/body"}`,
+          recommended_fix:
+            "Verify that application-level rate limiting exists independently of the WAF. " +
+            "WAF rules can be bypassed. Implement rate limiting at the application layer as a defence-in-depth measure.",
+          cvss_score: 0,
+          cwe_id: "CWE-307",
+          scanner_name: "Bug-Finder/Auth",
+          scanner_family: "web",
+          confidence: 0.95,
+        });
+        emit({ type: "log", message: `  [INFO] WAF/CDN (${wafDetected.waf}) blocked test — result inconclusive` });
+
+      } else if (all403) {
+        // All 403 = requests blocked before auth logic — CSRF failure, missing headers, etc.
+        // This is NOT evidence of missing rate limiting.
+        const csrfNote = csrfToken
+          ? "CSRF token was included but requests were still rejected."
+          : "Login page had no CSRF token; requests may require additional headers or a valid session.";
+        emit({
+          type: "log",
+          message: `  All responses are 403 — requests did not reach application auth logic (${csrfNote}). Rate limit test INVALID — skipping finding.`,
+        });
+
+      } else if (!requestsReachedAppLogic) {
+        // Mixed or unexpected status codes — insufficient valid auth failures to conclude
+        emit({
+          type: "log",
+          message: `  Only ${validAuthFailures.length} valid auth-failure responses (need 5). Status mix: ${statusCodes.join(", ")} — insufficient evidence. Rate limit test skipped.`,
+        });
+
+      } else {
+        // ALL conditions met: requests reached app logic, valid auth failures, no throttling
+        const csrfInfo = csrfToken
+          ? `CSRF token (${csrfFieldName}) was extracted from login page and included in all requests.`
+          : "No CSRF token required — requests sent as JSON POST.";
+
+        findings.push({
+          title: "No Rate Limiting on Login Endpoint",
+          category: "Authentication",
+          severity: "high",
+          endpoint: loginUrl,
+          description:
+            `The login endpoint does not rate-limit repeated failed login attempts. ` +
+            `${validAuthFailures.length} consecutive authenticated requests returned HTTP ${[...new Set(validAuthFailures)].join("/")} ` +
+            `without any 429, 423, or lockout response. ${csrfInfo} ` +
+            `This allows unlimited brute-force and credential-stuffing attacks against user accounts.`,
+          evidence: [
+            `${probes.length} POST requests to ${loginUrl}`,
+            `Responses: ${statusCodes.join(", ")}`,
+            `Valid auth failures (400/401/422): ${validAuthFailures.length}`,
+            `HTTP 429 received: no`,
+            `HTTP 423 (locked) received: no`,
+            `Delay-based throttling: no (median ${medianTiming}ms, max ${maxTiming}ms)`,
+            `Lockout keywords in responses: no`,
+            `WAF detected: none`,
+            `CSRF handled: ${csrfToken ? `yes (field: ${csrfFieldName})` : "not required"}`,
+            `Response timing ramp: ${timingRamp ? "yes (possible soft-throttle)" : "no"}`,
+          ].join("\n"),
+          recommended_fix:
+            "Implement IP-based and account-based rate limiting: max 5 attempts per minute, " +
+            "HTTP 429 with Retry-After header. Add CAPTCHA after 3 failures. " +
+            "Lock accounts after 10 failed attempts and notify the user by email. " +
+            "Use a library such as express-rate-limit, rack-attack, or Django's axes.",
+          cvss_score: 7.5,
+          cwe_id: "CWE-307",
+          scanner_name: "Bug-Finder/Auth",
+          scanner_family: "web",
+          confidence: 0.90,
+        });
+        emit({ type: "log", message: `  [HIGH] No rate limiting confirmed — ${validAuthFailures.length} valid auth failures, no throttling detected` });
+      }
     }
   }
 

@@ -29,6 +29,76 @@ type AuthenticatedRequest = AuthReq;
 
 const router = Router();
 
+// GET /credentials — list all credentials for the authenticated user
+// Returns metadata only — no plaintext values ever leave the vault.
+router.get("/credentials", requireAuth, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.session.userId;
+
+    // Fetch all targets owned by this user so we can scope credentials to them
+    const userTargets = await col("targets")
+      .find(userId ? { user_id: userId } as Record<string, unknown> : {})
+      .project({ _id: 1, url: 1, domain: 1 })
+      .toArray() as Array<Record<string, unknown>>;
+
+    const targetIds = userTargets.map(t => String(t["_id"]));
+    const targetUrlMap = Object.fromEntries(
+      userTargets.map(t => [String(t["_id"]), String(t["url"] ?? t["domain"] ?? "")])
+    );
+
+    // Query credentials belonging to any of the user's targets (or created_by this user)
+    const query: Record<string, unknown> = targetIds.length > 0
+      ? { $or: [{ target_id: { $in: targetIds } }, { created_by: userId }] }
+      : { created_by: userId };
+
+    const docs = await col("scan_credentials")
+      .find(query)
+      .sort({ created_at: -1 })
+      .toArray() as Array<Record<string, unknown>>;
+
+    const credentials = docs.map(d => ({
+      id: String(d["_id"]),
+      name: String(d["label"] ?? d["type"] ?? "Credential"),
+      type: mapCredentialType(String(d["type"] ?? "bearer")),
+      username: d["username"] ? String(d["username"]) : undefined,
+      masked_value: maskValue(String(d["type"] ?? "")),
+      targets: d["target_id"] ? [targetUrlMap[String(d["target_id"])] ?? String(d["target_id"])] : [],
+      created_at: d["created_at"] instanceof Date
+        ? d["created_at"].toISOString()
+        : String(d["created_at"] ?? new Date().toISOString()),
+      last_used: d["last_used"]
+        ? (d["last_used"] instanceof Date ? d["last_used"].toISOString() : String(d["last_used"]))
+        : null,
+    }));
+
+    res.json(credentials);
+  } catch {
+    res.status(500).json({ error: "Failed to list credentials" });
+  }
+});
+
+// Map vault types to the frontend's CredentialType enum
+function mapCredentialType(vaultType: string): string {
+  switch (vaultType) {
+    case "bearer":  return "oauth_token";
+    case "cookie":  return "cookie";
+    case "basic":   return "basic_auth";
+    case "apikey":  return "api_key";
+    default:        return "api_key";
+  }
+}
+
+// Return a masked placeholder — the actual value stays encrypted in the vault
+function maskValue(type: string): string {
+  switch (type) {
+    case "bearer":  return "Bearer ••••••••••••";
+    case "cookie":  return "session=••••••••";
+    case "basic":   return "••••:••••••••";
+    case "apikey":  return "••••••••••••••••";
+    default:        return "••••••••••••";
+  }
+}
+
 // POST /credentials — store a new credential set
 router.post("/credentials", requireAuth, async (req: AuthenticatedRequest, res) => {
   try {
