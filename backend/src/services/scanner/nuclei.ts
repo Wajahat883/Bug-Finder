@@ -414,45 +414,61 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
-  // ── Tier 2: Nuclei HTTP API (remote Docker service via NUCLEI_URL) ────────────
+  // ── Tier 2: Nuclei HTTP API (dedicated nuclei-service via NUCLEI_URL) ─────────
   if (findings.length === 0) {
     const nucleiUrl = process.env["NUCLEI_URL"];
     if (nucleiUrl) {
       try {
+        ctx.emit({ type: "log", message: `Nuclei service: POST ${nucleiUrl}/api/scan → ${ctx.targetUrl}` });
+        const authHeaders: Record<string, string> = {};
+        if (ctx.authToken) authHeaders["Authorization"] = ctx.authToken.startsWith("Bearer ") ? ctx.authToken : `Bearer ${ctx.authToken}`;
+        if (ctx.sessionCookie) authHeaders["Cookie"] = ctx.sessionCookie;
+
         const resp = await fetch(`${nucleiUrl}/api/scan`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             target: ctx.targetUrl,
             templates: ["cves", "exposures", "misconfiguration", "vulnerabilities"],
-            severity: ["critical", "high", "medium"],
+            severity: ["critical", "high", "medium", "low"],
+            headers: authHeaders,
+            timeout: 10,
+            rateLimit: 150,
           }),
-          signal: AbortSignal.timeout(120000),
+          signal: AbortSignal.timeout(300000),
         });
         if (resp.ok) {
-          const results = await resp.json() as Array<Record<string, unknown>>;
+          const payload = await resp.json() as { results?: Array<Record<string, unknown>>; count?: number };
+          const results = Array.isArray(payload.results) ? payload.results : (Array.isArray(payload) ? payload as Array<Record<string, unknown>> : []);
           for (const r of results) {
             const sev = String(r["severity"] ?? "medium").toLowerCase();
-            const validSev = ["critical", "high", "medium", "low", "info"].includes(sev) ? sev : "medium";
+            const validSev = (["critical", "high", "medium", "low", "info"].includes(sev) ? sev : "medium") as ScanFinding["severity"];
             findings.push({
               title: String(r["name"] ?? r["template-id"] ?? "Nuclei Finding"),
-              category: String(r["type"] ?? "Security Misconfiguration"),
-              severity: validSev as ScanFinding["severity"],
+              category: String(r["tags"] ?? r["type"] ?? "Security Misconfiguration"),
+              severity: validSev,
               endpoint: String(r["matched-at"] ?? ctx.targetUrl),
               description: String(r["description"] ?? "Found by Nuclei template engine"),
-              evidence: String(r["extracted-results"] ?? r["matched-at"] ?? ""),
+              evidence: [
+                `Template: ${r["template-id"]}`,
+                `Matched: ${r["matched-at"]}`,
+                r["extracted-results"] ? `Extracted: ${JSON.stringify(r["extracted-results"])}` : "",
+                r["curl-command"] ? `\nReproduction:\n${r["curl-command"]}` : "",
+              ].filter(Boolean).join("\n"),
               recommended_fix: String(r["remediation"] ?? "Apply security patches and follow vendor recommendations"),
-              cvss_score: typeof r["cvss-score"] === "number" ? r["cvss-score"] : 5.0,
+              cvss_score: typeof r["cvss-score"] === "number" ? r["cvss-score"] : ({ critical: 9.0, high: 7.5, medium: 5.0, low: 3.0, info: 1.0 }[validSev] ?? 5.0),
               cwe_id: String(r["cwe-id"] ?? "CWE-200"),
               scanner_name: `Nuclei/${r["template-id"] ?? "template"}`,
               scanner_family: "Nuclei",
-              confidence: 0.85,
+              confidence: 0.88,
             });
           }
-          ctx.emit({ type: "log", message: `Nuclei API: ${results.length} finding(s)` });
+          ctx.emit({ type: "log", message: `Nuclei service: ${results.length} finding(s) returned` });
+        } else {
+          logger.warn({ status: resp.status }, "Nuclei service returned non-OK status");
         }
       } catch (err) {
-        logger.warn({ err }, "Nuclei API scan failed — falling through to Tier 3 (simulation)");
+        logger.warn({ err }, "Nuclei service scan failed — falling through to Tier 3 (simulation)");
       }
     }
   }
@@ -519,7 +535,7 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
     }
   }
 
-  const tier = nucleiBinary ? "Tier 1 (binary)" : detectDockerAvailable() ? "Tier 1b (Docker)" : process.env["NUCLEI_URL"] ? "Tier 2 (API)" : "Tier 3 (built-in)";
+  const tier = nucleiBinary ? "Tier 1 (native binary)" : process.env["NUCLEI_URL"] ? "Tier 2 (nuclei-service)" : detectDockerAvailable() ? "Tier 1b (Docker sidecar)" : "Tier 3 (built-in simulation)";
   ctx.emit({ type: "engine_done", engine: "Bug-Finder/Nuclei", message: `Nuclei scan complete [${tier}] — ${findings.length} finding(s)` });
   return findings;
 }

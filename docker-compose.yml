@@ -118,6 +118,34 @@ services:
       retries: 3
       start_period: 15s
 
+  # ── Nuclei template scanner service ──────────────────────────────────────────
+  # Exposes POST /api/scan for authenticated template-based CVE/misconfiguration scanning.
+  # Also provides POST /api/scan/stream (SSE), GET /health, GET /metrics.
+  # Templates are persisted in a named volume and auto-updated on startup.
+  nuclei:
+    build:
+      context: ./nuclei-service
+      dockerfile: Dockerfile
+    container_name: bug-finder-nuclei
+    environment:
+      PORT: 8088
+      NUCLEI_TEMPLATES_DIR: /home/nuclei/nuclei-templates
+      MAX_CONCURRENT_SCANS: ${NUCLEI_MAX_CONCURRENT:-3}
+      NUCLEI_RATE_LIMIT: ${NUCLEI_RATE_LIMIT:-150}
+    ports:
+      - "8088:8088"
+    volumes:
+      - nuclei_templates:/home/nuclei/nuclei-templates
+    networks:
+      - bug-finder-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8088/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   # ── Interactsh OOB server — confirms blind SQLi/SSRF/XSS via callback ─────
   # Enables out-of-band detection of vulnerabilities that don't reflect in responses.
   # Uses ProjectDiscovery's open-source interactsh server.
@@ -162,6 +190,9 @@ services:
       ZAP_URL: http://zap:8080
       PLAYWRIGHT_URL: http://playwright:3005
       INTERACTSH_URL: http://interactsh:8194
+      NUCLEI_URL: http://nuclei:8088
+      NUCLEI_BINARY: /usr/local/bin/nuclei
+      NUCLEI_TEMPLATES_DIR: /home/appuser/nuclei-templates
       INTERACTSH_TOKEN: ${INTERACTSH_TOKEN:-changeme}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -190,6 +221,8 @@ services:
       mongodb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      nuclei:
         condition: service_healthy
     networks:
       - bug-finder-network
@@ -293,6 +326,7 @@ volumes:
   mongo_backups:
   grafana_data:
   redis_data:
+  nuclei_templates:
 
 networks:
   bug-finder-network:

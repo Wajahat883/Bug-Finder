@@ -11,15 +11,25 @@ RUN pnpm install --frozen-lockfile
 WORKDIR /app/backend
 RUN pnpm run build
 
+# ── Nuclei binary stage ───────────────────────────────────────────────────────
+FROM projectdiscovery/nuclei:latest AS nuclei-bin
+
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM node:20-alpine
 
 WORKDIR /app
 
-# curl needed only for Docker healthcheck probe
-RUN apk add --no-cache curl \
+# curl needed for healthcheck; git + ca-certificates needed for nuclei template updates
+RUN apk add --no-cache curl git ca-certificates \
  && addgroup -g 1001 -S appgroup \
  && adduser  -u 1001 -S appuser -G appgroup
+
+# Install nuclei binary — enables Tier 1 native scanning (no Docker-in-Docker needed)
+COPY --from=nuclei-bin /usr/local/bin/nuclei /usr/local/bin/nuclei
+
+# Nuclei templates directory (pre-populated at runtime via NUCLEI_TEMPLATES_DIR env)
+RUN mkdir -p /home/appuser/nuclei-templates \
+ && chown -R appuser:appgroup /home/appuser
 
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY backend ./backend
