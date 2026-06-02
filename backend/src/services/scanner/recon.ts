@@ -1,4 +1,5 @@
 import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { checkSpaFallback } from "./spa-detector";
 
 interface SensitivePathCheck {
   path: string;
@@ -219,6 +220,21 @@ export async function runReconCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     }
 
     const body = await res.text().catch(() => "");
+
+    // ── SPA fallback guard ────────────────────────────────────────────────────
+    // If the target is a SPA (React/Vite/etc.) it serves its index.html shell
+    // for every unknown route. Detecting /.env, /wp-login.php, /actuator, etc.
+    // on a SPA is always a false positive — the app returned its frontend, not
+    // the real resource. Suppress the finding and do not report it.
+    const spaCheck = checkSpaFallback(res, body, ctx.spaSignature);
+    if (spaCheck.isFallback) {
+      emit({
+        type: "log",
+        message: `  ${check.path} — SUPPRESSED (${spaCheck.reason} | confidence ${spaCheck.confidence.toFixed(1)})`,
+      });
+      continue;
+    }
+
     const detected = check.detectFn
       ? check.detectFn(res.status, body, res.headers)
       : res.status === 200;

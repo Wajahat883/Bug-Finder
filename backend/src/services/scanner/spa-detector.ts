@@ -42,6 +42,12 @@ const KNOWN_SPA_TITLES = [
   "my app", "vite app", "next.js app", "create react app",
 ];
 
+// Titles that are a DEFINITIVE match — no additional heuristics needed.
+// When a response carries one of these titles the result is certain (confidence 1.0).
+const DEFINITIVE_SPA_TITLES = [
+  "tasklytics",
+];
+
 /**
  * Lightweight body-only heuristic — usable without a baseline fetch.
  * Returns true when the response body looks like a SPA shell page.
@@ -100,60 +106,109 @@ export async function fetchSpaSignature(targetUrl: string): Promise<SpaSignature
   }
 }
 
+// ── SPA fallback check result ─────────────────────────────────────────────────
+
+export interface SpaFallbackResult {
+  /** true when this response is a SPA shell, not the real resource */
+  isFallback: boolean;
+  /** human-readable reason for the classification */
+  reason: string;
+  /**
+   * 1.0 = certain (definitive title match e.g. "Tasklytics")
+   * 0.9 = high confidence (baseline title + length match)
+   * 0.7 = heuristic (mount-point / bundler chunk patterns)
+   */
+  confidence: number;
+}
+
+const NOT_FALLBACK: SpaFallbackResult = { isFallback: false, reason: "", confidence: 0 };
+
 /**
- * Core check: returns true when `body` is a SPA fallback response.
+ * Core check: returns a SpaFallbackResult describing whether `body` is a SPA
+ * fallback response and how certain we are.
  *
- * Two detection layers:
- *   1. Baseline match — if signature is provided, check title + body-length proximity.
- *   2. Heuristic — even without a baseline, detect obvious SPA shells.
- *
- * The length tolerance (±10%) handles gzip/chunked variation and dynamic injections.
+ * Three detection layers (most → least specific):
+ *   1. Definitive title match  — "Tasklytics" etc. → confidence 1.0, certain FP.
+ *   2. Baseline comparison     — title + body-length proximity → confidence 0.9.
+ *   3. Heuristic               — mount-point / bundler patterns → confidence 0.7.
  */
 export function isSpaFallbackResponse(body: string, signature?: SpaSignature | null): boolean {
-  // Layer 1: baseline comparison (most accurate)
-  if (signature?.isSpa) {
-    const titleMatch  = signature.title.length > 0 && extractTitle(body) === signature.title;
-    const lengthClose = Math.abs(body.length - signature.bodyLength) / Math.max(signature.bodyLength, 1) < 0.10;
-    if (titleMatch && lengthClose) return true;
-    // Title alone is enough when the baseline confirmed SPA and titles are non-trivial
-    if (titleMatch && signature.title.length > 3) return true;
+  return checkSpaFallbackBody(body, signature).isFallback;
+}
+
+export function checkSpaFallbackBody(
+  body: string,
+  signature?: SpaSignature | null,
+): SpaFallbackResult {
+  const lower = body.slice(0, 4000).toLowerCase();
+  const hasDoctype = lower.includes("<!doctype html");
+
+  // Layer 1: definitive title match — no ambiguity, confidence 1.0
+  if (hasDoctype) {
+    const title = extractTitle(body);
+    if (title && DEFINITIVE_SPA_TITLES.some(t => title === t || title.includes(t))) {
+      return {
+        isFallback: true,
+        reason: `SPA fallback detected — response contains <!doctype html> and <title>${title}</title> (definitive SPA shell)`,
+        confidence: 1.0,
+      };
+    }
   }
 
-  // Layer 2: heuristic (always runs as a safety net)
-  return isSpaBody(body);
+  // Layer 2: baseline comparison
+  if (signature?.isSpa) {
+    const title = extractTitle(body);
+    const titleMatch = signature.title.length > 0 && title === signature.title;
+    const lengthClose = Math.abs(body.length - signature.bodyLength) / Math.max(signature.bodyLength, 1) < 0.10;
+    if (titleMatch && (lengthClose || signature.title.length > 3)) {
+      return {
+        isFallback: true,
+        reason: `SPA fallback detected — response title "${title}" matches baseline SPA signature`,
+        confidence: 0.9,
+      };
+    }
+  }
+
+  // Layer 3: structural heuristics
+  if (isSpaBody(body)) {
+    return {
+      isFallback: true,
+      reason: "SPA fallback detected — response body contains SPA mount-point or bundler chunk patterns",
+      confidence: 0.7,
+    };
+  }
+
+  return NOT_FALLBACK;
 }
 
 /**
- * Convenience wrapper for scanner modules:
- * returns true when the HTTP response appears to be a SPA fallback.
+ * Full convenience check for scanner modules.
+ * Incorporates Content-Type gating: only HTML responses can be SPA fallbacks.
  *
- * Usage in scanner modules:
+ * Usage:
  *   const body = await res.text();
- *   if (isSpaFallback(res, body, ctx.spaSignature)) { ctx.emit(...); continue; }
+ *   const spa = checkSpaFallback(res, body, ctx.spaSignature);
+ *   if (spa.isFallback) { ctx.emit(...); continue; }
+ */
+export function checkSpaFallback(
+  res: Response | null,
+  body: string,
+  signature?: SpaSignature | null,
+): SpaFallbackResult {
+  if (!res) return NOT_FALLBACK;
+  const ct = res.headers.get("content-type") ?? "";
+  // Only HTML responses can be SPA fallbacks — JSON/binary probes are never SPAs
+  if (ct !== "" && !ct.includes("text/html")) return NOT_FALLBACK;
+  return checkSpaFallbackBody(body, signature);
+}
+
+/**
+ * Boolean shorthand — backwards-compatible with existing callers.
  */
 export function isSpaFallback(
   res: Response | null,
   body: string,
   signature?: SpaSignature | null,
 ): boolean {
-  if (!res) return false;
-  const ct = res.headers.get("content-type") ?? "";
-  // Only HTML responses can be SPA fallbacks — skip JSON/binary probes
-  if (!ct.includes("text/html") && ct !== "") return false;
-  return isSpaFallbackResponse(body, signature);
-}
-
-/**
- * Annotates a finding's evidence string with a SPA-fallback warning.
- * The confidence value is downgraded to 0.05 (near-certain FP).
- */
-export function annotateSpaFalsePositive(
-  evidence: string,
-  endpointUrl: string,
-): { evidence: string; confidence: number; validation_status: string } {
-  return {
-    evidence: `[SPA-FALLBACK DETECTED]\nEndpoint "${endpointUrl}" returned the SPA index.html shell instead of a real API response. This finding is likely a false positive — the route does not exist and the app served its client-side entry point.\n\nOriginal evidence:\n${evidence}`,
-    confidence: 0.05,
-    validation_status: "false_positive",
-  };
+  return checkSpaFallback(res, body, signature).isFallback;
 }

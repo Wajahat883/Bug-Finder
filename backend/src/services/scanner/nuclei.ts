@@ -21,6 +21,7 @@ import { spawn, execSync } from "child_process";
 import { writeFileSync, unlinkSync, existsSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { checkSpaFallback } from "./spa-detector";
 
 // Tier 3 fallback templates — each has a real content-verification function
 // so they don't fire on custom 404 pages that return 200.
@@ -503,6 +504,18 @@ export async function runNucleiScan(ctx: ScanContext): Promise<ScanFinding[]> {
 
         const body = await resp.text().catch(() => "");
         const status = resp.status;
+
+        // ── SPA fallback guard ───────────────────────────────────────────────
+        // A SPA shell returned for an unknown route must never be reported as
+        // an exposed resource. Check before any content verification runs.
+        const spaCheck = checkSpaFallback(resp, body, ctx.spaSignature);
+        if (spaCheck.isFallback) {
+          ctx.emit({
+            type: "log",
+            message: `  [Nuclei sim] ${tpl.path} — SUPPRESSED (${spaCheck.reason} | confidence ${spaCheck.confidence.toFixed(1)})`,
+          });
+          continue;
+        }
 
         // For TRACE method check: 200 = vulnerable, others = not
         if (tpl.checkStatus && !tpl.checkStatus(status)) continue;
