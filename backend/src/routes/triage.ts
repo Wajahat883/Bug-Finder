@@ -13,8 +13,8 @@ import { sendIntegrationAlerts } from "../services/alerts";
 const router = Router();
 
 // ── Helper: get session user ──────────────────────────────────────────────────
-function getSession(req: any) {
-  return req.session as { userId?: string; username?: string; role?: string };
+function getSession(req: Request) {
+  return (req as unknown as { session: { userId?: string; username?: string; role?: string } }).session;
 }
 
 // ── PHASE 1: Triage a finding (mark FP, confirm, suppress, needs-review) ─────
@@ -109,8 +109,18 @@ router.patch("/findings/:id/triage", requireAuth, async (req, res) => {
       ip: req.ip ?? "",
     });
 
-    const updated = await col("findings").findOne(query as any);
-    res.json(updated);
+    const updated = await col("findings").findOne(query as any) as Record<string, unknown> | null;
+    if (!updated) return res.status(404).json({ error: "Finding not found after update" });
+    // Return only safe fields — never expose raw MongoDB document
+    res.json({
+      id: String(updated["_id"]),
+      triage_status: updated["triage_status"],
+      fp_reason: updated["fp_reason"] ?? null,
+      fp_marked_at: updated["fp_marked_at"] ?? null,
+      fp_expiry_date: updated["fp_expiry_date"] ?? null,
+      triage_updated_at: updated["triage_updated_at"],
+      triage_notes: updated["triage_notes"] ?? null,
+    });
   } catch (err) {
     logger.error({ err }, "Triage finding error");
     res.status(500).json({ error: "Internal server error" });
@@ -217,6 +227,7 @@ router.post("/findings/:id/triage/review", requireAuth, async (req, res) => {
       created_at: new Date(),
     });
 
+    await auditFromReq(req, `finding_fp_${decision}d`, "findings", id, { decision, notes });
     res.json({ ok: true, new_status: newStatus });
   } catch (err) {
     logger.error({ err }, "FP review error");
