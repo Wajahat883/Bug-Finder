@@ -420,48 +420,64 @@ router.post("/scan-jobs/:id/resume", requireAuth, async (req, res) => {
   }
 });
 
-// Shared cancel logic — used by both POST /cancel and DELETE /:id
-async function cancelScanJob(id: string, req: import("express").Request, res: import("express").Response) {
-  if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
-  const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
-  if (!scan) return res.status(404).json({ error: "Scan not found" });
-
-  const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-  if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
-    return res.status(403).json({ error: "Forbidden" });
-  }
-
-  if (!["running", "queued", "pending", "paused"].includes(String(scan["status"] ?? ""))) {
-    return res.status(400).json({ error: "Scan is not in a cancellable state" });
-  }
-  try {
-    const { getRedis } = await import("../lib/redis");
-    await getRedis().set(`scan:abort:${id}`, "1", "EX", 300);
-  } catch { /* non-fatal */ }
-  await col("scan_jobs").updateOne(
-    { _id: new ObjectId(id) } as Record<string, unknown>,
-    { $set: { status: "cancelled", cancelled_at: new Date(), updated_at: new Date() } }
-  );
-  await auditFromReq(req, "scan.cancel", "scan_jobs", id);
-  return res.json({ ok: true, status: "cancelled", message: "Scan cancelled" });
-}
-
-// POST /scan-jobs/:id/cancel — cancel via action endpoint (used by frontend)
+// POST /scan-jobs/:id/cancel — abort a running/queued scan (does not delete)
 router.post("/scan-jobs/:id/cancel", requireAuth, async (req, res) => {
   try {
-    await cancelScanJob(String(req.params["id"]), req, res);
+    const id = String(req.params["id"]);
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!scan) return res.status(404).json({ error: "Scan not found" });
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    if (!["running", "queued", "pending", "paused"].includes(String(scan["status"] ?? ""))) {
+      return res.status(400).json({ error: "Scan is not in a cancellable state" });
+    }
+    try {
+      const { getRedis } = await import("../lib/redis");
+      await getRedis().set(`scan:abort:${id}`, "1", "EX", 300);
+    } catch { /* non-fatal */ }
+    await col("scan_jobs").updateOne(
+      { _id: new ObjectId(id) } as Record<string, unknown>,
+      { $set: { status: "cancelled", cancelled_at: new Date(), updated_at: new Date() } }
+    );
+    await auditFromReq(req, "scan.cancel", "scan_jobs", id);
+    res.json({ ok: true, status: "cancelled", message: "Scan cancelled" });
   } catch (err) {
     logger.error({ err }, "Scan cancel error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// DELETE /scan-jobs/:id — cancel via REST convention (used by bulk delete / external clients)
+// DELETE /scan-jobs/:id — permanently delete a scan and all its findings
+// Running/queued scans are aborted first, then deleted.
 router.delete("/scan-jobs/:id", requireAuth, async (req, res) => {
   try {
-    await cancelScanJob(String(req.params["id"]), req, res);
+    const id = String(req.params["id"]);
+    if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
+    const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
+    if (!scan) return res.status(404).json({ error: "Scan not found" });
+    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
+    if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    // If still running, signal the scanner to stop before deleting
+    if (["running", "queued", "pending", "paused"].includes(String(scan["status"] ?? ""))) {
+      try {
+        const { getRedis } = await import("../lib/redis");
+        await getRedis().set(`scan:abort:${id}`, "1", "EX", 300);
+      } catch { /* non-fatal */ }
+    }
+    // Hard delete the scan job and all associated findings
+    await Promise.all([
+      col("scan_jobs").deleteOne({ _id: new ObjectId(id) } as Record<string, unknown>),
+      col("findings").deleteMany({ scan_job_id: new ObjectId(id) } as Record<string, unknown>),
+    ]);
+    await auditFromReq(req, "scan.delete", "scan_jobs", id);
+    res.json({ ok: true, message: "Scan and findings deleted" });
   } catch (err) {
-    logger.error({ err }, "Scan abort error");
+    logger.error({ err }, "Scan delete error");
     res.status(500).json({ error: "Internal server error" });
   }
 });
