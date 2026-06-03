@@ -173,7 +173,7 @@ export default function Scans() {
 
   const deleteScan = useMutation({
     mutationFn: (id: string) =>
-      fetch(`/api/scan-jobs/${id}`, { method: "DELETE", credentials: "include" }).then(async r => {
+      fetch(`/api/scan-jobs/${id}`, { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" } }).then(async r => {
         if (!r.ok) throw new Error(await r.text());
       }),
     onSuccess: (_, id) => {
@@ -199,7 +199,7 @@ export default function Scans() {
 
   async function bulkDelete() {
     for (const id of Array.from(selectedIds)) {
-      await fetch(`/api/scan-jobs/${id}`, { method: "DELETE", credentials: "include" });
+      await fetch(`/api/scan-jobs/${id}`, { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" } });
     }
     qc.invalidateQueries({ queryKey: ["/api/scan-jobs"] });
     toast({ title: `${selectedIds.size} scans deleted` });

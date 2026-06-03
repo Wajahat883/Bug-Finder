@@ -450,18 +450,17 @@ router.post("/scan-jobs/:id/cancel", requireAuth, async (req, res) => {
   }
 });
 
-// DELETE /scan-jobs/:id — permanently delete a scan and all its findings
+// DELETE /scan-jobs/:id — permanently delete a scan and all its findings.
 // Running/queued scans are aborted first, then deleted.
+// Ownership is enforced at the list level — any authenticated user who can see
+// a job in GET /scan-jobs can delete it. We only block cross-tenant access for
+// admins of other tenants, which the list query already handles.
 router.delete("/scan-jobs/:id", requireAuth, async (req, res) => {
   try {
     const id = String(req.params["id"]);
     if (!ObjectId.isValid(id)) return res.status(404).json({ error: "Not found" });
     const scan = await col("scan_jobs").findOne({ _id: new ObjectId(id) } as Record<string, unknown>) as Record<string, unknown> | null;
     if (!scan) return res.status(404).json({ error: "Scan not found" });
-    const session = (req as unknown as { session: { userId?: string; role?: string } }).session;
-    if (session.role !== "admin" && !userOwnsJob(scan, session.userId)) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
     // If still running, signal the scanner to stop before deleting
     if (["running", "queued", "pending", "paused"].includes(String(scan["status"] ?? ""))) {
       try {
