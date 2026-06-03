@@ -47,7 +47,7 @@ import { runOsintEnrichment } from "./osint";
 import { runCustomRules } from "./custom-rules";
 import { runDomBrowserScan } from "./dom-browser";
 import { isSuppressed } from "./fp-learner";
-import { fetchSpaSignature, isSpaFallback, annotateSpaFalsePositive, SpaSignature } from "./spa-detector";
+import { fetchSpaSignature, isSpaFallback, annotateSpaFalsePositive } from "./spa-detector";
 import { isPathAllowed, rateAwareFetch as _rateAwareFetch } from "./scope-manager";
 import { findSourceLocation, indexRepo, formatSourceLocation } from "./source-mapper";
 import { notifyAllChannels } from "../notifications";
@@ -59,9 +59,8 @@ import { inferCvss4FromFinding } from "../../lib/cvss4";
 import { isSuppressionActive } from "../../routes/suppression";
 import { triggerWebhooks } from "../../routes/webhooks";
 import { buildDedupKey } from "./normalize-engine";
-import { reduceFalsePositive, createFpContext, annotateFpEvidence, type FpContext } from "./fp-engine";
-import { scoreConfidence } from "./confidence-engine";
-import { extractWafCdnContext } from "./infrastructure";
+import { isRobotsTxtTitle } from "./fp-engine";
+import { computeRiskScore, isInfraOrInfo } from "./risk-scorer";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -542,12 +541,6 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     let maxRiskScore = 0;
     let totalFindings = 0;
 
-    // WAF/CDN context — extracted from infrastructure module results and shared
-    // with confidence scoring so findings get degraded confidence when a WAF sits
-    // in front and may obscure the actual server response.
-    let fpCtx = createFpContext();
-    fpCtx.isSpa = ctx.spaSignature?.isSpa ?? false;
-
     // Listen for cancellation
     let cancelled = false;
     const cancelListener = () => { cancelled = true; };
@@ -572,51 +565,40 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
         logger.error({ err, step: step.name, jobId }, "Scanner step error");
       }
 
-      // Capture WAF/CDN context from infrastructure module for confidence scoring
-      if (step.name === "Infrastructure (WAF/LB)") {
-        const infraCtx = extractWafCdnContext(findings);
-        fpCtx.wafDetected = infraCtx.waf;
-        fpCtx.cdnDetected = infraCtx.cdn;
-        ctx.wafDetected = infraCtx.waf;
-        ctx.cdnDetected = infraCtx.cdn;
-        if (infraCtx.waf.length > 0 || infraCtx.cdn.length > 0) {
-          emit({ type: "log", message: `  [FP-Engine] WAF=${infraCtx.waf.join(",") || "none"} CDN=${infraCtx.cdn.join(",") || "none"} — findings will get reduced confidence` });
-        }
-      }
-
-      // ── SPA Fallback Post-Processing ───────────────────────────────────────
-      // For each finding, verify its endpoint is not just the SPA shell page.
+      // ── Risk Scoring & SPA Fallback Post-Processing ──────────────────────
       const filteredFindings: ScanFinding[] = [];
       for (const finding of findings) {
         let processed = finding;
 
-        // Apply FP reduction engine — adjusts confidence/severity based on WAF/CDN/SPA context
-        const fpResult = reduceFalsePositive(processed, fpCtx);
-        if (fpResult.shouldSuppress) {
-          emit({ type: "log", message: `  [FP-Engine] "${finding.title}" suppressed — ${fpResult.fpReason}` });
-          continue;
-        }
-        if (fpResult.fpReason) {
-          processed = {
-            ...processed,
-            confidence: fpResult.adjustedConfidence,
-            severity: fpResult.adjustedSeverity,
-            evidence: annotateFpEvidence(processed.evidence, processed.endpoint, fpResult),
-          };
-          emit({ type: "log", message: `  [FP-Engine] "${finding.title}" — ${fpResult.fpReason}` });
+        // Robots.txt → always informational
+        if (isRobotsTxtTitle(finding.title)) {
+          processed = { ...processed, severity: "info", cvss_score: 0, confidence: 1.0 };
         }
 
-        // Recalculate confidence with scoring engine
-        processed.confidence = scoreConfidence(processed, {
-          isSpa: fpCtx.isSpa,
-          wafDetected: fpCtx.wafDetected,
-          cdnDetected: fpCtx.cdnDetected,
-          hasExploitContext: fpCtx.hasExploitContext,
-          hasCurlReproducer: !!processed.reproduction_curl,
-          hasRawEvidence: processed.raw_request && processed.raw_response,
+        // Apply the Perfect Risk Scoring Engine
+        const score = computeRiskScore({
+          finding: processed,
+          spaSignature: ctx.spaSignature,
         });
 
-        // SPA fallback re-verification
+        // Infrastructure/informational signals get scored at 0, severity=info
+        if (isInfraOrInfo(processed) || !score.riskScore) {
+          processed = {
+            ...processed,
+            severity: "info",
+            cvss_score: 0,
+            confidence: processed.confidence,
+          };
+          if (score.signalType === "infrastructure" || score.signalType === "informational") {
+            processed.evidence = `[${score.signalType.toUpperCase()} SIGNAL] ${score.verdict}\n\n${processed.evidence}`;
+            emit({ type: "log", message: `  [${score.signalType.slice(0, 4).toUpperCase()}] "${processed.title}" — reclassified as informational (risk=0)` });
+          }
+        } else {
+          processed.confidence = score.adjustedConfidence;
+          processed.severity = score.adjustedSeverity;
+        }
+
+        // SPA fallback check — only for endpoints that return HTML
         if (ctx.spaSignature?.isSpa && processed.endpoint.startsWith("http")) {
           try {
             const verifyRes = await fetch(processed.endpoint, {
@@ -629,15 +611,16 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
               processed = {
                 ...processed,
                 evidence: annotation.evidence,
-                confidence: Math.min(processed.confidence, 0.1),
+                confidence: 0.0,
                 severity: "info",
                 validation_status: annotation.validation_status,
                 fp_reason: annotation.fp_reason,
               };
               emit({ type: "log", message: `  [SPA-FP] ${processed.title} @ ${processed.endpoint} — marked as false positive (SPA fallback)` });
             }
-          } catch { /* network error — keep finding as-is */ }
+          } catch { /* network error — keep finding */ }
         }
+
         filteredFindings.push(processed);
       }
 
