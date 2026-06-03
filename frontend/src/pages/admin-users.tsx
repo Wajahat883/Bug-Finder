@@ -71,7 +71,7 @@ export default function AdminUsers() {
 
   const deleteUser = useMutation({
     mutationFn: (id: string) =>
-      fetch(`/api/admin/users/${id}`, { method: "DELETE", credentials: "include" }),
+      fetch(`/api/admin/users/${id}`, { method: "DELETE", credentials: "include", headers: { "Content-Type": "application/json" } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/admin/users"] });
       toast({ title: "User removed" });

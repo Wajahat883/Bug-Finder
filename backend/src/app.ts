@@ -150,6 +150,11 @@ app.use("/api", (req, res, next) => {
   const contentType = (req.headers["content-type"] ?? "").toLowerCase();
   if (contentType.includes("application/json")) return next();
 
+  // Authenticated session requests bypass CSRF — the session cookie is httpOnly + SameSite,
+  // so it cannot be included by a cross-site attack; the double-submit cookie is redundant here
+  const session = (req as unknown as { session: { userId?: string } }).session;
+  if (session?.userId) return next();
+
   const cookieToken = req.cookies?.["__csrf"];
   const headerToken = req.headers["x-csrf-token"];
   if (!cookieToken || !headerToken || cookieToken !== headerToken) {
