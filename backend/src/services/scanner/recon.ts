@@ -1,5 +1,6 @@
 import { ScanContext, ScanFinding, safeFetch } from "./types";
 import { checkSpaFallback } from "./spa-detector";
+import { classifyRobotsTxtFinding } from "./fp-engine";
 
 interface SensitivePathCheck {
   path: string;
@@ -240,7 +241,7 @@ export async function runReconCheck(ctx: ScanContext): Promise<ScanFinding[]> {
       : res.status === 200;
 
     if (detected) {
-      findings.push({
+      const rawFinding: ScanFinding = {
         title: check.title,
         category: "Information Disclosure",
         severity: check.severity,
@@ -261,8 +262,14 @@ export async function runReconCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         scanner_name: "Bug-Finder/Recon",
         scanner_family: "web",
         confidence: 0.95,
-      });
-      emit({ type: "log", message: `  [FOUND] ${check.path} — ${check.title}` });
+      };
+
+      const finding = check.path === "/robots.txt"
+        ? classifyRobotsTxtFinding(rawFinding)
+        : rawFinding;
+
+      findings.push(finding);
+      emit({ type: "log", message: `  [FOUND] ${check.path} — ${check.title}` + (check.path === "/robots.txt" ? " (informational only)" : "") });
     } else {
       emit({ type: "log", message: `  ${check.path} — OK (${res.status})` });
     }

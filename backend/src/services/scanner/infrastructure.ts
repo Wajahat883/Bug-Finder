@@ -1,6 +1,22 @@
 import { ScanContext, ScanFinding, ctxFetch, safeFetch } from "./types";
 import { wafVariants } from "./waf-bypass";
 
+export function extractWafCdnContext(findings: ScanFinding[]): { waf: string[]; cdn: string[] } {
+  const waf = new Set<string>();
+  const cdn = new Set<string>();
+  const cdnServices = new Set(["Cloudflare", "Fastly", "Akamai", "Varnish Cache", "AWS WAF"]);
+  for (const f of findings) {
+    if (f.category !== "Infrastructure") continue;
+    if (!f.title.startsWith("WAF/CDN Detected:")) continue;
+    const names = f.title.replace("WAF/CDN Detected:", "").split(",").map(s => s.trim());
+    for (const name of names) {
+      if (cdnServices.has(name)) cdn.add(name);
+      else waf.add(name);
+    }
+  }
+  return { waf: [...waf], cdn: [...cdn] };
+}
+
 const WAF_SIGNATURES: Array<{ name: string; header?: string; pattern?: RegExp; cookieName?: string }> = [
   { name: "Cloudflare", header: "cf-ray" },
   { name: "Cloudflare", header: "server", pattern: /cloudflare/i },

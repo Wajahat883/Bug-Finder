@@ -47,7 +47,7 @@ import { runOsintEnrichment } from "./osint";
 import { runCustomRules } from "./custom-rules";
 import { runDomBrowserScan } from "./dom-browser";
 import { isSuppressed } from "./fp-learner";
-import { fetchSpaSignature, isSpaFallback, annotateSpaFalsePositive } from "./spa-detector";
+import { fetchSpaSignature, isSpaFallback, annotateSpaFalsePositive, SpaSignature } from "./spa-detector";
 import { isPathAllowed, rateAwareFetch as _rateAwareFetch } from "./scope-manager";
 import { findSourceLocation, indexRepo, formatSourceLocation } from "./source-mapper";
 import { notifyAllChannels } from "../notifications";
@@ -58,6 +58,10 @@ import { loadCredentialsForTarget } from "../../lib/credential-vault";
 import { inferCvss4FromFinding } from "../../lib/cvss4";
 import { isSuppressionActive } from "../../routes/suppression";
 import { triggerWebhooks } from "../../routes/webhooks";
+import { buildDedupKey } from "./normalize-engine";
+import { reduceFalsePositive, createFpContext, annotateFpEvidence, type FpContext } from "./fp-engine";
+import { scoreConfidence } from "./confidence-engine";
+import { extractWafCdnContext } from "./infrastructure";
 
 export const scanEvents = new EventEmitter();
 scanEvents.setMaxListeners(100);
@@ -200,10 +204,8 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     : finding.evidence;
 
   // ── Deduplication: check if this finding already exists for this target ─────
-  // Key = title + normalized endpoint (strip query string for stability)
-  let normalizedEndpoint = finding.endpoint;
-  try { normalizedEndpoint = new URL(finding.endpoint).origin + new URL(finding.endpoint).pathname; } catch { /* use as-is */ }
-  const dedupKey = `${finding.title}||${normalizedEndpoint}`;
+  // Key = title + normalized endpoint (strip query string, lowercase origin)
+  const dedupKey = buildDedupKey(finding.title, finding.endpoint);
 
   // Check suppression via FP learner patterns
   if (await isSuppressed(finding.title, finding.endpoint, finding.scanner_name, finding.description)) {
@@ -268,7 +270,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     title: finding.title,
     category: finding.category,
     severity: finding.severity,
-    validation_status: "real",
+    validation_status: finding.validation_status ?? "real",
     confidence: finding.confidence,
     endpoint: finding.endpoint,
     description: finding.description,
@@ -293,6 +295,7 @@ async function saveFinding(jobId: string, targetUrl: string, finding: ScanFindin
     has_raw_evidence: (sev === "critical" || sev === "high") && finding.evidence.length > 200,
     source_location: finding.source_location ?? null,
     cve_id: (finding as unknown as Record<string, unknown>)["cve_id"] as string ?? null,
+    fp_reason: finding.fp_reason ?? null,
   });
 
   // Non-blocking CVE/EPSS enrichment — triggered whenever finding has a cve_id
@@ -424,6 +427,8 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     scopeHosts: scopeHosts ?? [],
     sessionStore: createSessionStore(),
     openapiSpecUrl,
+    wafDetected: [],
+    cdnDetected: [],
     // Re-authentication: if login credentials were provided, re-run the login
     // flow when a module gets a 401 mid-scan (expired JWT / session rotation).
     reauthenticate: (authToken || sessionCookie)
@@ -537,6 +542,12 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
     let maxRiskScore = 0;
     let totalFindings = 0;
 
+    // WAF/CDN context — extracted from infrastructure module results and shared
+    // with confidence scoring so findings get degraded confidence when a WAF sits
+    // in front and may obscure the actual server response.
+    let fpCtx = createFpContext();
+    fpCtx.isSpa = ctx.spaSignature?.isSpa ?? false;
+
     // Listen for cancellation
     let cancelled = false;
     const cancelListener = () => { cancelled = true; };
@@ -561,35 +572,73 @@ export async function runScanPipeline(opts: ScanJobOptions): Promise<void> {
         logger.error({ err, step: step.name, jobId }, "Scanner step error");
       }
 
+      // Capture WAF/CDN context from infrastructure module for confidence scoring
+      if (step.name === "Infrastructure (WAF/LB)") {
+        const infraCtx = extractWafCdnContext(findings);
+        fpCtx.wafDetected = infraCtx.waf;
+        fpCtx.cdnDetected = infraCtx.cdn;
+        ctx.wafDetected = infraCtx.waf;
+        ctx.cdnDetected = infraCtx.cdn;
+        if (infraCtx.waf.length > 0 || infraCtx.cdn.length > 0) {
+          emit({ type: "log", message: `  [FP-Engine] WAF=${infraCtx.waf.join(",") || "none"} CDN=${infraCtx.cdn.join(",") || "none"} — findings will get reduced confidence` });
+        }
+      }
+
       // ── SPA Fallback Post-Processing ───────────────────────────────────────
       // For each finding, verify its endpoint is not just the SPA shell page.
-      // Modules that already call isSpaFallback() inline skip the network re-check;
-      // this is a safety net for modules that do not have inline checks.
       const filteredFindings: ScanFinding[] = [];
       for (const finding of findings) {
-        // Only re-verify endpoints that look like real web URLs (skip DNS, port, etc.)
-        if (ctx.spaSignature?.isSpa && finding.endpoint.startsWith("http")) {
+        let processed = finding;
+
+        // Apply FP reduction engine — adjusts confidence/severity based on WAF/CDN/SPA context
+        const fpResult = reduceFalsePositive(processed, fpCtx);
+        if (fpResult.shouldSuppress) {
+          emit({ type: "log", message: `  [FP-Engine] "${finding.title}" suppressed — ${fpResult.fpReason}` });
+          continue;
+        }
+        if (fpResult.fpReason) {
+          processed = {
+            ...processed,
+            confidence: fpResult.adjustedConfidence,
+            severity: fpResult.adjustedSeverity,
+            evidence: annotateFpEvidence(processed.evidence, processed.endpoint, fpResult),
+          };
+          emit({ type: "log", message: `  [FP-Engine] "${finding.title}" — ${fpResult.fpReason}` });
+        }
+
+        // Recalculate confidence with scoring engine
+        processed.confidence = scoreConfidence(processed, {
+          isSpa: fpCtx.isSpa,
+          wafDetected: fpCtx.wafDetected,
+          cdnDetected: fpCtx.cdnDetected,
+          hasExploitContext: fpCtx.hasExploitContext,
+          hasCurlReproducer: !!processed.reproduction_curl,
+          hasRawEvidence: processed.raw_request && processed.raw_response,
+        });
+
+        // SPA fallback re-verification
+        if (ctx.spaSignature?.isSpa && processed.endpoint.startsWith("http")) {
           try {
-            const verifyRes = await fetch(finding.endpoint, {
+            const verifyRes = await fetch(processed.endpoint, {
               headers: { ...ctx.authHeaders, Accept: "text/html,application/xhtml+xml" },
               signal: AbortSignal.timeout(6000),
             });
             const verifyBody = await verifyRes.text().catch(() => "");
             if (isSpaFallback(verifyRes, verifyBody, ctx.spaSignature)) {
-              const annotation = annotateSpaFalsePositive(finding.evidence, finding.endpoint);
-              filteredFindings.push({
-                ...finding,
+              const annotation = annotateSpaFalsePositive(processed.evidence, processed.endpoint);
+              processed = {
+                ...processed,
                 evidence: annotation.evidence,
-                confidence: annotation.confidence,
+                confidence: Math.min(processed.confidence, 0.1),
+                severity: "info",
                 validation_status: annotation.validation_status,
                 fp_reason: annotation.fp_reason,
-              });
-              emit({ type: "log", message: `  [SPA-FP] ${finding.title} @ ${finding.endpoint} — marked as false positive (SPA fallback)` });
-              continue; // skip normal push so it goes through as annotated finding
+              };
+              emit({ type: "log", message: `  [SPA-FP] ${processed.title} @ ${processed.endpoint} — marked as false positive (SPA fallback)` });
             }
           } catch { /* network error — keep finding as-is */ }
         }
-        filteredFindings.push(finding);
+        filteredFindings.push(processed);
       }
 
       for (const finding of filteredFindings) {

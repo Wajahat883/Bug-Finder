@@ -1,5 +1,6 @@
 import * as tls from "node:tls";
 import { ScanContext, ScanFinding, ctxFetch, safeFetch } from "./types";
+import { rfcHeaderContains } from "./normalize-engine";
 
 interface TlsSocketInfo {
   protocol: string | null;
@@ -295,7 +296,8 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
         confidence: 0.95,
       });
     } else if (hsts) {
-      if (!hsts.includes("includeSubDomains")) {
+      const hasIncludeSubDomains = hsts.toLowerCase().includes("includesubdomains");
+      if (!hasIncludeSubDomains) {
         findings.push({
           title: "HSTS Missing includeSubDomains Directive",
           category: "TLS/Transport",
@@ -311,7 +313,7 @@ export async function runTlsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
           confidence: 0.9,
         });
       }
-      const maxAge = hsts.match(/max-age=(\d+)/);
+      const maxAge = hsts.match(/max-age=(\d+)/i);
       if (maxAge && parseInt(maxAge[1]) < 2592000) {
         findings.push({
           title: "HSTS max-age Too Short",

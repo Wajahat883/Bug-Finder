@@ -17,6 +17,8 @@ export interface ScanFinding {
   raw_request?: string;
   raw_response?: string;
   reproduction_curl?: string;
+  validation_status?: string;
+  fp_reason?: string;
 }
 
 export interface ScannerEvent {
@@ -72,6 +74,10 @@ export interface ScanContext {
   // Scanner modules use this with isSpaFallback() from spa-detector.ts to skip
   // responses that are just the React/Vue/Angular index.html shell page.
   spaSignature?: import("./spa-detector").SpaSignature | null;
+  // WAF/CDN presence — set by the infrastructure module after detection.
+  // Downstream modules read this to reduce confidence on header-based findings.
+  wafDetected: string[];
+  cdnDetected: string[];
 }
 
 // Cross-module session store for sharing discovered tokens across scanner modules

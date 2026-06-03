@@ -1,5 +1,6 @@
 import * as dns from "dns/promises";
 import { ScanContext, ScanFinding, safeFetch } from "./types";
+import { getRootRoot, getRootDomain } from "./normalize-engine";
 
 // Known services vulnerable to subdomain takeover — fingerprint is what a dangling CNAME shows
 const TAKEOVER_FINGERPRINTS: Array<{ service: string; cnameSuffix: string; fingerprint: string; severity: ScanFinding["severity"] }> = [
@@ -88,55 +89,61 @@ export async function runDnsCheck(ctx: ScanContext): Promise<ScanFinding[]> {
     emit({ type: "log", message: `DNS resolution failed for ${hostname}` });
   }
 
-  // Check for SPF record
+  // Check for SPF record — always on the ROOT (apex) domain, not www subdomain.
+  // SPF records live at the organizational domain level (RFC 7208 §3.1).
+  // Checking www.example.com instead of example.com produces false negatives.
+  const rootDomain = getRootRoot(hostname);
+  const spfDomain = rootDomain !== hostname ? rootDomain : hostname;
+  const spfLabel = spfDomain !== hostname ? `root domain ${spfDomain}` : hostname;
+
   try {
-    const txtRecords = await dns.resolveTxt(hostname);
-    const spf = txtRecords.find(r => r.join("").includes("v=spf1"));
+    const txtRecords = await dns.resolveTxt(spfDomain);
+    const spf = txtRecords.find(r => r.join("").toLowerCase().includes("v=spf1"));
     if (!spf) {
       findings.push({
         title: "No SPF Record Configured",
         category: "Email Security",
         severity: "medium",
-        endpoint: hostname,
-        description: "No SPF (Sender Policy Framework) record was found for this domain. This allows email spoofing attacks where attackers send emails pretending to be from this domain.",
-        evidence: `DNS TXT lookup for ${hostname}: No v=spf1 record found`,
-        recommended_fix: "Add a TXT record: v=spf1 include:yourmailprovider.com -all",
+        endpoint: spfDomain,
+        description: `No SPF (Sender Policy Framework) record was found for the root domain ${spfDomain}${spfDomain !== hostname ? ` (resolved from ${hostname})` : ""}. This allows email spoofing attacks.`,
+        evidence: `DNS TXT lookup for ${spfDomain}: No v=spf1 record found`,
+        recommended_fix: "Add a TXT record at the root domain: v=spf1 include:yourmailprovider.com -all",
         cvss_score: 5.3,
         cwe_id: "CWE-290",
-        scanner_name: "Bug-Finder/Port-Scanner",
+        scanner_name: "Bug-Finder/DNS",
         scanner_family: "network",
         confidence: 0.9,
       });
-      emit({ type: "log", message: "No SPF record found" });
+      emit({ type: "log", message: `No SPF record found for ${spfDomain}` });
     } else {
-      emit({ type: "log", message: `SPF record found: ${spf.join("").slice(0, 50)}` });
+      emit({ type: "log", message: `SPF record found at ${spfDomain}: ${spf.join("").slice(0, 50)}` });
     }
 
-    // Check for DMARC
+    // Check for DMARC — also on the root (organizational) domain
     try {
-      const dmarcRecords = await dns.resolveTxt(`_dmarc.${hostname}`);
-      const dmarc = dmarcRecords.find(r => r.join("").includes("v=DMARC1"));
+      const dmarcRecords = await dns.resolveTxt(`_dmarc.${spfDomain}`);
+      const dmarc = dmarcRecords.find(r => r.join("").toLowerCase().includes("v=dmarc1"));
       if (!dmarc) {
         findings.push({
           title: "No DMARC Record Configured",
           category: "Email Security",
           severity: "medium",
-          endpoint: hostname,
-          description: "No DMARC record was found. DMARC prevents email spoofing by specifying how receivers should handle unauthenticated emails.",
-          evidence: `DNS TXT lookup for _dmarc.${hostname}: No DMARC record`,
+          endpoint: spfDomain,
+          description: `No DMARC record was found for the root domain ${spfDomain}${spfDomain !== hostname ? ` (resolved from ${hostname})` : ""}. DMARC prevents email spoofing.`,
+          evidence: `DNS TXT lookup for _dmarc.${spfDomain}: No DMARC record`,
           recommended_fix: "Add DMARC: _dmarc.yourdomain.com TXT v=DMARC1; p=reject; rua=mailto:dmarc@yourdomain.com",
           cvss_score: 4.3,
           cwe_id: "CWE-290",
-          scanner_name: "Bug-Finder/Port-Scanner",
+          scanner_name: "Bug-Finder/DNS",
           scanner_family: "network",
           confidence: 0.9,
         });
-        emit({ type: "log", message: "No DMARC record found" });
+        emit({ type: "log", message: `No DMARC record found for ${spfDomain}` });
       } else {
         emit({ type: "log", message: "DMARC record configured" });
       }
     } catch {
-      emit({ type: "log", message: "No DMARC record found" });
+      emit({ type: "log", message: `No DMARC record found for ${spfDomain}` });
     }
   } catch {
     emit({ type: "log", message: "Could not retrieve TXT records" });
