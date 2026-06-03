@@ -20,10 +20,12 @@ import { tenantMiddleware } from "./middlewares/tenant";
 
 const app: Express = express();
 
+const isVercel = !!process.env["VERCEL"];
+
 connectDb()
   .then(() => seedData())
   .then(() => seedDefaultFlags())
-  .then(() => initScheduler())
+  .then(() => isVercel ? undefined : initScheduler())
   .catch((err) => logger.warn({ err }, "DB init/seed error — continuing without database"));
 
 const isProdMode = process.env["NODE_ENV"] === "production";
@@ -95,13 +97,15 @@ app.set("trust proxy", 1);
 const sessionSecret = process.env["SESSION_SECRET"];
 if (!sessionSecret) {
   logger.error("SESSION_SECRET env var is required");
-  process.exit(1);
+  if (!isVercel) process.exit(1);
+  else throw new Error("SESSION_SECRET env var is required");
 }
 
 const mongoUrl = process.env["MONGODB_URI"] || process.env["MONGO_URI"];
 if (!mongoUrl) {
   logger.error("MONGODB_URI or MONGO_URI env var is required for session store");
-  process.exit(1);
+  if (!isVercel) process.exit(1);
+  else throw new Error("MONGODB_URI or MONGO_URI env var is required for session store");
 }
 
 app.use(
@@ -179,36 +183,38 @@ app.use("/api", globalLimiter);
 app.use("/api", tenantMiddleware);
 app.use("/api", router);
 
-// SLA breach enforcement — hourly background job
-setInterval(async () => {
-  try {
-    const { col } = await import("./lib/db");
-    const { SLA_DAYS } = await import("./routes/sla-enforcement");
-    const now = new Date();
-    let totalBreached = 0;
-    for (const [severity, days] of Object.entries(SLA_DAYS)) {
-      const deadline = new Date(now.getTime() - (days as number) * 86400000);
-      const breached = await col("findings").find({
-        severity, status: { $nin: ["resolved", "false_positive"] },
-        created_at: { $lte: deadline }, sla_notified: { $ne: true },
-      } as Record<string, unknown>).limit(50).toArray() as Array<Record<string, unknown>>;
-      if (breached.length > 0) {
-        await col("findings").updateMany(
-          { _id: { $in: breached.map(f => f["_id"]) } } as Record<string, unknown>,
-          { $set: { sla_notified: true, sla_breached_at: now } }
-        );
-        totalBreached += breached.length;
+// SLA breach enforcement — hourly background job (skipped on Vercel serverless; use Vercel Cron instead)
+if (!isVercel) {
+  setInterval(async () => {
+    try {
+      const { col } = await import("./lib/db");
+      const { SLA_DAYS } = await import("./routes/sla-enforcement");
+      const now = new Date();
+      let totalBreached = 0;
+      for (const [severity, days] of Object.entries(SLA_DAYS)) {
+        const deadline = new Date(now.getTime() - (days as number) * 86400000);
+        const breached = await col("findings").find({
+          severity, status: { $nin: ["resolved", "false_positive"] },
+          created_at: { $lte: deadline }, sla_notified: { $ne: true },
+        } as Record<string, unknown>).limit(50).toArray() as Array<Record<string, unknown>>;
+        if (breached.length > 0) {
+          await col("findings").updateMany(
+            { _id: { $in: breached.map(f => f["_id"]) } } as Record<string, unknown>,
+            { $set: { sla_notified: true, sla_breached_at: now } }
+          );
+          totalBreached += breached.length;
+        }
       }
-    }
-    if (totalBreached > 0) {
-      const adminEmail = process.env["ADMIN_EMAIL"] ?? "";
-      if (adminEmail) {
-        const { sendEmail } = await import("./services/email");
-        sendEmail({ to: adminEmail, subject: `[SLA Alert] ${totalBreached} finding(s) breached SLA`, html: `<p>${totalBreached} finding(s) have exceeded their SLA deadline. Log in to review them.</p>` }).catch(() => {});
+      if (totalBreached > 0) {
+        const adminEmail = process.env["ADMIN_EMAIL"] ?? "";
+        if (adminEmail) {
+          const { sendEmail } = await import("./services/email");
+          sendEmail({ to: adminEmail, subject: `[SLA Alert] ${totalBreached} finding(s) breached SLA`, html: `<p>${totalBreached} finding(s) have exceeded their SLA deadline. Log in to review them.</p>` }).catch(() => {});
+        }
       }
-    }
-  } catch { /* non-fatal */ }
-}, 60 * 60 * 1000);
+    } catch { /* non-fatal */ }
+  }, 60 * 60 * 1000);
+}
 
 app.use((_req, res) => {
   res.status(404).json({ error: "Not found" });

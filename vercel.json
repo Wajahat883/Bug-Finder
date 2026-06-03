@@ -1,8 +1,15 @@
 {
-  "buildCommand": "pnpm --filter \"./frontend\" run build",
+  "buildCommand": "pnpm --filter \"./frontend\" run build && pnpm --filter \"./backend\" run build",
   "outputDirectory": "frontend/dist/public",
   "installCommand": "pnpm install --frozen-lockfile",
   "framework": null,
+  "functions": {
+    "api/[[...path]].js": {
+      "runtime": "@vercel/node@3",
+      "maxDuration": 30,
+      "memory": 512
+    }
+  },
   "headers": [
     {
       "source": "/assets/(.*)",
@@ -21,6 +28,6 @@
     }
   ],
   "rewrites": [
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
   ]
 }
