@@ -78,7 +78,7 @@ export async function runPortScan(ctx: ScanContext): Promise<ScanFinding[]> {
   }
 
   // Skip port scanning for localhost (common in development)
-  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".replit.dev")) {
+  if (host === "localhost" || host === "127.0.0.1") {
     emit({ type: "log", message: "Skipping port scan for local/dev host" });
     emit({ type: "engine_done", engine: "Bug-Finder/Ports", message: "Port scan skipped (local host)" });
     return findings;

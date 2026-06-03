@@ -18,7 +18,7 @@ export async function runPassiveRecon(ctx: ScanContext): Promise<ScanFinding[]> 
     return findings;
   }
 
-  if (hostname === "localhost" || hostname.startsWith("127.") || hostname.endsWith(".replit.dev")) {
+  if (hostname === "localhost" || hostname.startsWith("127.")) {
     emit({ type: "log", message: "Skipping passive recon for localhost/dev host" });
     emit({ type: "engine_done", engine: "Bug-Finder/PassiveRecon", message: "Skipped (local)" });
     return findings;

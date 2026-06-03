@@ -43,7 +43,7 @@ export async function runSubdomainEnum(ctx: ScanContext): Promise<ScanFinding[]>
     return findings;
   }
 
-  if (hostname === "localhost" || hostname.startsWith("127.") || hostname.endsWith(".replit.dev")) {
+  if (hostname === "localhost" || hostname.startsWith("127.")) {
     emit({ type: "log", message: "Skipping subdomain enum for local/dev host" });
     emit({ type: "engine_done", engine: "Bug-Finder/Subdomains", message: "Skipped (local host)" });
     return findings;
@@ -204,7 +204,7 @@ export async function runWaybackCrawl(ctx: ScanContext): Promise<ScanFinding[]> 
     emit({ type: "engine_done", engine: "Wayback Machine", message: "Skipped" });
     return findings;
   }
-  if (hostname === "localhost" || hostname.startsWith("127.") || hostname.endsWith(".replit.dev")) {
+  if (hostname === "localhost" || hostname.startsWith("127.")) {
     emit({ type: "engine_done", engine: "Wayback Machine", message: "Skipped (local host)" });
     return findings;
   }
